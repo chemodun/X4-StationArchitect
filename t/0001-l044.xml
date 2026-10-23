@@ -38,6 +38,8 @@
       <t id="128">Plan a station here</t>
       <t id="129">The plot could not be reserved at this spot</t>
       <t id="130">New station in %s</t>
+      <t id="131">%s, candidate %s of %s</t>
+      <t id="132">Turn %s of %s</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>

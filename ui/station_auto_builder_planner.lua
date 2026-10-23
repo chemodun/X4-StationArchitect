@@ -110,11 +110,11 @@ local function methodOf(ware, p, races)
   return matches[1]
 end
 
--- The workforce and sunlight effects of a method from the Macro and Ware Data API; nil when that API
+-- The workforce and sunlight effects of a method from the Extra Data API; nil when that API
 -- cannot answer on this build (fail closed: the plan then warns and applies no bonus).
 local function effectsOf(ware, method)
-  if not (method and MacroWareData and MacroWareData.Available()) then return nil end
-  local work, sunlight = MacroWareData.GetWareDataEx(ware,
+  if not (method and ExtraData and ExtraData.Available()) then return nil end
+  local work, sunlight = ExtraData.GetWareDataEx(ware,
     "productioneffects." .. method .. ".work", "productioneffects." .. method .. ".sunlight")
   if work == nil and sunlight == nil then return nil end
   return { work = work or 0, sunlight = sunlight or 0 }
@@ -327,8 +327,8 @@ function planner.Plan(target)
     consumed = {}, workforce = 0, workforceCapacity = 0, workforceFraction = 0, storage = {}, flow = { import = 0, export = 0 } }
   local counts = plan.counts
   local function warn(fmt, ...) plan.warnings[#plan.warnings + 1] = string.format(fmt, ...) end
-  if not (MacroWareData and MacroWareData.Available()) then
-    warn("production effects unavailable (Macro and Ware Data API): no workforce or sunlight bonus applied")
+  if not (ExtraData and ExtraData.Available()) then
+    warn("production effects unavailable (Extra Data API): no workforce or sunlight bonus applied")
   end
   -- without planned habitats the new modules run at the station's current workforce
   local liveFraction = (not target.workforce) and liveWorkforceFraction(target.station) or 0
@@ -351,6 +351,15 @@ function planner.Plan(target)
   else
     base[target.ware] = target.rate or 0
   end
+
+  -- an existing station's surplus (built, building and planned modules alike) covers new consumption first
+  local surplus = {}
+  local function surplusOf(w)
+    if not target.station then return 0 end
+    if surplus[w] == nil then surplus[w] = math.max(0, planner.Current(target.station, w).net) end
+    return surplus[w]
+  end
+  plan.surplus = surplus
 
   local prodCounts, habCounts = {}, {}
   local missing = {}
@@ -383,12 +392,14 @@ function planner.Plan(target)
     for w, r in pairs(base) do demand[w] = r end
     for w, r in pairs(consumed) do
       local own = base[w] ~= nil or (target.fullCycle and (target.selfSufficient or not habWares[w]))
-      if own then demand[w] = (demand[w] or 0) + r end
+      if own then demand[w] = (demand[w] or 0) + math.max(0, r - surplusOf(w)) end
     end
     local next = {}
     for w, r in pairs(demand) do
       local e, p = producerFor(cat, w, race)
-      if e then
+      if r <= 0 then
+        -- covered by the station's surplus
+      elseif e then
         next[e.macro] = (next[e.macro] or 0) + ceil(r / rateOf(p, fraction, sunlight))
       elseif not missing[w] then
         missing[w] = true
@@ -439,11 +450,35 @@ function planner.Plan(target)
   return plan
 end
 
--- The current hourly balance of a ware on an existing station, workforce use included.
+-- The current hourly balance of a ware on an existing station, workforce use included, plus what the open
+-- build menu's plan still has to build (planned entries and modules under construction) at the station's
+-- live workforce fraction and sunlight.
 function planner.Current(station, ware)
   local production = tonumber(C.GetContainerWareProduction(station, ware, false)) or 0
   local consumption = (tonumber(C.GetContainerWareConsumption(station, ware, false)) or 0) + (Helper.getWorkforceConsumption(station, ware) or 0)
-  return { production = production, consumption = consumption, net = production - consumption }
+  local pending = 0
+  local menu = sab.menu
+  if menu and menu.shown and menu.holomap ~= 0 and menu.container == station then
+    local cat = planner.Catalogue(menu.set or "")
+    local fraction, sunlight
+    for _, e in ipairs(sab.ReadPlan()) do
+      if e.component == 0 or IsComponentConstruction(e.component) then
+        local entry = cat.byMacro[e.macro]
+        for _, p in ipairs(entry and entry.products or {}) do
+          if p.ware == ware then
+            if not fraction then
+              fraction = liveWorkforceFraction(station)
+              sunlight = GetComponentData(GetComponentData(station, "sectorid"), "sunlight") or 1
+            end
+            production = production + rateOf(p, fraction, sunlight)
+            pending = pending + 1
+          end
+          if p.resources[ware] then consumption = consumption + p.resources[ware] end
+        end
+      end
+    end
+  end
+  return { production = production, consumption = consumption, net = production - consumption, pending = pending }
 end
 
 -- The plan as StartBill takes it, grouped: build, production, habitation, storage, dock areas, piers.
@@ -461,6 +496,172 @@ function planner.Bill(plan)
   return bill
 end
 
+-- *** turns ***
+-- The bill in build order, so the station works from its first final module on: turn t adds one final
+-- module (a producer of the target ware, or the build module) behind the storage, dock, pier and habitat
+-- units the need of t turns exceeds (largest units first, one big unit serves several turns) and the
+-- upstream producers t final modules need, deepest first.
+
+local function unitsOf(cat, counts, group)
+  local list = {}
+  for macro in pairs(counts) do
+    local e = cat.byMacro[macro]
+    if e and e.group == group then list[#list + 1] = e end
+  end
+  table.sort(list, function(a, b)
+    if (a.capacity or 0) ~= (b.capacity or 0) then return (a.capacity or 0) > (b.capacity or 0) end
+    return a.name < b.name
+  end)
+  local out = {}
+  for _, e in ipairs(list) do
+    for _ = 1, counts[e.macro] do out[#out + 1] = e end
+  end
+  return out
+end
+
+function planner.Turns(plan)
+  local cat = planner.Catalogue(plan.set)
+  local counts, target = plan.counts, plan.target
+  local function isFinal(e)
+    if target.kind == "ship" then return e.macro == target.buildMacro end
+    for _, p in ipairs(e.products or {}) do if p.ware == target.ware then return true end end
+    return false
+  end
+  local finals, upstream, others = {}, {}, {}
+  for macro in pairs(counts) do
+    local e = cat.byMacro[macro]
+    if not e then
+      others[#others + 1] = { macro = macro, name = macro }
+    elseif e.group == "production" or e.group == "build" then
+      if isFinal(e) then finals[#finals + 1] = e else upstream[#upstream + 1] = e end
+    elseif e.group ~= "habitation" and e.group ~= "storage" and e.group ~= "dock" and e.group ~= "pier" then
+      others[#others + 1] = e
+    end
+  end
+  table.sort(finals, function(a, b) return a.name < b.name end)
+  table.sort(others, function(a, b) return a.name < b.name end)
+  local nFinal = 0
+  for _, e in ipairs(finals) do nFinal = nFinal + counts[e.macro] end
+  -- level: 0 for a final producer, else 1 + the highest level among the producers consuming its products
+  local level, consumers = {}, {}
+  for _, e in ipairs(finals) do level[e.macro] = 0 end
+  for _, list in ipairs({ finals, upstream }) do
+    for _, e in ipairs(list) do
+      for _, p in ipairs(e.products or {}) do
+        for w in pairs(p.resources) do
+          consumers[w] = consumers[w] or {}
+          consumers[w][#consumers[w] + 1] = e.macro
+        end
+      end
+    end
+  end
+  for _ = 1, #upstream + 1 do
+    local changed = false
+    for _, e in ipairs(upstream) do
+      local lv = 1
+      for _, p in ipairs(e.products or {}) do
+        for _, m in ipairs(consumers[p.ware] or {}) do
+          if m ~= e.macro and level[m] and level[m] + 1 > lv then lv = level[m] + 1 end
+        end
+      end
+      if level[e.macro] ~= lv then
+        level[e.macro] = lv
+        changed = true
+      end
+    end
+    if not changed then break end
+  end
+  table.sort(upstream, function(a, b)
+    if level[a.macro] ~= level[b.macro] then return level[a.macro] > level[b.macro] end
+    return a.name < b.name
+  end)
+  -- the unit lists, largest first; a storage unit goes to the first transport type it serves
+  local habitats, piers, areas = unitsOf(cat, counts, "habitation"), unitsOf(cat, counts, "pier"), unitsOf(cat, counts, "dock")
+  local transports, storages = {}, {}
+  for transport in pairs(plan.storage) do transports[#transports + 1] = transport end
+  table.sort(transports)
+  for _, u in ipairs(unitsOf(cat, counts, "storage")) do
+    for _, transport in ipairs(transports) do
+      if u.tags[transport] then
+        storages[transport] = storages[transport] or {}
+        table.insert(storages[transport], u)
+        break
+      end
+    end
+  end
+
+  local flow = plan.flow.import + plan.flow.export
+  local turns, cum = {}, {}
+  local placedWorkforce, placedHabitat, placedDocks, placedAreas, placedStorage = 0, 0, 0, 0, {}
+  local finalIdx = 1
+  local function emitWhile(turn, list, placed, need, each)
+    while list[1] and placed < need - 1e-6 do
+      local u = table.remove(list, 1)
+      turn[#turn + 1] = u.macro
+      placed = placed + (each or u.capacity or 1)
+    end
+    return placed
+  end
+  for t = 1, math.max(1, nFinal) do
+    local turn, share = {}, t / math.max(1, nFinal)
+    local producers = {}
+    for _, e in ipairs(upstream) do
+      while (cum[e.macro] or 0) < ceil(counts[e.macro] * share) do
+        cum[e.macro] = (cum[e.macro] or 0) + 1
+        producers[#producers + 1] = e
+      end
+    end
+    local f = finals[finalIdx]
+    if f then
+      cum[f.macro] = (cum[f.macro] or 0) + 1
+      if cum[f.macro] >= counts[f.macro] then finalIdx = finalIdx + 1 end
+    end
+    for _, e in ipairs(producers) do placedWorkforce = placedWorkforce + e.workforce end
+    if f then placedWorkforce = placedWorkforce + f.workforce end
+    for _, transport in ipairs(transports) do
+      placedStorage[transport] = emitWhile(turn, storages[transport] or {}, placedStorage[transport] or 0, (plan.storage[transport] or 0) * share)
+    end
+    placedDocks = emitWhile(turn, piers, placedDocks, math.max(1, ceil(flow * share / planner.pierDockM3PerHour)))
+    placedAreas = emitWhile(turn, areas, placedAreas, math.max(1, ceil(flow * share / planner.dockAreaM3PerHour)), 1)
+    if t == 1 then
+      for _, e in ipairs(others) do
+        for _ = 1, counts[e.macro] do turn[#turn + 1] = e.macro end
+      end
+    end
+    placedHabitat = emitWhile(turn, habitats, placedHabitat, placedWorkforce)
+    for _, e in ipairs(producers) do turn[#turn + 1] = e.macro end
+    if f then turn[#turn + 1] = f.macro end
+    turns[t] = turn
+  end
+  -- whatever rounding left over goes with the last turn
+  local last = turns[#turns]
+  for _, list in ipairs({ habitats, piers, areas }) do
+    for _, u in ipairs(list) do last[#last + 1] = u.macro end
+  end
+  for _, transport in ipairs(transports) do
+    for _, u in ipairs(storages[transport] or {}) do last[#last + 1] = u.macro end
+  end
+  for _, e in ipairs(upstream) do
+    for _ = (cum[e.macro] or 0) + 1, counts[e.macro] do last[#last + 1] = e.macro end
+  end
+  for _, e in ipairs(finals) do
+    for _ = (cum[e.macro] or 0) + 1, counts[e.macro] do last[#last + 1] = e.macro end
+  end
+
+  local bill = {}
+  for t, turn in ipairs(turns) do
+    for _, macro in ipairs(turn) do
+      local prev = bill[#bill]
+      if prev and prev.turn == t and prev.macro == macro then
+        prev.count = prev.count + 1
+      else
+        bill[#bill + 1] = { macro = macro, count = 1, turn = t }
+      end
+    end
+  end
+  return bill
+end
+
 -- A readable plan for the log and for eval.
 function planner.Print(plan)
   local cat = planner.Catalogue(plan.set)
@@ -469,6 +670,12 @@ function planner.Print(plan)
     local e = cat.byMacro[b.macro]
     lines[#lines + 1] = string.format("%3d x %-32s %s (%s)", b.count, e.name, e.group, b.macro)
   end
+  local turnLines = {}
+  for _, b in ipairs(planner.Turns(plan)) do
+    local e = cat.byMacro[b.macro]
+    turnLines[b.turn] = (turnLines[b.turn] and turnLines[b.turn] .. ", " or "") .. string.format("%d x %s", b.count, e and e.name or b.macro)
+  end
+  for t, text in ipairs(turnLines) do lines[#lines + 1] = string.format("    turn %d: %s", t, text) end
   local wares = {}
   for w in pairs(plan.consumed) do wares[#wares + 1] = w end
   table.sort(wares)
@@ -478,6 +685,9 @@ function planner.Print(plan)
   end
   lines[#lines + 1] = string.format("    workforce %d (capacity %d, fraction %.2f), sunlight %.2f, trade in %d m3/h, out %d m3/h",
     plan.workforce, plan.workforceCapacity, plan.workforceFraction, plan.sunlight, plan.flow.import, plan.flow.export)
+  for w, s in pairs(plan.surplus or {}) do
+    if s > 0 then lines[#lines + 1] = string.format("    station surplus used: %-18s %7d /h", planner.Ware(w).name, s) end
+  end
   for _, w in ipairs(plan.warnings) do lines[#lines + 1] = "    ! " .. w end
   return table.concat(lines, "\n")
 end
@@ -486,7 +696,7 @@ end
 function planner.Run(target)
   local plan = planner.Plan(target)
   sab.Debug("planned:\n%s", planner.Print(plan))
-  return sab.StartBill(planner.Bill(plan)), plan
+  return sab.StartBill(planner.Turns(plan)), plan
 end
 
 sab.planner = planner

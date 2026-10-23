@@ -5,7 +5,7 @@
     <dependency name="ego_detailmonitor" />
     <dependency name="ego_interactmenu" />
     <dependency name="lua_log_api" />
-    <dependency name="macro_ware_data_api" />
+    <dependency name="extra_data_api" />
     <file name="ui/station_auto_builder.lua" />
     <file name="ui/station_auto_builder_planner.lua" />
   </environment>

@@ -52,6 +52,8 @@ ffi.cdef [[
   uint32_t GetNumPlayerBuildMethods(void);
   uint32_t GetPlayerBuildMethods(ProductionMethodInfo* result, uint32_t resultlen);
   bool IsComponentClass(UniverseID componentid, const char* classname);
+  bool ExtendBuildPlot(UniverseID stationid, Coord3D poschange, Coord3D negchange, bool allowreduction);
+  void UpdateConstructionMapBuildPlot(UniverseID holomapid);
   void PayBuildPlotSize(UniverseID stationid, Coord3D plotsize, Coord3D plotcenter);
   UniverseID ReserveBuildPlot(UniverseID sectorid, const char* factionid, const char* set, UIPosRot location, float x, float y, float z);
   void SetContainerBuildMethod(UniverseID containerid, const char* buildmethodid);
@@ -440,16 +442,8 @@ local function unit(v)
   return { v[1] / l, v[2] / l, v[3] / l }
 end
 
--- Rows of the rotation that turns unit vector a onto unit vector b (Rodrigues; any axis for a = -b).
-local function rowsFromTo(a, b)
-  local k, c = cross(a, b), dot(a, b)
-  local s = math.sqrt(dot(k, k))
-  if s < 1e-6 then
-    if c > 0 then return { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } } end
-    k = cross(a, math.abs(a[1]) < 0.9 and { 1, 0, 0 } or { 0, 1, 0 })
-    s, c = 0, -1
-  end
-  k = unit(k)
+-- Rows of the rotation about unit axis k by the angle with cosine c and sine s (Rodrigues).
+local function rowsAxisAngle(k, c, s)
   local rows = {}
   for i = 1, 3 do
     local e = { 0, 0, 0 }
@@ -460,6 +454,28 @@ local function rowsFromTo(a, b)
       e[3] * c + kxe[3] * s + k[3] * kde * (1 - c) }
   end
   return rows
+end
+
+-- Rows of the rotation that turns unit vector a onto unit vector b (any axis for a = -b).
+local function rowsFromTo(a, b)
+  local k, c = cross(a, b), dot(a, b)
+  local s = math.sqrt(dot(k, k))
+  if s < 1e-6 then
+    if c > 0 then return { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } } end
+    k = cross(a, math.abs(a[1]) < 0.9 and { 1, 0, 0 } or { 0, 1, 0 })
+    s, c = 0, -1
+  end
+  return rowsAxisAngle(unit(k), c, s)
+end
+
+-- Rows of "a, then b": (v a) b = v (a b).
+local function mulRows(a, b)
+  local r = {}
+  for i = 1, 3 do
+    r[i] = {}
+    for j = 1, 3 do r[i][j] = a[i][1] * b[1][j] + a[i][2] * b[2][j] + a[i][3] * b[3][j] end
+  end
+  return r
 end
 
 -- One entry's connections in the plan frame: { entryIdx, macro, name, pos, dir, used }.
@@ -499,9 +515,10 @@ function sab.PlanConnections(editor)
 end
 
 -- The module pose that puts moduleConn onto a station connection at world sPos pointing along sDir,
--- directions opposed: { pos = { x, y, z }, rows }. The engine quantises the roll about the axis itself.
-function sab.PoseForWorld(sPos, sDir, moduleConn)
+-- directions opposed, turned by roll (radians) about that axis: { pos = { x, y, z }, rows }.
+function sab.PoseForWorld(sPos, sDir, moduleConn, roll)
   local rows = rowsFromTo(unit(moduleConn.dir), { -sDir[1], -sDir[2], -sDir[3] })
+  if roll and roll ~= 0 then rows = mulRows(rows, rowsAxisAngle(unit(sDir), math.cos(roll), math.sin(roll))) end
   local mPos = rotate(moduleConn.pos, rows)
   return { pos = { x = sPos[1] - mPos[1], y = sPos[2] - mPos[2], z = sPos[3] - mPos[3] }, rows = rows }
 end
@@ -603,12 +620,16 @@ end
 
 -- *** packing ***
 -- A pack item goes onto the free station connection that keeps the plan compact: candidates are every
--- free connection x every connection of the module, nearest module centre to the plan's anchor first,
--- pre-checked in Lua against the plot and the placed boxes; the engine's snap (tags) and valid flag
--- (collision) give the verdict. Outer modules take outward connections only and keep a clearance.
+-- free connection x every connection of the module x four rolls, nearest module centre to the plan's
+-- anchor first, pre-checked in Lua against the plot and the placed boxes; the engine's snap (tags) and
+-- valid flag (collision) give the verdict. Outer modules take outward connections only and keep a clearance.
+-- No place: the overlapping candidates go to the engine's collision check, then the plot grows when it
+-- blocked candidates, then a connector grows outward from the edge and the item tries again.
 
 local OUTER = { dockarea = 1000, pier = 2000, buildmodule = 2000, defencemodule = 1000, ventureplatform = 1000 }
 local TRIES_PER_FRAME, CHECKS_PER_FRAME = 8, 400
+local ROLLS = { 0, math.pi / 2, math.pi, 3 * math.pi / 2 }
+local RELAXED_TRIES, MAX_REACH, MAX_PLOT, PLOT_STEP = 200, 6, 20000, 1000
 
 local function outerMargin(macro)
   for class, margin in pairs(OUTER) do
@@ -656,18 +677,46 @@ local function addEntry(run, idx, macro, pose)
   if size then run.boxes[idx] = worldBox(size, { pose.x, pose.y, pose.z }, pose.rows) end
 end
 
+local function readPlot(run)
+  local menu = sab.menu
+  local size, centre = C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container)
+  run.plot = { min = { centre.x - size.x / 2, centre.y - size.y / 2, centre.z - size.z / 2 },
+    max = { centre.x + size.x / 2, centre.y + size.y / 2, centre.z + size.z / 2 } }
+end
+
 -- The plan's connections, boxes, anchor and plot at the start of a run.
 local function readPlanState(run, editor)
-  local menu = sab.menu
   run.conns = sab.PlanConnections(editor)
   run.boxes, run.sum, run.n = {}, { 0, 0, 0 }, 0
   for _, e in ipairs(sab.ReadPlan()) do
     local pose = sab.EntryPose(editor, e.idx)
     if pose then addEntry(run, e.idx, e.macro, pose) end
   end
-  local size, centre = C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container)
-  run.plot = { min = { centre.x - size.x / 2, centre.y - size.y / 2, centre.z - size.z / 2 },
-    max = { centre.x + size.x / 2, centre.y + size.y / 2, centre.z + size.z / 2 } }
+  readPlot(run)
+end
+
+-- One step on every axis still under the cap, paid as vanilla's plot-size menu pays it.
+local function growPlot(run)
+  local menu = sab.menu
+  local size = C.GetBuildPlotSize(menu.container)
+  local step, grows = { x = 0, y = 0, z = 0 }, false
+  for _, axis in ipairs({ "x", "y", "z" }) do
+    if size[axis] + 2 * PLOT_STEP <= MAX_PLOT then
+      step[axis] = PLOT_STEP
+      grows = true
+    end
+  end
+  if not grows or not C.ExtendBuildPlot(menu.container, step, step, true) then return false end
+  C.UpdateConstructionMapBuildPlot(menu.holomap)
+  local sector = GetComponentData(menu.container, "sectorid")
+  local owner = GetComponentData(sector, "owner")
+  if owner == "ownerless" or owner == "xenon" or GetComponentData(sector, "isplayerowned") then
+    C.PayBuildPlotSize(menu.container, C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container))
+  end
+  readPlot(run)
+  size = C.GetBuildPlotSize(menu.container)
+  sab.Debug("plot grown to %.0f x %.0f x %.0f km", size.x / 1000, size.y / 1000, size.z / 1000)
+  return true
 end
 
 local function anchorOf(run)
@@ -678,31 +727,41 @@ local function anchorOf(run)
   return { run.sum[1] / run.n, run.sum[2] / run.n, run.sum[3] / run.n }
 end
 
+-- A reach connector takes the outward connection farthest from the anchor; an item retried after one
+-- prefers that connector's connections.
 local function buildCandidates(run, item, editor)
   local anchor = anchorOf(run)
   local mconns = sab.Connections(sab.FloatingMacro(editor))
   local size = sab.sizes[item.macro]
+  local prefer = item.connectors and run.lastPlacedIdx
   local list = {}
   for _, f in ipairs(run.conns) do
-    if not f.used and (not item.margin or dot(f.dir, { f.pos[1] - anchor[1], f.pos[2] - anchor[2], f.pos[3] - anchor[3] }) > 0) then
+    local outward = dot(f.dir, { f.pos[1] - anchor[1], f.pos[2] - anchor[2], f.pos[3] - anchor[3] }) > 0
+    if not f.used and (outward or not (item.margin or item.reach)) then
       for _, m in ipairs(mconns) do
         local key = f.macro .. "|" .. f.name .. "|" .. item.macro .. "|" .. m.name
         if not sab.incompatible[key] then
-          local pose = sab.PoseForWorld(f.pos, f.dir, m)
-          local c = { pose.pos.x, pose.pos.y, pose.pos.z }
-          if size then
-            local cc = rotate({ size.cX, size.cY, size.cZ }, pose.rows)
-            c = { c[1] + cc[1], c[2] + cc[2], c[3] + cc[3] }
+          for _, roll in ipairs(ROLLS) do
+            local pose = sab.PoseForWorld(f.pos, f.dir, m, roll)
+            local c = { pose.pos.x, pose.pos.y, pose.pos.z }
+            if size then
+              local cc = rotate({ size.cX, size.cY, size.cZ }, pose.rows)
+              c = { c[1] + cc[1], c[2] + cc[2], c[3] + cc[3] }
+            end
+            local d = { c[1] - anchor[1], c[2] - anchor[2], c[3] - anchor[3] }
+            local score = dot(d, d)
+            if item.reach then score = -score end
+            if prefer and f.entryIdx == prefer then score = score - 1e15 end
+            list[#list + 1] = { f = f, m = m, key = key, pose = pose, score = score, roll = roll }
           end
-          local d = { c[1] - anchor[1], c[2] - anchor[2], c[3] - anchor[3] }
-          list[#list + 1] = { f = f, m = m, key = key, pose = pose, score = dot(d, d) }
         end
       end
     end
   end
   table.sort(list, function(a, b) return a.score < b.score end)
-  item.candidates, item.cursor = list, 1
-  sab.Debug("%s: %d candidates, %d module connections, anchor %.0f %.0f %.0f", item.macro, #list, #mconns, anchor[1], anchor[2], anchor[3])
+  item.candidates, item.cursor, item.skips = list, 1, nil
+  sab.Debug("%s: %d candidates, %d module connections, anchor %.0f %.0f %.0f%s", item.macro, #list, #mconns, anchor[1], anchor[2], anchor[3],
+    item.reach and ", reaching outward" or (prefer and string.format(", entry %d first", prefer) or ""))
 end
 
 -- The Lua pre-check: inside the plot, clear of every placed box but the one it attaches to. An outer module
@@ -725,7 +784,7 @@ local function boxOk(run, item, cand)
   end
   for idx, b in pairs(run.boxes) do
     if idx ~= cand.f.entryIdx then
-      if overlaps(box, b, -5) then return false, "overlap" end
+      if not item.relaxed and overlaps(box, b, -5) then return false, "overlap" end
       if front and overlaps(front, b, 0) then return false, "overlap" end
     end
   end
@@ -741,6 +800,7 @@ local function addPlacement(run, editor, added, cand)
   local pose = sab.EntryPose(editor, added.idx)
   if not pose then return end
   addEntry(run, added.idx, added.macro, pose)
+  run.lastPlacedIdx = added.idx
   cand.f.used = true
   for _, c in ipairs(connectionsOf(added.idx, added.macro, pose, { [added.connection] = true })) do
     run.conns[#run.conns + 1] = c
@@ -753,14 +813,19 @@ local function tryCandidates(run, item, editor)
   local tries, checks = 0, 0
   while tries < TRIES_PER_FRAME and checks < CHECKS_PER_FRAME do
     local cand = item.candidates[item.cursor]
-    if not cand then return "exhausted" end
+    if not cand or (item.relaxed and item.relaxedTries >= RELAXED_TRIES) then return "exhausted" end
     item.cursor = item.cursor + 1
     checks = checks + 1
     local ok, reason = boxOk(run, item, cand)
-    if not ok then
+    if cand.tested then
+      ok = false
+    elseif not ok then
       skip(item, reason)
-    else
+    end
+    if ok then
       tries = tries + 1
+      cand.tested = true
+      if item.relaxed then item.relaxedTries = item.relaxedTries + 1 end
       sab.WriteFloating(editor, cand.pose.pos, cand.pose.rows)
       local snap = sab.Snap(editor)
       if snap.snapped and snap.entryIdx == cand.f.entryIdx and snap.connection == cand.m.name and snap.predecessorConnection == cand.f.name then
@@ -775,6 +840,9 @@ local function tryCandidates(run, item, editor)
             addPlacement(run, editor, added, cand)
             sab.Debug("placed %s as entry %d: %s on entry %d %s (%s) at %.0f %.0f %.0f, candidate %d", item.macro, added.idx,
               added.connection, added.predecessorIdx, added.predecessorConnection, cand.f.macro, added.offset.x, added.offset.y, added.offset.z, item.cursor - 1)
+            if cand.roll ~= 0 or item.relaxed then
+              sab.Debug("  (roll %.0f deg%s)", math.deg(cand.roll), item.relaxed and ", by the engine's collision check" or "")
+            end
             return "placed"
           end
           skip(item, "refused")
@@ -793,9 +861,20 @@ local function tryCandidates(run, item, editor)
   return "more"
 end
 
+-- what the vanilla drop handler does after a mouse-driven placement; "last" selects the newest plan row
+local function refreshPlanTable(placed)
+  local menu = sab.menu
+  menu.storePlanTableState()
+  ---@diagnostic disable-next-line: inject-field
+  if placed then menu.selectedRows.plan = "last" end
+  menu.refreshPlan()
+  menu.displayMenu()
+end
+
 local function advance(run)
   run.next = run.next + 1
   run.phase = "begin"
+  if tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) > run.countBefore then refreshPlanTable(true) end
 end
 
 -- The drop phase of a pack item; the module stays floated across frames while candidates remain.
@@ -817,21 +896,34 @@ local function packStep(run, item)
     advance(run)
     return
   end
+  local s, total = item.skips or {}, #item.candidates
+  local function skipsText()
+    return string.format("%d candidates: plot %d, overlap %d, incompatible %d, rejected %d, refused %d", total,
+      s.plot or 0, s.overlap or 0, s.incompatible or 0, s.rejected or 0, s.refused or 0)
+  end
+  if not item.relaxed and (s.overlap or 0) > 0 then
+    item.relaxed, item.cursor, item.relaxedTries = true, 1, 0
+    sab.Debug("%s: no place among %s; the overlapping ones go to the engine's collision check", item.macro, skipsText())
+    return
+  end
   C.RemoveFloatingSequenceFromConstructionPlan(menu.holomap)
   menu.floatingNewModule = nil
+  item.candidates, item.relaxed = nil, nil
+  if (s.plot or 0) > 0 and growPlot(run) then
+    sab.Debug("%s: no place among %s; retrying in the grown plot", item.macro, skipsText())
+    run.phase = "begin"
+    return
+  end
   local connector = run.connector
-  if connector and connector.budget > 0 and not item.connectorTried and not item.isConnector then
-    item.connectorTried, item.candidates = true, nil
-    connector.budget = connector.budget - 1
-    table.insert(run.items, run.next, { macro = connector.macro, pack = true, isConnector = true })
-    sab.Debug("%s: no place, inserting %s first", item.macro, connector.macro)
+  if connector and not item.isConnector and (item.connectors or 0) < MAX_REACH then
+    item.connectors = (item.connectors or 0) + 1
+    table.insert(run.items, run.next, { macro = connector.macro, pack = true, isConnector = true, reach = true, turn = item.turn })
+    sab.Debug("%s: no place among %s; growing %s outward first (%d of %d)", item.macro, skipsText(), connector.macro, item.connectors, MAX_REACH)
     run.phase = "begin"
     return
   end
   run.failed = run.failed + 1
-  local s = item.skips or {}
-  sab.Debug("%s: no place found among %d candidates: plot %d, overlap %d, incompatible %d, rejected %d, refused %d", item.macro,
-    #item.candidates, s.plot or 0, s.overlap or 0, s.incompatible or 0, s.rejected or 0, s.refused or 0)
+  sab.Debug("%s: no place found among %s", item.macro, skipsText())
   advance(run)
 end
 
@@ -877,7 +969,8 @@ end
 -- must land on or nil, free = drop without a snap } for a pose.
 
 -- A bill { { macro, count } } becomes pack items: inner modules first, largest first, then the outer ones.
--- Connectors in the bill set the insertion budget and type instead of being items.
+-- A bill whose entries carry a turn (planner.Turns) keeps its order: it is the build order.
+-- A connector in the bill sets the type the packer grows outward with instead of being an item.
 function sab.StartBill(bill)
   local menu = sab.menu
   if not (menu and menu.shown and menu.holomap ~= 0) then
@@ -885,35 +978,38 @@ function sab.StartBill(bill)
     return false
   end
   sab.ReadSizes()
-  local items, connector = {}, nil
+  local items, connector, turns = {}, nil, 0
   for _, b in ipairs(bill) do
     local count = tonumber(b.count) or 1
     if IsMacroClass(b.macro, "connectionmodule") then
-      connector = { macro = b.macro, budget = (connector and connector.budget or 0) + count }
+      connector = { macro = b.macro }
     else
       local size = sab.sizes[b.macro]
       for _ = 1, count do
-        items[#items + 1] = { macro = b.macro, pack = true, margin = outerMargin(b.macro),
+        items[#items + 1] = { macro = b.macro, pack = true, margin = outerMargin(b.macro), turn = b.turn,
           volume = size and size.maxX * size.maxY * size.maxZ or 0 }
       end
+      turns = math.max(turns, b.turn or 0)
     end
   end
-  table.sort(items, function(a, b)
-    if (a.margin ~= nil) ~= (b.margin ~= nil) then return a.margin == nil end
-    return a.volume > b.volume
-  end)
+  if turns == 0 then
+    table.sort(items, function(a, b)
+      if (a.margin ~= nil) ~= (b.margin ~= nil) then return a.margin == nil end
+      return a.volume > b.volume
+    end)
+  end
   if not connector and items[1] then
     local macro = defaultConnector(items[1].macro)
-    if macro then connector = { macro = macro, budget = #items } end
+    if macro then connector = { macro = macro } end
   end
   if items[1] and tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) == 0 then
     local centre = C.GetBuildPlotCenterOffset(menu.container)
     items[1].pack, items[1].free, items[1].pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
   end
-  return sab.StartRun(items, connector)
+  return sab.StartRun(items, connector, turns > 0 and turns or nil)
 end
 
-function sab.StartRun(items, connector)
+function sab.StartRun(items, connector, turns)
   if sab.run then
     sab.Error("a run is already active")
     return false
@@ -928,12 +1024,13 @@ function sab.StartRun(items, connector)
     sab.Error("the editor is not reachable")
     return false
   end
-  local run = { items = items, next = 1, phase = "begin", placed = 0, failed = 0, connector = connector }
+  local run = { items = items, next = 1, phase = "begin", placed = 0, failed = 0, connector = connector, turns = turns }
   sab.ReadSizes()
   readPlanState(run, editor)
   sab.run = run
-  sab.Debug("run started: %d items, %d entries, %d connections, connector %s x %d", #items, run.n, #run.conns,
-    connector and connector.macro or "none", connector and connector.budget or 0)
+  sab.panelDirty = true
+  sab.Debug("run started: %d items, %d entries, %d connections, connector %s", #items, run.n, #run.conns,
+    connector and connector.macro or "none")
   return true
 end
 
@@ -960,12 +1057,7 @@ function sab.StopRun(reason)
   sab.Debug("run %s: %d placed, %d failed", reason or "finished", run.placed, run.failed)
   sab.lastRun = { placed = run.placed, failed = run.failed,
     planCount = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) }
-  -- what the vanilla drop handler does after a mouse-driven placement; "last" selects the newest plan row
-  menu.storePlanTableState()
-  ---@diagnostic disable-next-line: inject-field
-  if run.placed > 0 then menu.selectedRows.plan = "last" end
-  menu.refreshPlan()
-  menu.displayMenu()
+  refreshPlanTable(run.placed > 0)
 end
 
 -- One step per menu update.
@@ -1041,7 +1133,16 @@ sab.panelDirty = nil
 sab.tab = "target"
 -- the panel opens as its title bar only
 sab.expanded = false
-sab.target = { kind = "ware", rate = 1000, shipRate = 1, shipSize = "m", fullCycle = false, workforce = true, selfSufficient = false }
+-- ware, build module and race are filled from the catalogue on the first panel build (targetChoices)
+local function defaultTarget()
+  return { kind = "ware", rate = 1000, shipRate = 1, shipSize = "m", fullCycle = false, workforce = true, selfSufficient = false }
+end
+sab.target = defaultTarget()
+
+function sab.ResetTarget()
+  sab.target = defaultTarget()
+  sab.panelDirty = true
+end
 -- the map dialog (07c): the last right-clicked sector spot, the open dialog, the target handed to the next build menu
 sab.lastSpot = nil
 sab.dialog = nil
@@ -1180,6 +1281,31 @@ local function progressText()
   local last = sab.lastRun
   if last then return string.format(tostring(ReadText(PAGE, 107)), last.placed, last.failed) end
   return ""
+end
+
+-- the item in work and how far its candidate list is
+local function progressDetail()
+  local run = sab.run
+  local item = run and run.items[run.next]
+  if not item then return "" end
+  local text = string.format(tostring(ReadText(PAGE, 131)), GetMacroData(item.macro, "name"), item.candidates and item.cursor - 1 or 0, item.candidates and #item.candidates or 0)
+  if item.turn and run.turns then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
+  return text
+end
+
+local function progressDone()
+  local run = sab.run
+  return run and run.placed + run.failed or 0
+end
+
+local function progressPlaced()
+  local run = sab.run
+  return run and run.placed or 0
+end
+
+local function progressTotal()
+  local run = sab.run
+  return run and math.max(1, #run.items) or 1
 end
 
 -- Input rows of a 4-column form table; a change marks the owning frame dirty through `dirty`.
@@ -1359,24 +1485,36 @@ function sab.DisplayPanel()
       end
     end
   end
-  local headHeight = head:getVisibleHeight() + Helper.borderSize
-
-  -- the button table below needs two rows of the view
-  local ftable = frame:addTable(4, { tabOrder = 2, highlightMode = "off", reserveScrollBar = false, y = head.properties.y + headHeight,
-    maxVisibleHeight = Helper.viewHeight - y - headHeight - Helper.frameBorder - Helper.scaleY(3 * buttonHeight) })
-  ftable:setColWidthPercent(1, 30)
-  ftable:setColWidth(3, Helper.scaleX(50), false)
-  ftable:setColWidth(4, Helper.scaleY(buttonHeight), false)
+  -- the progress sits under the tabs; during a run the tab content is hidden so the map stays in view
+  local prow = head:addRow(true, {})
+  prow[1]:setColSpan(3):createText(progressText, { halign = "left", minRowHeight = buttonHeight })
+  if not idle then
+    prow = head:addRow(true, {})
+    prow[1]:setColSpan(3):createStatusBar({ current = progressDone, start = progressPlaced, max = progressTotal, cellBGColor = Color["row_background"],
+      valueColor = Color["slider_value"], posChangeColor = Color["statusbar_diff_neg_default"], markerColor = Color["statusbar_marker_hidden"],
+      width = width - 2 * Helper.borderSize, height = Helper.scaleY(Helper.standardTextHeight), x = Helper.borderSize, scaling = false })
+    prow = head:addRow(true, {})
+    prow[1]:setColSpan(3):createText(progressDetail, { halign = "left", minRowHeight = buttonHeight })
+  end
+  local contentY = head.properties.y + head:getVisibleHeight() + Helper.borderSize
 
   local canAdd = false
-  if target then
-    addTargetRows(ftable, idle, buttonHeight, sab.PanelContext(), function() sab.panelDirty = true end)
-  else
-    canAdd = addBillRows(ftable, idle, buttonHeight)
+  if idle then
+    -- the button table below needs two rows of the view
+    local ftable = frame:addTable(4, { tabOrder = 2, highlightMode = "off", reserveScrollBar = false, y = contentY,
+      maxVisibleHeight = Helper.viewHeight - y - contentY - Helper.frameBorder - Helper.scaleY(3 * buttonHeight) })
+    ftable:setColWidthPercent(1, 30)
+    ftable:setColWidth(3, Helper.scaleX(50), false)
+    ftable:setColWidth(4, Helper.scaleY(buttonHeight), false)
+    if target then
+      addTargetRows(ftable, idle, buttonHeight, sab.PanelContext(), function() sab.panelDirty = true end)
+    else
+      canAdd = addBillRows(ftable, idle, buttonHeight)
+    end
+    contentY = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize
   end
 
-  local btable = frame:addTable(4, { tabOrder = 3, highlightMode = "off", reserveScrollBar = false,
-    y = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize })
+  local btable = frame:addTable(4, { tabOrder = 3, highlightMode = "off", reserveScrollBar = false, y = contentY })
   local row = btable:addRow(true, {})
   if target then
     local function canRun() return sab.run == nil and sab.RouteOk() end
@@ -1384,10 +1522,10 @@ function sab.DisplayPanel()
     row[1].handlers.onClick = sab.RunTarget
     row[2]:createButton({ height = buttonHeight, active = function() return sab.run ~= nil end }):setText(ReadText(PAGE, 104), { halign = "center" })
     row[2].handlers.onClick = function() sab.StopRun("stopped") end
-    row[3]:setColSpan(2):createButton({ height = buttonHeight, active = sab.CanUndoRun }):setText(ReadText(PAGE, 105), { halign = "center" })
+    row[3]:createButton({ height = buttonHeight, active = sab.CanUndoRun }):setText(ReadText(PAGE, 105), { halign = "center" })
     row[3].handlers.onClick = sab.UndoRun
-    row = btable:addRow(true, {})
-    row[1]:setColSpan(4):createText(progressText, { halign = "left", minRowHeight = buttonHeight })
+    row[4]:createButton({ height = buttonHeight, active = idle }):setText(ReadText(1001, 3318), { halign = "center" })
+    row[4].handlers.onClick = sab.ResetTarget
   else
     row[1]:createButton({ height = buttonHeight, active = idle and canAdd }):setText(ReadText(1001, 3106), { halign = "center" })
     row[1].handlers.onClick = sab.AddBillRow
@@ -1404,7 +1542,6 @@ function sab.DisplayPanel()
     row = btable:addRow(true, {})
     row[1]:createButton({ height = buttonHeight, active = sab.CanUndoRun }):setText(ReadText(PAGE, 105), { halign = "center" })
     row[1].handlers.onClick = sab.UndoRun
-    row[2]:setColSpan(3):createText(progressText, { halign = "left", minRowHeight = buttonHeight })
   end
 
   frame:display()

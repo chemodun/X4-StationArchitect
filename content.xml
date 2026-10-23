@@ -62,5 +62,5 @@
   <dependency id="ws_3715253556" optional="false" name="Options Helper" version="110"></dependency>
   <dependency id="ws_3770927339" optional="false" name="Print Extension List" version="100"></dependency>
   <dependency id="ws_3823580916" optional="false" name="Lua Log API" version="100"></dependency>
-  <dependency id="macro_ware_data_api" optional="false" name="Macro and Ware Data API" version="100"></dependency>
+  <dependency id="ws_3825599643" optional="false" name="Extra Data API" version="100"></dependency>
 </content>
