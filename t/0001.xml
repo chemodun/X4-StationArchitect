@@ -7,7 +7,7 @@
       <t id="2">Fills your station's build plan from a bill of modules inside the build menu, one module at a time, with the game's own editor snapping each one into place.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Auto Planner</t>
+      <t id="100">Station Auto Builder</t>
       <t id="101">Category</t>
       <t id="102">Count</t>
       <t id="103">Run</t>
@@ -16,6 +16,23 @@
       <t id="106">Placed %s, failed %s, left %s</t>
       <t id="107">Last run: %s placed, %s failed</t>
       <t id="108">The editor is not reachable on this game build</t>
+      <t id="109">Target</t>
+      <t id="110">Bill</t>
+      <t id="111">Produce a ware</t>
+      <t id="112">Build ships</t>
+      <t id="113">Maintain ships</t>
+      <t id="114">Ware</t>
+      <t id="115">Current net rate</t>
+      <t id="116">Add per hour</t>
+      <t id="117">Build module</t>
+      <t id="118">Ships per hour</t>
+      <t id="119">Full cycle</t>
+      <t id="120">Workforce</t>
+      <t id="121">Self-sufficient workforce</t>
+      <t id="122">Planned modules</t>
+      <t id="123">%s /h</t>
+      <t id="124">Workforce %s of %s, trade %s m³/h in, %s m³/h out</t>
+      <t id="125">No plan: %s</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>

@@ -17,6 +17,15 @@ ffi.cdef [[
     float roll;
   } UIPosRot;
   typedef struct {
+    float x;
+    float y;
+    float z;
+  } Coord3D;
+  typedef struct {
+    const char* id;
+    const char* name;
+  } ProductionMethodInfo;
+  typedef struct {
     size_t idx;
     const char* macroid;
     UniverseID componentid;
@@ -38,6 +47,15 @@ ffi.cdef [[
   UniverseID GetPlayerID(void);
   void RemoveFloatingSequenceFromConstructionPlan(UniverseID holomapid);
   void UpdateConstructionMapItemLoadout(UniverseID holomapid, size_t itemidx, UniverseID defensibleid, UILoadout uiloadout);
+  int64_t GetBuildPlotPrice(UniverseID sectorid, UIPosRot location, float x, float y, float z, const char* factionid);
+  const char* GetContainerBuildMethod(UniverseID containerid);
+  uint32_t GetNumPlayerBuildMethods(void);
+  uint32_t GetPlayerBuildMethods(ProductionMethodInfo* result, uint32_t resultlen);
+  bool IsComponentClass(UniverseID componentid, const char* classname);
+  void PayBuildPlotSize(UniverseID stationid, Coord3D plotsize, Coord3D plotcenter);
+  UniverseID ReserveBuildPlot(UniverseID sectorid, const char* factionid, const char* set, UIPosRot location, float x, float y, float z);
+  void SetContainerBuildMethod(UniverseID containerid, const char* buildmethodid);
+  void SetStationModuleLoadoutLevel(UniverseID stationid, float value);
 ]]
 
 local MENU_NAME = "StationConfigurationMenu"
@@ -51,9 +69,8 @@ local sab = {
   menu = nil,
   -- the active run; nil between runs
   run = nil,
-  -- macro -> { maxX, maxY, maxZ, cX, cY, cZ } from MD; macros asked this session
+  -- macro -> { maxX, maxY, maxZ, cX, cY, cZ, pierDocks } from MD
   sizes = {},
-  sizesAsked = {},
   -- "entry macro|station connection|module macro|module connection" the engine refused to snap
   incompatible = {},
 }
@@ -89,21 +106,26 @@ function sab.ReadSizes()
   return sab.sizes
 end
 
-function sab.RequestSizes()
-  local menu = sab.menu
-  if not (menu and menu.modules) or sab.playerId == 0 then return end
+-- Asks for every macro the blackboard lacks; MD clears the table on every load, a repeat ask is harmless.
+function sab.RequestSizes(macros)
+  if sab.playerId == 0 then return end
   local sizes = sab.ReadSizes()
   local asked = 0
-  for _, macros in pairs(menu.modules) do
-    for _, macro in ipairs(macros) do
-      if not sizes[macro] and not sab.sizesAsked[macro] then
-        sab.sizesAsked[macro] = true
-        SignalObject(sab.playerId, "StationAutoBuilder.BBox", macro)
-        asked = asked + 1
-      end
+  for _, macro in ipairs(macros) do
+    if not sizes[macro] then
+      SignalObject(sab.playerId, "StationAutoBuilder.BBox", macro)
+      asked = asked + 1
     end
   end
-  if asked > 0 then sab.Debug("asked MD for %d module sizes", asked) end
+  if asked > 0 then sab.Debug("asked MD for %d module data entries", asked) end
+end
+
+function sab.MenuMacros()
+  local macros = {}
+  for _, list in pairs(sab.menu and sab.menu.modules or {}) do
+    for _, macro in ipairs(list) do macros[#macros + 1] = macro end
+  end
+  return macros
 end
 
 -- *** plan read-back ***
@@ -683,15 +705,29 @@ local function buildCandidates(run, item, editor)
   sab.Debug("%s: %d candidates, %d module connections, anchor %.0f %.0f %.0f", item.macro, #list, #mconns, anchor[1], anchor[2], anchor[3])
 end
 
--- The Lua pre-check: inside the plot, clear of every placed box but the one it attaches to.
+-- The Lua pre-check: inside the plot, clear of every placed box but the one it attaches to. An outer module
+-- keeps its clearance in front of its outward face only (the approach of the ships), so it sits beside modules.
 local function boxOk(run, item, cand)
   local size = sab.sizes[item.macro]
   if not size then return true end
   local box = worldBox(size, { cand.pose.pos.x, cand.pose.pos.y, cand.pose.pos.z }, cand.pose.rows)
   if not inside(box, run.plot) then return false, "plot" end
-  local margin = item.margin or -5
+  local front
+  if item.margin then
+    front = { min = { box.min[1], box.min[2], box.min[3] }, max = { box.max[1], box.max[2], box.max[3] } }
+    for i = 1, 3 do
+      if cand.f.dir[i] > 0.5 then
+        front.max[i] = front.max[i] + item.margin
+      elseif cand.f.dir[i] < -0.5 then
+        front.min[i] = front.min[i] - item.margin
+      end
+    end
+  end
   for idx, b in pairs(run.boxes) do
-    if idx ~= cand.f.entryIdx and overlaps(box, b, margin) then return false, "overlap" end
+    if idx ~= cand.f.entryIdx then
+      if overlaps(box, b, -5) then return false, "overlap" end
+      if front and overlaps(front, b, 0) then return false, "overlap" end
+    end
   end
   return true
 end
@@ -933,6 +969,23 @@ function sab.StopRun(reason)
 end
 
 -- One step per menu update.
+-- A pair or free item that landed joins the run's boxes and free connections, as a pack item does in addPlacement.
+local function registerEntry(run)
+  local editor = sab.Editor()
+  local plan = sab.ReadPlan()
+  local added = plan[#plan]
+  if not (editor and added) then return end
+  local pose = sab.EntryPose(editor, added.idx)
+  if not pose then return end
+  addEntry(run, added.idx, added.macro, pose)
+  for _, f in ipairs(run.conns) do
+    if f.entryIdx == added.predecessorIdx and f.name == added.predecessorConnection then f.used = true end
+  end
+  for _, c in ipairs(connectionsOf(added.idx, added.macro, pose, { [added.connection] = true })) do
+    run.conns[#run.conns + 1] = c
+  end
+end
+
 function sab.Tick()
   local run = sab.run
   if not run then return end
@@ -954,7 +1007,7 @@ function sab.Tick()
     if item.pack then
       packStep(run, item)
     else
-      finishPlacement(run, item)
+      if finishPlacement(run, item) then registerEntry(run) end
       advance(run)
     end
   end
@@ -984,6 +1037,78 @@ local CATEGORIES = {
 sab.bill = {}
 sab.lastRun = nil
 sab.panelDirty = nil
+-- "target" or "bill"; the Target tab's inputs live across menu openings, unset choices default from the catalogue
+sab.tab = "target"
+-- the panel opens as its title bar only
+sab.expanded = false
+sab.target = { kind = "ware", rate = 1000, shipRate = 1, shipSize = "m", fullCycle = false, workforce = true, selfSufficient = false }
+-- the map dialog (07c): the last right-clicked sector spot, the open dialog, the target handed to the next build menu
+sab.lastSpot = nil
+sab.dialog = nil
+sab.pendingTarget = nil
+-- plot side = plotFactor x cube root of the bill's padded box volume (the HQ's 280 modules: 12.5 x 5.4 x 17.6 km)
+sab.plotFactor = 2
+
+local function option(id, text) return { id = id, text = tostring(text), icon = "", displayremoveoption = false } end
+
+local function sortedByText(options)
+  table.sort(options, function(a, b) return a.text < b.text end)
+  return options
+end
+
+-- The Target tab's choice lists from the owned blueprints; an unset or no longer owned choice takes the default.
+local function targetChoices(cat)
+  local t = sab.target
+  local wares, seen = {}, {}
+  for _, group in ipairs({ "production", "processing" }) do
+    for _, e in ipairs(cat[group]) do
+      for _, p in ipairs(e.products or {}) do
+        if not seen[p.ware] then
+          seen[p.ware] = true
+          wares[#wares + 1] = option(p.ware, sab.planner.Ware(p.ware).name)
+        end
+      end
+    end
+  end
+  local builds = {}
+  for _, e in ipairs(cat.build) do builds[#builds + 1] = option(e.macro, e.name) end
+  local habitats, races = {}, {}
+  for _, e in ipairs(cat.habitation) do habitats[e.race] = (habitats[e.race] or 0) + 1 end
+  for _, r in ipairs(GetLibrary("races")) do
+    if habitats[r.id] then races[#races + 1] = option(r.id, r.name) end
+  end
+  sortedByText(wares); sortedByText(builds); sortedByText(races)
+  if not seen[t.ware] then t.ware = wares[1] and wares[1].id end
+  if not (t.buildMacro and cat.byMacro[t.buildMacro]) then t.buildMacro = builds[1] and builds[1].id end
+  if not habitats[t.race] then
+    local best = 0
+    for race, n in pairs(habitats) do
+      if n > best then t.race, best = race, n end
+    end
+  end
+  return { wares = wares, builds = builds, races = races }
+end
+
+-- Where a target is planned: the build menu's station, or a sector spot before the station exists.
+function sab.PanelContext()
+  local menu = sab.menu
+  return { set = menu.set, station = menu.container ~= 0 and menu.container or nil }
+end
+
+function sab.TargetSpec(ctx)
+  local t = sab.target
+  -- a run before the form was ever built (eval, a collapsed panel) still needs the defaults
+  if not (t.ware and t.buildMacro and t.race) then targetChoices(sab.planner.Catalogue(ctx.set, true)) end
+  local ship = t.kind ~= "ware"
+  return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, kind = ship and "ship" or "ware", repair = t.kind == "repair",
+    ware = t.ware, rate = ship and t.shipRate or t.rate, buildMacro = t.buildMacro, shipSize = t.shipSize, count = 1,
+    fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
+    race = t.race }
+end
+
+function sab.RunTarget()
+  if sab.planner and sab.planner.Run(sab.TargetSpec(sab.PanelContext())) then sab.panelDirty = true end
+end
 
 local function categoryOptions()
   local options = {}
@@ -1057,31 +1182,102 @@ local function progressText()
   return ""
 end
 
-function sab.DisplayPanel()
+-- Input rows of a 4-column form table; a change marks the owning frame dirty through `dirty`.
+local function rowKit(ftable, idle, buttonHeight, dirty)
+  local kit = {}
+  function kit.input(label)
+    local row = ftable:addRow(true, {})
+    row[1]:createText(label, { minRowHeight = buttonHeight })
+    return row
+  end
+  function kit.dropdown(row, options, current, onChange)
+    row[2]:setColSpan(3):createDropDown(options, { startOption = current or "", height = buttonHeight, active = idle and #options > 0 })
+    row[2].handlers.onDropDownConfirmed = function(_, id)
+      if id ~= current then onChange(id); dirty() end
+    end
+  end
+  function kit.number(row, value, onChange)
+    row[3]:setColSpan(2):createEditBox({ height = buttonHeight, active = idle }):setText(tostring(value), { halign = "center" })
+    row[3].handlers.onEditBoxDeactivated = function(_, text, textchanged)
+      if textchanged then onChange(tonumber(text)); dirty() end
+    end
+  end
+  function kit.checkbox(row, checked, active, onChange)
+    row[4]:createCheckBox(checked, { height = buttonHeight, width = buttonHeight, active = idle and active })
+    row[4].handlers.onClick = function(_, value) onChange(value); dirty() end
+  end
+  return kit
+end
+
+-- The target form: the inputs, `extraRows(kit)` if given, then the planned bill and balance as a preview;
+-- the plan is recomputed on every rebuild and returned (nil when the planner fails).
+local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
+  local t = sab.target
+  local cat = sab.planner.Catalogue(ctx.set, true)
+  local choices = targetChoices(cat)
+  local kit = rowKit(ftable, idle, buttonHeight, dirty)
+  local input, dropdown, number, checkbox = kit.input, kit.dropdown, kit.number, kit.checkbox
+
+  local kinds = { option("ware", ReadText(PAGE, 111)), option("ship", ReadText(PAGE, 112)), option("repair", ReadText(PAGE, 113)) }
+  dropdown(input(ReadText(PAGE, 109)), kinds, t.kind, function(id) t.kind = id end)
+  if t.kind == "ware" then
+    dropdown(input(ReadText(PAGE, 114)), choices.wares, t.ware, function(id) t.ware = id end)
+    if t.ware and ctx.station then
+      local current = sab.planner.Current(ctx.station, t.ware)
+      local row = input(ReadText(PAGE, 115))
+      row[2]:setColSpan(3):createText(string.format(tostring(ReadText(PAGE, 123)), string.format("%+d", current.net)), { halign = "right", minRowHeight = buttonHeight })
+    end
+    number(input(ReadText(PAGE, 116)), t.rate, function(v) if v and v > 0 then t.rate = v end end)
+  else
+    dropdown(input(ReadText(PAGE, 117)), choices.builds, t.buildMacro, function(id) t.buildMacro = id end)
+    if t.kind == "ship" then
+      local sizes = { option("s", "S"), option("m", "M"), option("l", "L"), option("xl", "XL") }
+      dropdown(input(ReadText(1001, 9648)), sizes, t.shipSize, function(id) t.shipSize = id end)
+      number(input(ReadText(PAGE, 118)), t.shipRate, function(v) if v and v > 0 then t.shipRate = v end end)
+    end
+  end
+  checkbox(input(ReadText(PAGE, 119)), t.fullCycle, true, function(v) t.fullCycle = v end)
+  checkbox(input(ReadText(PAGE, 120)), t.workforce, true, function(v) t.workforce = v end)
+  checkbox(input(ReadText(PAGE, 121)), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
+  dropdown(input(ReadText(1001, 2428)), choices.races, t.race, function(id) t.race = id end)
+  if extraRows then extraRows(kit) end
+
+  local header = ftable:addRow(false, {})
+  header[1]:setColSpan(4):createText(ReadText(PAGE, 122), Helper.subHeaderTextProperties)
+  local ok, plan = pcall(sab.planner.Plan, sab.TargetSpec(ctx))
+  if not ok then
+    local row = ftable:addRow(true, {})
+    row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 125)), tostring(plan)), { color = Color["text_warning"] })
+    return nil
+  end
+  for _, b in ipairs(sab.planner.Bill(plan)) do
+    local row = ftable:addRow(true, {})
+    row[1]:createText(tostring(b.count) .. " x", { halign = "right" })
+    row[2]:setColSpan(3):createText(cat.byMacro[b.macro].name, {})
+  end
+  local wares = {}
+  for w in pairs(plan.consumed) do
+    if math.abs((plan.produced[w] or 0) - plan.consumed[w]) >= 1 then wares[#wares + 1] = w end
+  end
+  table.sort(wares, function(a, b) return sab.planner.Ware(a).name < sab.planner.Ware(b).name end)
+  for _, w in ipairs(wares) do
+    local row = ftable:addRow(true, {})
+    row[1]:setColSpan(2):createText(sab.planner.Ware(w).name, {})
+    row[3]:setColSpan(2):createText(string.format(tostring(ReadText(PAGE, 123)), string.format("%+d", (plan.produced[w] or 0) - plan.consumed[w])), { halign = "right" })
+  end
+  local row = ftable:addRow(true, {})
+  row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 124)), plan.workforce, plan.workforceCapacity,
+    math.floor(plan.flow.import), math.floor(plan.flow.export)), {})
+  for _, warning in ipairs(plan.warnings) do
+    row = ftable:addRow(true, {})
+    row[1]:setColSpan(4):createText(warning, { color = Color["text_warning"] })
+  end
+  return plan
+end
+
+-- The Bill tab: the manual rows.
+local function addBillRows(ftable, idle, buttonHeight)
   local menu = sab.menu
-  if not (menu.shown and menu.titleData and menu.titleData.width) then return end
-  Helper.clearDataForRefresh(menu, PANEL_LAYER)
-  local idle = sab.run == nil
-  local buttonHeight = Helper.standardButtonHeight
-
-  local width = math.floor(menu.titleData.width * 0.6)
-  local x = menu.titleData.offsetX + menu.titleData.width - width
-  local y = menu.titleData.offsetY + menu.titleData.height + 2 * Helper.borderSize
-  local frame = Helper.createFrameHandle(menu, {
-    layer = PANEL_LAYER, standardButtons = {}, width = width, x = x, y = y, autoFrameHeight = true,
-  })
-  frame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
-  sab.panelFrame = frame
-
-  local ftable = frame:addTable(4, { tabOrder = 1, highlightMode = "off", reserveScrollBar = false,
-    maxVisibleHeight = Helper.viewHeight - y - Helper.frameBorder })
-  ftable:setColWidthPercent(1, 30)
-  ftable:setColWidth(3, Helper.scaleX(50), false)
-  ftable:setColWidth(4, Helper.scaleY(buttonHeight), false)
-
-  local title = ftable:addRow(false, { fixed = true, bgColor = Color["row_title_background"] })
-  title[1]:setColSpan(4):createText(ReadText(PAGE, 100), Helper.headerRowCenteredProperties)
-
   local header = ftable:addRow(false, {})
   header[1]:createText(ReadText(PAGE, 101), Helper.subHeaderTextProperties)
   header[2]:createText(ReadText(1001, 56), Helper.subHeaderTextProperties)
@@ -1113,29 +1309,343 @@ function sab.DisplayPanel()
       sab.panelDirty = true
     end
   end
+  return #catOptions > 0
+end
 
-  local btable = frame:addTable(4, { tabOrder = 2, highlightMode = "off", reserveScrollBar = false,
-    y = ftable.properties.y + ftable:getFullHeight() + Helper.borderSize })
-  local row = btable:addRow(true, {})
-  row[1]:createButton({ height = buttonHeight, active = idle and #catOptions > 0 }):setText(ReadText(1001, 3106), { halign = "center" })
-  row[1].handlers.onClick = sab.AddBillRow
-  row[2]:createButton({ height = buttonHeight, active = idle and #sab.bill > 0 }):setText(ReadText(1001, 5706), { halign = "center" })
-  row[2].handlers.onClick = function()
-    sab.bill = {}
+function sab.DisplayPanel()
+  local menu = sab.menu
+  if not (menu.shown and menu.titleData and menu.titleData.width) then return end
+  Helper.clearDataForRefresh(menu, PANEL_LAYER)
+  local idle = sab.run == nil
+  local buttonHeight = Helper.standardButtonHeight
+  local target = sab.tab == "target" and sab.planner ~= nil
+
+  local width = math.floor(menu.titleData.width * 0.6)
+  local x = menu.titleData.offsetX + menu.titleData.width - width
+  local y = menu.titleData.offsetY + menu.titleData.height + 2 * Helper.borderSize
+  local frame = Helper.createFrameHandle(menu, {
+    layer = PANEL_LAYER, standardButtons = {}, width = width, x = x, y = y, autoFrameHeight = true,
+  })
+  frame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
+  sab.panelFrame = frame
+
+  -- the head: the title with a small show/hide arrow at its right end, then two equal tab buttons
+  local head = frame:addTable(3, { tabOrder = 1, highlightMode = "off", reserveScrollBar = false })
+  head:setColWidth(3, Helper.scaleY(buttonHeight), false)
+  local title = head:addRow(true, { bgColor = Color["row_title_background"] })
+  title[1]:setColSpan(2):createText(ReadText(PAGE, 100), Helper.headerRowCenteredProperties)
+  title[3]:createButton({ height = buttonHeight, width = buttonHeight, bgColor = Color["row_title_background"],
+    mouseOverText = ReadText(PAGE, sab.expanded and 127 or 126) })
+      :setIcon(sab.expanded and "widget_arrow_up_01" or "widget_arrow_down_01")
+  title[3].handlers.onClick = function()
+    sab.expanded = not sab.expanded
     sab.panelDirty = true
   end
-  local function canRun() return sab.run == nil and #sab.bill > 0 and sab.RouteOk() end
-  row[3]:createButton({ height = buttonHeight, active = canRun }):setText(ReadText(PAGE, 103), { halign = "center" })
-  row[3].handlers.onClick = sab.RunBill
-  row[4]:createButton({ height = buttonHeight, active = function() return sab.run ~= nil end }):setText(ReadText(PAGE, 104), { halign = "center" })
-  row[4].handlers.onClick = function() sab.StopRun("stopped") end
+  if not sab.expanded then
+    frame:display()
+    return
+  end
+  if sab.planner then
+    local tabs = head:addRow(true, {})
+    for i, tab in ipairs({ { id = "target", text = ReadText(PAGE, 109) }, { id = "bill", text = ReadText(PAGE, 110) } }) do
+      local current = tab.id == sab.tab
+      tabs[i]:createButton({ height = buttonHeight, bgColor = Color["toplevel_button_background"] })
+          :setText(tab.text, { halign = "center", color = current and Color["text_normal"] or Color["text_inactive"] })
+      if not current then
+        tabs[i].handlers.onClick = function()
+          sab.tab = tab.id
+          sab.panelDirty = true
+        end
+      end
+    end
+  end
+  local headHeight = head:getVisibleHeight() + Helper.borderSize
 
-  row = btable:addRow(true, {})
-  row[1]:createButton({ height = buttonHeight, active = sab.CanUndoRun }):setText(ReadText(PAGE, 105), { halign = "center" })
-  row[1].handlers.onClick = sab.UndoRun
-  row[2]:setColSpan(3):createText(progressText, { halign = "left", minRowHeight = buttonHeight })
+  -- the button table below needs two rows of the view
+  local ftable = frame:addTable(4, { tabOrder = 2, highlightMode = "off", reserveScrollBar = false, y = head.properties.y + headHeight,
+    maxVisibleHeight = Helper.viewHeight - y - headHeight - Helper.frameBorder - Helper.scaleY(3 * buttonHeight) })
+  ftable:setColWidthPercent(1, 30)
+  ftable:setColWidth(3, Helper.scaleX(50), false)
+  ftable:setColWidth(4, Helper.scaleY(buttonHeight), false)
+
+  local canAdd = false
+  if target then
+    addTargetRows(ftable, idle, buttonHeight, sab.PanelContext(), function() sab.panelDirty = true end)
+  else
+    canAdd = addBillRows(ftable, idle, buttonHeight)
+  end
+
+  local btable = frame:addTable(4, { tabOrder = 3, highlightMode = "off", reserveScrollBar = false,
+    y = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize })
+  local row = btable:addRow(true, {})
+  if target then
+    local function canRun() return sab.run == nil and sab.RouteOk() end
+    row[1]:createButton({ height = buttonHeight, active = canRun }):setText(ReadText(PAGE, 103), { halign = "center" })
+    row[1].handlers.onClick = sab.RunTarget
+    row[2]:createButton({ height = buttonHeight, active = function() return sab.run ~= nil end }):setText(ReadText(PAGE, 104), { halign = "center" })
+    row[2].handlers.onClick = function() sab.StopRun("stopped") end
+    row[3]:setColSpan(2):createButton({ height = buttonHeight, active = sab.CanUndoRun }):setText(ReadText(PAGE, 105), { halign = "center" })
+    row[3].handlers.onClick = sab.UndoRun
+    row = btable:addRow(true, {})
+    row[1]:setColSpan(4):createText(progressText, { halign = "left", minRowHeight = buttonHeight })
+  else
+    row[1]:createButton({ height = buttonHeight, active = idle and canAdd }):setText(ReadText(1001, 3106), { halign = "center" })
+    row[1].handlers.onClick = sab.AddBillRow
+    row[2]:createButton({ height = buttonHeight, active = idle and #sab.bill > 0 }):setText(ReadText(1001, 5706), { halign = "center" })
+    row[2].handlers.onClick = function()
+      sab.bill = {}
+      sab.panelDirty = true
+    end
+    local function canRun() return sab.run == nil and #sab.bill > 0 and sab.RouteOk() end
+    row[3]:createButton({ height = buttonHeight, active = canRun }):setText(ReadText(PAGE, 103), { halign = "center" })
+    row[3].handlers.onClick = sab.RunBill
+    row[4]:createButton({ height = buttonHeight, active = function() return sab.run ~= nil end }):setText(ReadText(PAGE, 104), { halign = "center" })
+    row[4].handlers.onClick = function() sab.StopRun("stopped") end
+    row = btable:addRow(true, {})
+    row[1]:createButton({ height = buttonHeight, active = sab.CanUndoRun }):setText(ReadText(PAGE, 105), { halign = "center" })
+    row[1].handlers.onClick = sab.UndoRun
+    row[2]:setColSpan(3):createText(progressText, { halign = "left", minRowHeight = buttonHeight })
+  end
 
   frame:display()
+end
+
+-- *** map dialog (07c) ***
+-- The Interact Menu API entry on an empty sector spot (MD cue Plot_Menu_Item) raises StationAutoBuilder.PlotDialog;
+-- the spot itself is taken from the interact menu at its open. OK reserves the plot there, sets the station-wide
+-- options and opens the build menu, which starts the run from sab.pendingTarget.
+
+local DIALOG_LAYER = 3 -- the map draws on 2, 4, 5 and 6
+local LOADOUTS = { { 0, 7990 }, { 0.1, 7910 }, { 0.5, 7911 }, { 1.0, 7912 }, { -1, 7968 } }
+
+-- "global" stands for the empty container method (a dropdown needs a non-empty id)
+local function buildMethodOptions()
+  local options = { option("global", ReadText(1001, 8367)) }
+  local n = C.GetNumPlayerBuildMethods()
+  if n > 0 then
+    local buf = ffi.new("ProductionMethodInfo[?]", n)
+    n = C.GetPlayerBuildMethods(buf, n)
+    for i = 0, n - 1 do options[#options + 1] = option(ffi.string(buf[i].id), ffi.string(buf[i].name)) end
+  end
+  return options
+end
+
+-- A cube with room for the bill's boxes, each padded by its outward clearance, whole kilometres, 4 km at least.
+function sab.EstimatePlotKm(bill)
+  sab.ReadSizes()
+  local volume = 0
+  for _, b in ipairs(bill) do
+    local s = sab.sizes[b.macro]
+    if s then
+      local m = outerMargin(b.macro) or 0
+      volume = volume + (b.count or 1) * 8 * (s.maxX + m) * (s.maxY + m) * (s.maxZ + m)
+    end
+  end
+  return math.max(4, math.ceil(volume ^ (1 / 3) * sab.plotFactor / 1000))
+end
+
+local function dialogContext(d)
+  return { set = "factory", sunlight = GetComponentData(d.sector, "sunlight") }
+end
+
+function sab.OpenPlotDialog()
+  local menu, spot = sab.mapMenu, sab.lastSpot
+  if not (sab.planner and menu and menu.shown and spot) then
+    sab.Debug("plot dialog: no planner, map or spot")
+    return
+  end
+  sab.dialog = { sector = spot.sector, x = spot.x, y = spot.y, z = spot.z, loadout = 1.0, method = "global", plotKm = nil }
+  sab.dialogDirty = true
+end
+
+function sab.CloseDialog()
+  sab.dialog, sab.dialogFrame = nil, nil
+  Helper.clearFrame(sab.mapMenu, DIALOG_LAYER)
+end
+
+function sab.DisplayDialog()
+  local menu, d = sab.mapMenu, sab.dialog
+  if not (d and menu.shown) then return end
+  Helper.clearDataForRefresh(menu, DIALOG_LAYER)
+  local buttonHeight = Helper.standardButtonHeight
+  local width = math.floor(Helper.viewWidth * 0.3)
+  local x = math.floor((Helper.viewWidth - width) / 2)
+  local y = math.floor(Helper.viewHeight * 0.1)
+  local frame = Helper.createFrameHandle(menu, {
+    layer = DIALOG_LAYER, standardButtons = {}, width = width, x = x, y = y, autoFrameHeight = true,
+  })
+  frame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
+  sab.dialogFrame = frame
+  local function dirty() sab.dialogDirty = true end
+
+  local ftable = frame:addTable(4, { tabOrder = 1, highlightMode = "off", reserveScrollBar = false,
+    maxVisibleHeight = Helper.viewHeight - y - Helper.frameBorder - Helper.scaleY(2 * buttonHeight) })
+  ftable:setColWidthPercent(1, 30)
+  ftable:setColWidth(3, Helper.scaleX(50), false)
+  ftable:setColWidth(4, Helper.scaleY(buttonHeight), false)
+  local title = ftable:addRow(false, { fixed = true, bgColor = Color["row_title_background"] })
+  title[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 130)), tostring(GetComponentData(d.sector, "name"))), Helper.headerRowCenteredProperties)
+
+  local plan = addTargetRows(ftable, true, buttonHeight, dialogContext(d), dirty, function(kit)
+    local loadouts = {}
+    for _, l in ipairs(LOADOUTS) do loadouts[#loadouts + 1] = option(l[1], ReadText(1001, l[2])) end
+    kit.dropdown(kit.input(ReadText(1001, 7967)), loadouts, d.loadout, function(id) d.loadout = tonumber(id) end)
+    kit.dropdown(kit.input(ReadText(1001, 11298)), buildMethodOptions(), d.method, function(id) d.method = id end)
+  end)
+
+  local km = d.plotKm or (plan and sab.EstimatePlotKm(sab.planner.Bill(plan))) or 4
+  local kit = rowKit(ftable, true, buttonHeight, dirty)
+  local row = kit.input(ReadText(1001, 11285) .. " (" .. ReadText(1001, 108) .. ")")
+  kit.number(row, km, function(v) if v and v >= 1 then d.plotKm = math.ceil(v) end end)
+  local size = km * 1000
+  local loc = ffi.new("UIPosRot")
+  loc.x, loc.y, loc.z = d.x, d.y, d.z
+  local price = tonumber(C.GetBuildPlotPrice(d.sector, loc, size, size, size, "player")) or 0
+  row = kit.input(ReadText(1001, 2808))
+  row[2]:setColSpan(3):createText(ConvertMoneyString(price, false, true, nil, true) .. " " .. ReadText(1001, 101),
+    { halign = "right", minRowHeight = buttonHeight, color = price > GetPlayerMoney() and Color["text_warning"] or nil })
+  if d.error then
+    row = ftable:addRow(true, {})
+    row[1]:setColSpan(4):createText(d.error, { color = Color["text_warning"] })
+  end
+
+  local btable = frame:addTable(2, { tabOrder = 2, highlightMode = "off", reserveScrollBar = false,
+    y = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize })
+  row = btable:addRow(true, {})
+  row[1]:createButton({ height = buttonHeight, active = plan ~= nil }):setText(ReadText(1001, 14), { halign = "center" })
+  row[1].handlers.onClick = sab.ConfirmDialog
+  row[2]:createButton({ height = buttonHeight }):setText(ReadText(1001, 64), { halign = "center" })
+  row[2].handlers.onClick = sab.CloseDialog
+  frame:display()
+end
+
+-- OK: reserve the plot at the spot, pay it where vanilla would, set the station-wide options, open the build menu.
+function sab.ConfirmDialog()
+  local menu, d = sab.mapMenu, sab.dialog
+  if not d then return end
+  local spec = sab.TargetSpec(dialogContext(d))
+  local ok, plan = pcall(sab.planner.Plan, spec)
+  if not ok then
+    sab.Error("plan failed: %s", tostring(plan))
+    return
+  end
+  local km = d.plotKm or sab.EstimatePlotKm(sab.planner.Bill(plan))
+  local size = km * 1000
+  local loc = ffi.new("UIPosRot")
+  loc.x, loc.y, loc.z = d.x, d.y, d.z
+  local station = C.ReserveBuildPlot(d.sector, "player", "factory", loc, size, size, size)
+  if station == 0 then
+    d.error = ReadText(PAGE, 129)
+    sab.dialogDirty = true
+    sab.Debug("plot of %d km refused at %s %.0f %.0f %.0f", km, tostring(d.sector), d.x, d.y, d.z)
+    return
+  end
+  station = ConvertStringTo64Bit(tostring(station))
+  if GetComponentData(d.sector, "isplayerowned") then
+    C.PayBuildPlotSize(station, { x = size, y = size, z = size }, { x = d.x, y = d.y, z = d.z })
+  end
+  C.SetStationModuleLoadoutLevel(station, d.loadout)
+  local method = d.method == "global" and "" or d.method
+  local buildstorage = ConvertIDTo64Bit(GetComponentData(station, "buildstorage")) or 0
+  if buildstorage ~= 0 then C.SetContainerBuildMethod(buildstorage, method) end
+  sab.pendingTarget = { station = station, spec = spec, method = buildstorage == 0 and method or nil, since = getElapsedTime() }
+  sab.Debug("plot reserved: station %s, %d km, loadout %s, method '%s', build storage %s", tostring(station), km,
+    tostring(d.loadout), method, tostring(buildstorage))
+  sab.dialog, sab.dialogFrame = nil, nil
+  AddUITriggeredEvent(menu.name, "initiateconstruction_station", station)
+  Helper.closeMenuAndOpenNewMenu(menu, MENU_NAME, { 0, 0, station })
+  menu.cleanup()
+end
+
+-- The build menu opened on the reserved plot: start the planned run once the module sizes are in (5 s at most).
+function sab.StartPending()
+  local menu, p = sab.menu, sab.pendingTarget
+  local age = getElapsedTime() - p.since
+  if menu.container ~= p.station then
+    if age > 30 then
+      sab.pendingTarget = nil
+      sab.Debug("pending target dropped: another station opened")
+    end
+    return
+  end
+  if not sab.RouteOk() then
+    sab.pendingTarget = nil
+    return
+  end
+  local bill = sab.planner.Bill(sab.planner.Plan(p.spec))
+  sab.ReadSizes()
+  for _, b in ipairs(bill) do
+    if not sab.sizes[b.macro] and age < 5 then return end
+  end
+  sab.pendingTarget = nil
+  if p.method and menu.buildstorage ~= 0 then C.SetContainerBuildMethod(menu.buildstorage, p.method) end
+  ---@diagnostic disable-next-line: inject-field
+  p.spec.station, p.spec.set = menu.container, menu.set
+  sab.expanded, sab.tab = true, "target"
+  if sab.planner.Run(p.spec) then sab.panelDirty = true end
+end
+
+local function findMenu(name)
+  for _, menu in ipairs(Menus) do
+    if menu.name == name then return menu end
+  end
+end
+
+local function hookInteractMenu()
+  local menu = findMenu("InteractMenu")
+  if not menu then
+    sab.Error("menu InteractMenu not found")
+    return
+  end
+  local onShowMenu = menu.onShowMenu
+  menu.onShowMenu = function(...)
+    onShowMenu(...)
+    local sector, offset = menu.offsetcomponent, menu.offset
+    if sector and sector ~= 0 and offset and C.IsComponentClass(sector, "sector") then
+      sab.lastSpot = { sector = ConvertStringTo64Bit(tostring(sector)), x = offset.x, y = offset.y, z = offset.z }
+    else
+      sab.lastSpot = nil
+    end
+  end
+end
+
+local function hookMapMenu()
+  local menu = findMenu("MapMenu")
+  if not menu then
+    sab.Error("menu MapMenu not found")
+    return
+  end
+  sab.mapMenu = menu
+  local onUpdate = menu.onUpdate
+  menu.onUpdate = function(...)
+    onUpdate(...)
+    if sab.dialogDirty and menu.shown then
+      sab.dialogDirty = nil
+      local ok, err = pcall(sab.DisplayDialog)
+      if not ok then sab.Error("dialog failed: %s", tostring(err)) end
+    end
+  end
+  local viewCreated = menu.viewCreated
+  menu.viewCreated = function(layer, ...)
+    if layer == DIALOG_LAYER then
+      sab.dialogTables = { ... }
+      return
+    end
+    return viewCreated(layer, ...)
+  end
+  local cleanup = menu.cleanup
+  menu.cleanup = function(...)
+    sab.dialog, sab.dialogDirty, sab.dialogFrame, sab.dialogTables = nil, nil, nil, nil
+    return cleanup(...)
+  end
+  local onCloseElement = menu.onCloseElement
+  menu.onCloseElement = function(...)
+    if sab.dialog then
+      sab.CloseDialog()
+      return
+    end
+    return onCloseElement(...)
+  end
 end
 
 -- *** build menu hooks ***
@@ -1160,6 +1670,12 @@ local function hookMenu()
       if not ok then
         sab.Error("tick failed: %s", tostring(err))
         sab.run = nil
+      end
+    elseif sab.pendingTarget and menu.shown and menu.holomap ~= 0 then
+      local ok, err = pcall(sab.StartPending)
+      if not ok then
+        sab.Error("pending start failed: %s", tostring(err))
+        sab.pendingTarget = nil
       end
     end
     if sab.panelDirty and menu.shown then
@@ -1194,6 +1710,7 @@ local function hookMenu()
   local cleanup = menu.cleanup
   menu.cleanup = function(...)
     sab.run, sab.lastRun, sab.panelDirty, sab.panelTables, sab.panelFrame = nil, nil, nil, nil, nil
+    sab.expanded = false
     return cleanup(...)
   end
   local onCloseElement = menu.onCloseElement
@@ -1204,15 +1721,19 @@ local function hookMenu()
   local onShowMenu = menu.onShowMenu
   menu.onShowMenu = function(...)
     onShowMenu(...)
-    local ok, err = pcall(sab.RequestSizes)
+    local ok, err = pcall(function() sab.RequestSizes(sab.MenuMacros()) end)
     if not ok then sab.Error("size request failed: %s", tostring(err)) end
   end
 end
 
 local function init()
   RegisterEvent("StationAutoBuilder.ConfigChanged", sab.ReadConfig)
+  RegisterEvent("StationAutoBuilder.PlotDialog", sab.OpenPlotDialog)
   sab.ReadConfig()
   hookMenu()
+  hookInteractMenu()
+  hookMapMenu()
+  if sab.planner then sab.RequestSizes(sab.planner.AllMacros()) end
   sab.Debug("initialised")
 end
 

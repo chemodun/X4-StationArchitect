@@ -39,11 +39,22 @@
       </actions>
     </library>
 
-    <cue name="Init" version="1">
+    <cue name="Init" version="2">
       <actions>
         <include_actions ref="Ensure_Config" />
+        <set_value name="player.entity.$StationAutoBuilderBBox" exact="table[]" />
       </actions>
       <cues>
+        <!-- module data is read from the game of this session, never carried over in a save -->
+        <cue name="Reset_Module_Data" instantiate="true" version="1">
+          <conditions>
+            <event_game_loaded />
+          </conditions>
+          <actions>
+            <set_value name="player.entity.$StationAutoBuilderBBox" exact="table[]" />
+          </actions>
+        </cue>
+
         <cue name="Register_Menu" instantiate="true" version="1">
           <conditions>
             <event_cue_signalled cue="@md.Simple_Menu_API.Reloaded" />
@@ -100,7 +111,7 @@
         </cue>
 
         <!-- The Lua side has no macro bounding box: it asks per macro, the answer lands in the player's blackboard -->
-        <cue name="BBox" instantiate="true" version="1">
+        <cue name="BBox" instantiate="true" version="2">
           <conditions>
             <event_object_signalled object="player.entity" param="'StationAutoBuilder.BBox'" />
             <check_value value="typeof event.param2 == datatype.string" />
@@ -111,6 +122,8 @@
             <do_if value="@player.entity.$StationAutoBuilderBBox == null">
               <set_value name="player.entity.$StationAutoBuilderBBox" exact="table[]" />
             </do_if>
+            <!-- the Lua library entry reports 0 docks for piers -->
+            <set_value name="$pierDocks" exact="if @$macro.numpierdocks != null then $macro.numpierdocks else 0" />
             <do_if value="$macro.boundingbox.exists">
               <set_value name="player.entity.$StationAutoBuilderBBox.{$key}" exact="table[
                 $maxX = $macro.boundingbox.max.x,
@@ -119,13 +132,43 @@
                 $cX = $macro.boundingbox.center.x,
                 $cY = $macro.boundingbox.center.y,
                 $cZ = $macro.boundingbox.center.z,
+                $pierDocks = $pierDocks,
               ]" />
             </do_if>
             <do_else>
-              <set_value name="player.entity.$StationAutoBuilderBBox.{$key}" exact="table[$maxX = 0, $maxY = 0, $maxZ = 0, $cX = 0, $cY = 0, $cZ = 0]" />
+              <set_value name="player.entity.$StationAutoBuilderBBox.{$key}" exact="table[$maxX = 0, $maxY = 0, $maxZ = 0, $cX = 0, $cY = 0, $cZ = 0, $pierDocks = $pierDocks]" />
             </do_else>
             <include_actions ref="ReadDebugChances" />
             <debug_text text="'StationAutoBuilder: bbox of %s: %s'.[event.param2, player.entity.$StationAutoBuilderBBox.{$key}]" chance="$traceChance" />
+            <include_actions ref="ClearDebugChances" />
+          </actions>
+        </cue>
+
+        <!-- Map context menu on an empty sector spot: the Lua side took the spot at the menu's open -->
+        <cue name="Plot_Menu_Item" instantiate="true" version="1">
+          <conditions>
+            <event_cue_signalled cue="md.Interact_Menu_API.Get_Actions" />
+            <check_value value="@event.param.$offsetcomponent.isclass.sector and event.param.$offset?" />
+            <check_value value="@event.param.$object == null or event.param.$object == event.param.$offsetcomponent" />
+          </conditions>
+          <actions>
+            <signal_cue_instantly cue="md.Interact_Menu_API.Add_Action" param="table[
+              $id       = 'station_auto_builder_plot',
+              $section  = 'main',
+              $text     = {1972092448, 128},
+              $callback = Plot_Dialog,
+            ]" />
+          </actions>
+        </cue>
+
+        <cue name="Plot_Dialog" instantiate="true" version="1">
+          <conditions>
+            <event_cue_signalled />
+          </conditions>
+          <actions>
+            <raise_lua_event name="'StationAutoBuilder.PlotDialog'" />
+            <include_actions ref="ReadDebugChances" />
+            <debug_text text="'StationAutoBuilder: plot dialog requested in %s at %s'.[@event.param.$offsetcomponent.debugname, @event.param.$offset]" chance="$debugChance" />
             <include_actions ref="ClearDebugChances" />
           </actions>
         </cue>
