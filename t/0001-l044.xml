@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Station Auto Builder - English text, page 1972092448 -->
+<diff>
+  <add sel="/language">
+    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
+      <t id="1">Station Auto Builder</t>
+      <t id="2">Fills your station's build plan from a bill of modules inside the build menu, one module at a time, with the game's own editor snapping each one into place.</t>
+
+      <!-- Panel in the build menu (100) -->
+      <t id="100">Auto Planner</t>
+      <t id="101">Category</t>
+      <t id="102">Count</t>
+      <t id="103">Run</t>
+      <t id="104">Stop</t>
+      <t id="105">Undo run</t>
+      <t id="106">Placed %s, failed %s, left %s</t>
+      <t id="107">Last run: %s placed, %s failed</t>
+      <t id="108">The editor is not reachable on this game build</t>
+
+      <!-- Section: Station Auto Builder (90000) -->
+      <t id="90000">Station Auto Builder</t>
+
+      <!-- Section: Debug (90900) -->
+      <t id="90900">Debug</t>
+      <t id="90910">Debug Level</t>
+      <t id="90911">None</t>
+      <t id="90912">Debug</t>
+      <t id="90913">Trace</t>
+    </page>
+  </add>
+</diff>

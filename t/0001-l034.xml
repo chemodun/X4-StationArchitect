@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Station Auto Builder - Spanish text, page 1972092448 -->
+<diff>
+  <add sel="/language">
+    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
+      <t id="1">Constructor automático de estaciones</t>
+      <t id="2">Rellena el plan de construcción de tu estación a partir de una lista de módulos dentro del menú de construcción, módulo a módulo, y el propio editor del juego encaja cada uno en su sitio.</t>
+
+      <!-- Panel in the build menu (100) -->
+      <t id="100">Planificador automático</t>
+      <t id="101">Categoría</t>
+      <t id="102">Cantidad</t>
+      <t id="103">Ejecutar</t>
+      <t id="104">Detener</t>
+      <t id="105">Deshacer ejecución</t>
+      <t id="106">Colocados %s, fallidos %s, pendientes %s</t>
+      <t id="107">Última ejecución: %s colocados, %s fallidos</t>
+      <t id="108">El editor no es accesible en esta versión del juego</t>
+
+      <!-- Section: Station Auto Builder (90000) -->
+      <t id="90000">Constructor automático de estaciones</t>
+
+      <!-- Section: Debug (90900) -->
+      <t id="90900">Depuración</t>
+      <t id="90910">Nivel de depuración</t>
+      <t id="90911">Ninguno</t>
+      <t id="90912">Depuración</t>
+      <t id="90913">Rastreo</t>
+    </page>
+  </add>
+</diff>

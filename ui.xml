@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon name="station_auto_builder" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../ui/core/addon.xsd">
+  <environment type="menus">
+    <dependency name="sn_mod_support_apis" />
+    <dependency name="ego_detailmonitor" />
+    <dependency name="lua_log_api" />
+    <file name="ui/station_auto_builder.lua" />
+  </environment>
+</addon>

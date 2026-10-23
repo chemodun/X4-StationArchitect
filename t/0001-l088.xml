@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Station Auto Builder - Chinese Traditional text, page 1972092448 -->
+<diff>
+  <add sel="/language">
+    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
+      <t id="1">空間站自動建造器</t>
+      <t id="2">在建造選單中按模組清單逐個填充空間站的建造方案，由遊戲自帶的編輯器將每個模組吸附到位。</t>
+
+      <!-- Panel in the build menu (100) -->
+      <t id="100">自動規劃器</t>
+      <t id="101">類別</t>
+      <t id="102">數量</t>
+      <t id="103">執行</t>
+      <t id="104">停止</t>
+      <t id="105">復原本次執行</t>
+      <t id="106">已放置 %s，失敗 %s，剩餘 %s</t>
+      <t id="107">上次執行：已放置 %s，失敗 %s</t>
+      <t id="108">此遊戲版本無法存取編輯器</t>
+
+      <!-- Section: Station Auto Builder (90000) -->
+      <t id="90000">空間站自動建造器</t>
+
+      <!-- Section: Debug (90900) -->
+      <t id="90900">調試</t>
+      <t id="90910">調試級別</t>
+      <t id="90911">無</t>
+      <t id="90912">調試</t>
+      <t id="90913">追蹤</t>
+    </page>
+  </add>
+</diff>

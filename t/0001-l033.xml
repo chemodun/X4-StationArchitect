@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Station Auto Builder - French text, page 1972092448 -->
+<diff>
+  <add sel="/language">
+    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
+      <t id="1">Constructeur automatique de station</t>
+      <t id="2">Remplit le plan de construction de votre station à partir d'une liste de modules, dans le menu de construction, module par module, l'éditeur du jeu plaçant lui-même chacun d'eux.</t>
+
+      <!-- Panel in the build menu (100) -->
+      <t id="100">Planificateur auto</t>
+      <t id="101">Catégorie</t>
+      <t id="102">Nombre</t>
+      <t id="103">Lancer</t>
+      <t id="104">Arrêter</t>
+      <t id="105">Annuler l'exécution</t>
+      <t id="106">Placés %s, échoués %s, restants %s</t>
+      <t id="107">Dernière exécution : %s placés, %s échoués</t>
+      <t id="108">L'éditeur n'est pas accessible sur cette version du jeu</t>
+
+      <!-- Section: Station Auto Builder (90000) -->
+      <t id="90000">Constructeur automatique de station</t>
+
+      <!-- Section: Debug (90900) -->
+      <t id="90900">Débogage</t>
+      <t id="90910">Niveau de débogage</t>
+      <t id="90911">Aucun</t>
+      <t id="90912">Débogage</t>
+      <t id="90913">Trace</t>
+    </page>
+  </add>
+</diff>

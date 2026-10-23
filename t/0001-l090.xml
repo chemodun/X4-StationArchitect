@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Station Auto Builder - Turkish text, page 1972092448 -->
+<diff>
+  <add sel="/language">
+    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
+      <t id="1">Otomatik İstasyon İnşa Aracı</t>
+      <t id="2">İstasyonunuzun inşa planını, inşa menüsünün içinde bir modül listesinden modül modül doldurur; oyunun kendi düzenleyicisi her modülü yerine oturtur.</t>
+
+      <!-- Panel in the build menu (100) -->
+      <t id="100">Otomatik Planlayıcı</t>
+      <t id="101">Kategori</t>
+      <t id="102">Adet</t>
+      <t id="103">Çalıştır</t>
+      <t id="104">Durdur</t>
+      <t id="105">Çalıştırmayı geri al</t>
+      <t id="106">Yerleştirilen %s, başarısız %s, kalan %s</t>
+      <t id="107">Son çalıştırma: %s yerleştirildi, %s başarısız</t>
+      <t id="108">Bu oyun sürümünde düzenleyiciye erişilemiyor</t>
+
+      <!-- Section: Station Auto Builder (90000) -->
+      <t id="90000">Otomatik İstasyon İnşa Aracı</t>
+
+      <!-- Section: Debug (90900) -->
+      <t id="90900">Hata Ayıklama</t>
+      <t id="90910">Hata Ayıklama Seviyesi</t>
+      <t id="90911">Yok</t>
+      <t id="90912">Hata Ayıklama</t>
+      <t id="90913">İzleme</t>
+    </page>
+  </add>
+</diff>

@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="StationAutoBuilder" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="md.xsd">
+
+  <cues>
+    <library name="ReadDebugChances" purpose="include_actions">
+      <actions>
+        <set_value name="$sabDebugLevel" exact="if @player.entity.$StationAutoBuilderConfig.$debugLevel != null
+          then player.entity.$StationAutoBuilderConfig.$debugLevel else 'none'" />
+        <set_value name="$debugChance" exact="if @$sabDebugLevel == null or @$sabDebugLevel == 'none' then 0 else 100" />
+        <set_value name="$traceChance" exact="if @$sabDebugLevel == 'trace' then 100 else 0" />
+        <remove_value name="$sabDebugLevel" />
+      </actions>
+    </library>
+
+    <library name="ClearDebugChances" purpose="include_actions">
+      <actions>
+        <remove_value name="$debugChance" />
+        <remove_value name="$traceChance" />
+      </actions>
+    </library>
+
+    <!-- The Lua side reads this table on every change -->
+    <library name="Ensure_Config" purpose="include_actions">
+      <actions>
+        <set_value name="$cfg" exact="table[
+          $debugLevel = 'none',
+        ]" />
+        <do_if value="@player.entity.$StationAutoBuilderConfig == null">
+          <set_value name="player.entity.$StationAutoBuilderConfig" exact="$cfg" />
+        </do_if>
+        <do_else>
+          <do_for_each name="$key" in="$cfg">
+            <do_if value="not player.entity.$StationAutoBuilderConfig.{$key}?">
+              <set_value name="player.entity.$StationAutoBuilderConfig.{$key}" exact="$cfg.{$key}" />
+            </do_if>
+          </do_for_each>
+        </do_else>
+        <remove_value name="$cfg" />
+      </actions>
+    </library>
+
+    <cue name="Init" version="1">
+      <actions>
+        <include_actions ref="Ensure_Config" />
+      </actions>
+      <cues>
+        <cue name="Register_Menu" instantiate="true" version="1">
+          <conditions>
+            <event_cue_signalled cue="@md.Simple_Menu_API.Reloaded" />
+            <check_value value="@md.Options_Helper.Add_Dropdown.exists" />
+          </conditions>
+          <actions>
+            <signal_cue_instantly cue="md.Simple_Menu_API.Register_Options_Menu"
+              param="table[
+                $id      = 'station_auto_builder_options_menu',
+                $columns = 12,
+                $title   = {1972092448, 1},
+                $onOpen  = Options_Menu,
+              ]" />
+          </actions>
+        </cue>
+
+        <cue name="Options_Menu" instantiate="true" version="1">
+          <conditions>
+            <event_cue_signalled />
+          </conditions>
+          <actions>
+            <include_actions ref="Ensure_Config" />
+            <set_value name="$cfg" exact="player.entity.$StationAutoBuilderConfig" />
+
+            <run_actions ref="md.Options_Helper.Add_Title_Row">
+              <param name="title" value="{1972092448, 90900}" />
+            </run_actions>
+            <set_value name="$debugLevelOptions" exact="[
+              table[$text = {1972092448, 90911}, $value = 'none'],
+              table[$text = {1972092448, 90912}, $value = 'debug'],
+              table[$text = {1972092448, 90913}, $value = 'trace']
+            ]" />
+            <set_value name="$debugLevelIndexes" exact="['none', 'debug', 'trace']" />
+            <set_value name="$debugLevelCurrentIndex" exact="$debugLevelIndexes.indexof.{@$cfg.$debugLevel}" />
+            <do_if value="$debugLevelCurrentIndex == 0">
+              <set_value name="$debugLevelCurrentIndex" exact="1" />
+            </do_if>
+            <run_actions ref="md.Options_Helper.Add_Dropdown">
+              <param name="id" value="'debugLevel'" />
+              <param name="options" value="$debugLevelOptions" />
+              <param name="currentIndex" value="$debugLevelCurrentIndex" />
+              <param name="col" value="1" />
+              <param name="textColSpan" value="6" />
+              <param name="text" value="{1972092448, 90910}" />
+              <param name="dropdownColSpan" value="6" />
+              <param name="handle" value="Handle_Dropdown_Changed" />
+            </run_actions>
+
+            <remove_value name="$debugLevelOptions" />
+            <remove_value name="$debugLevelIndexes" />
+            <remove_value name="$debugLevelCurrentIndex" />
+            <remove_value name="$cfg" />
+          </actions>
+        </cue>
+
+        <!-- The Lua side has no macro bounding box: it asks per macro, the answer lands in the player's blackboard -->
+        <cue name="BBox" instantiate="true" version="1">
+          <conditions>
+            <event_object_signalled object="player.entity" param="'StationAutoBuilder.BBox'" />
+            <check_value value="typeof event.param2 == datatype.string" />
+          </conditions>
+          <actions>
+            <set_value name="$macro" exact="macro.{event.param2}" />
+            <set_value name="$key" exact="'$%s'.[event.param2]" />
+            <do_if value="@player.entity.$StationAutoBuilderBBox == null">
+              <set_value name="player.entity.$StationAutoBuilderBBox" exact="table[]" />
+            </do_if>
+            <do_if value="$macro.boundingbox.exists">
+              <set_value name="player.entity.$StationAutoBuilderBBox.{$key}" exact="table[
+                $maxX = $macro.boundingbox.max.x,
+                $maxY = $macro.boundingbox.max.y,
+                $maxZ = $macro.boundingbox.max.z,
+                $cX = $macro.boundingbox.center.x,
+                $cY = $macro.boundingbox.center.y,
+                $cZ = $macro.boundingbox.center.z,
+              ]" />
+            </do_if>
+            <do_else>
+              <set_value name="player.entity.$StationAutoBuilderBBox.{$key}" exact="table[$maxX = 0, $maxY = 0, $maxZ = 0, $cX = 0, $cY = 0, $cZ = 0]" />
+            </do_else>
+            <include_actions ref="ReadDebugChances" />
+            <debug_text text="'StationAutoBuilder: bbox of %s: %s'.[event.param2, player.entity.$StationAutoBuilderBBox.{$key}]" chance="$traceChance" />
+            <include_actions ref="ClearDebugChances" />
+          </actions>
+        </cue>
+
+        <cue name="Handle_Dropdown_Changed" instantiate="true" version="1">
+          <conditions>
+            <event_cue_signalled />
+          </conditions>
+          <actions>
+            <set_value name="$resultTable" exact="player.entity.$StationAutoBuilderConfig" />
+            <include_actions ref="md.Options_Helper.Process_Dropdown_Changed" />
+            <remove_value name="$resultTable" />
+            <raise_lua_event name="'StationAutoBuilder.ConfigChanged'" />
+            <include_actions ref="ReadDebugChances" />
+            <debug_text text="'StationAutoBuilder: Options: %s set to %s'.[event.param.$echo.$valueId, @event.param.$option.$value]" chance="$debugChance" />
+            <include_actions ref="ClearDebugChances" />
+          </actions>
+        </cue>
+      </cues>
+    </cue>
+  </cues>
+</mdscript>

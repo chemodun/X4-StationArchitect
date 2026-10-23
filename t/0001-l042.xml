@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Station Auto Builder - Czech text, page 1972092448 -->
+<diff>
+  <add sel="/language">
+    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
+      <t id="1">Automatický stavitel stanic</t>
+      <t id="2">Doplní stavební plán vaší stanice podle seznamu modulů přímo v nabídce stavby, modul po modulu, a vlastní editor hry každý z nich sám přichytí na místo.</t>
+
+      <!-- Panel in the build menu (100) -->
+      <t id="100">Automatický plánovač</t>
+      <t id="101">Kategorie</t>
+      <t id="102">Počet</t>
+      <t id="103">Spustit</t>
+      <t id="104">Zastavit</t>
+      <t id="105">Vrátit běh</t>
+      <t id="106">Umístěno %s, selhalo %s, zbývá %s</t>
+      <t id="107">Poslední běh: %s umístěno, %s selhalo</t>
+      <t id="108">Editor není v této verzi hry dostupný</t>
+
+      <!-- Section: Station Auto Builder (90000) -->
+      <t id="90000">Automatický stavitel stanic</t>
+
+      <!-- Section: Debug (90900) -->
+      <t id="90900">Ladění</t>
+      <t id="90910">Úroveň ladění</t>
+      <t id="90911">Žádná</t>
+      <t id="90912">Ladění</t>
+      <t id="90913">Trasování</t>
+    </page>
+  </add>
+</diff>

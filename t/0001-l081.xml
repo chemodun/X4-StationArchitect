@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Station Auto Builder - Japanese text, page 1972092448 -->
+<diff>
+  <add sel="/language">
+    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
+      <t id="1">ステーション自動ビルダー</t>
+      <t id="2">建造メニューの中でモジュールの一覧からステーションの建造計画を1つずつ埋めていき、ゲーム自身のエディターが各モジュールを所定の位置にスナップします。</t>
+
+      <!-- Panel in the build menu (100) -->
+      <t id="100">自動プランナー</t>
+      <t id="101">カテゴリ</t>
+      <t id="102">数量</t>
+      <t id="103">実行</t>
+      <t id="104">停止</t>
+      <t id="105">実行を取り消す</t>
+      <t id="106">配置 %s、失敗 %s、残り %s</t>
+      <t id="107">前回の実行: 配置 %s、失敗 %s</t>
+      <t id="108">このゲームビルドではエディターにアクセスできません</t>
+
+      <!-- Section: Station Auto Builder (90000) -->
+      <t id="90000">ステーション自動ビルダー</t>
+
+      <!-- Section: Debug (90900) -->
+      <t id="90900">デバッグ</t>
+      <t id="90910">デバッグレベル</t>
+      <t id="90911">なし</t>
+      <t id="90912">デバッグ</t>
+      <t id="90913">トレース</t>
+    </page>
+  </add>
+</diff>

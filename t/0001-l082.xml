@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Station Auto Builder - Korean text, page 1972092448 -->
+<diff>
+  <add sel="/language">
+    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
+      <t id="1">스테이션 자동 빌더</t>
+      <t id="2">건조 메뉴 안에서 모듈 목록을 바탕으로 스테이션 건조 계획을 모듈 하나씩 채우며, 게임 자체 편집기가 각 모듈을 제자리에 맞춥니다.</t>
+
+      <!-- Panel in the build menu (100) -->
+      <t id="100">자동 플래너</t>
+      <t id="101">분류</t>
+      <t id="102">수량</t>
+      <t id="103">실행</t>
+      <t id="104">중지</t>
+      <t id="105">실행 취소</t>
+      <t id="106">배치 %s, 실패 %s, 남음 %s</t>
+      <t id="107">마지막 실행: 배치 %s, 실패 %s</t>
+      <t id="108">이 게임 빌드에서는 편집기에 접근할 수 없습니다</t>
+
+      <!-- Section: Station Auto Builder (90000) -->
+      <t id="90000">스테이션 자동 빌더</t>
+
+      <!-- Section: Debug (90900) -->
+      <t id="90900">디버그</t>
+      <t id="90910">디버그 수준</t>
+      <t id="90911">없음</t>
+      <t id="90912">디버그</t>
+      <t id="90913">추적</t>
+    </page>
+  </add>
+</diff>

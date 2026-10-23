@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<content
+  id=""
+  name="Station Auto Builder"
+  author="Chem O`Dun"
+  version="100"
+  date="2026-10-23"
+  save="false"
+  sync="false"
+  enabled="true"
+  lastupdate=""
+  description="Fills your station's build plan from a bill of modules inside the build menu, one module at a time, with the game's own editor snapping each one into place.">
+  <text language="7"
+    description="Заполняет план строительства станции по списку модулей прямо в меню строительства, по одному модулю за раз, а штатный редактор игры сам пристыковывает каждый из них."></text>
+  <!-- French -->
+  <text language="33"
+    description="Remplit le plan de construction de votre station à partir d'une liste de modules, dans le menu de construction, module par module, l'éditeur du jeu plaçant lui-même chacun d'eux."></text>
+  <!-- Spanish -->
+  <text language="34"
+    description="Rellena el plan de construcción de tu estación a partir de una lista de módulos dentro del menú de construcción, módulo a módulo, y el propio editor del juego encaja cada uno en su sitio."></text>
+  <!-- Italian -->
+  <text language="39"
+    description="Riempie il piano di costruzione della tua stazione da un elenco di moduli, dentro il menu di costruzione, un modulo alla volta, con l'editor del gioco che aggancia ciascuno al suo posto."></text>
+  <!-- Czech -->
+  <text language="42"
+    description="Doplní stavební plán vaší stanice podle seznamu modulů přímo v nabídce stavby, modul po modulu, a vlastní editor hry každý z nich sám přichytí na místo."></text>
+  <!-- English -->
+  <text language="44"
+    description="Fills your station's build plan from a bill of modules inside the build menu, one module at a time, with the game's own editor snapping each one into place."></text>
+  <!-- Polish -->
+  <text language="48"
+    description="Wypełnia plan budowy twojej stacji z listy modułów w menu budowy, moduł po module, a własny edytor gry sam dopasowuje każdy z nich."></text>
+  <!-- German -->
+  <text language="49"
+    description="Füllt den Bauplan Ihrer Station aus einer Modulliste direkt im Baumenü, Modul für Modul, wobei der spieleigene Editor jedes Modul selbst einrastet."></text>
+  <!-- Portuguese -->
+  <text language="55"
+    description="Preenche o plano de construção da sua estação a partir de uma lista de módulos dentro do menu de construção, um módulo de cada vez, com o próprio editor do jogo encaixando cada um no lugar."></text>
+  <!-- Japanese -->
+  <text language="81"
+    description="建造メニューの中でモジュールの一覧からステーションの建造計画を1つずつ埋めていき、ゲーム自身のエディターが各モジュールを所定の位置にスナップします。"></text>
+  <!-- Korean -->
+  <text language="82"
+    description="건조 메뉴 안에서 모듈 목록을 바탕으로 스테이션 건조 계획을 모듈 하나씩 채우며, 게임 자체 편집기가 각 모듈을 제자리에 맞춥니다."></text>
+  <!-- Chinese Simplified -->
+  <text language="86"
+    description="在建造菜单中按模块清单逐个填充空间站的建造方案，由游戏自带的编辑器将每个模块吸附到位。"></text>
+  <!-- Chinese Traditional -->
+  <text language="88"
+    description="在建造選單中按模組清單逐個填充空間站的建造方案，由遊戲自帶的編輯器將每個模組吸附到位。"></text>
+  <!-- Turkish -->
+  <text language="90"
+    description="İstasyonunuzun inşa planını, inşa menüsünün içinde bir modül listesinden modül modül doldurur; oyunun kendi düzenleyicisi her modülü yerine oturtur."></text>
+  <!-- Bulgarian -->
+  <text language="359"
+    description="Попълва строителния план на вашата станция по списък с модули направо в менюто за строеж, модул по модул, като собственият редактор на играта сам закача всеки от тях на мястото му."></text>
+  <!-- Ukrainian -->
+  <text language="380"
+    description="Заповнює план будівництва вашої станції за списком модулів прямо в меню будівництва, модуль за модулем, а власний редактор гри сам пристиковує кожен із них."></text>
+  <dependency version="900"></dependency>
+  <dependency id="ws_2042901274" optional="false" name="SirNukes Mod Support APIs" version="195"></dependency>
+  <dependency id="ws_3715253556" optional="false" name="Options Helper" version="110"></dependency>
+  <dependency id="ws_3770927339" optional="false" name="Print Extension List" version="100"></dependency>
+  <dependency id="ws_3823580916" optional="false" name="Lua Log API" version="100"></dependency>
+</content>

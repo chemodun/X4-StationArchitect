@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Station Auto Builder - Polish text, page 1972092448 -->
+<diff>
+  <add sel="/language">
+    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
+      <t id="1">Automatyczny budowniczy stacji</t>
+      <t id="2">Wypełnia plan budowy twojej stacji z listy modułów w menu budowy, moduł po module, a własny edytor gry sam dopasowuje każdy z nich.</t>
+
+      <!-- Panel in the build menu (100) -->
+      <t id="100">Automatyczny planer</t>
+      <t id="101">Kategoria</t>
+      <t id="102">Liczba</t>
+      <t id="103">Uruchom</t>
+      <t id="104">Zatrzymaj</t>
+      <t id="105">Cofnij przebieg</t>
+      <t id="106">Umieszczono %s, nieudane %s, pozostało %s</t>
+      <t id="107">Ostatni przebieg: %s umieszczono, %s nieudanych</t>
+      <t id="108">Edytor jest niedostępny w tej wersji gry</t>
+
+      <!-- Section: Station Auto Builder (90000) -->
+      <t id="90000">Automatyczny budowniczy stacji</t>
+
+      <!-- Section: Debug (90900) -->
+      <t id="90900">Debugowanie</t>
+      <t id="90910">Poziom debugowania</t>
+      <t id="90911">Brak</t>
+      <t id="90912">Debugowanie</t>
+      <t id="90913">Ślad</t>
+    </page>
+  </add>
+</diff>
