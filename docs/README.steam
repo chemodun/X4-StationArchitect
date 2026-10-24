@@ -13,7 +13,7 @@ Building a large station by hand means dragging every module into place; the gam
 [list]
 [*] Works only inside the open build menu of a station you own.
 [*] Windows version of the game only: the placement route reads the game's own editor in memory, which the native Linux build does not expose the same way. On a game build where that route is not available the panel says so and Run stays off; nothing else in the build menu changes.
-[*] Modules are placed on free connections of the current plan; a module that fits nowhere is reported as failed. The plot is not grown automatically: give the station enough plot room in the game's own plot panel first.
+[*] Modules are placed on free connections of the current plan; a module that fits nowhere is reported as failed. The plot grows with the run as the modules need room. Where the plot licence costs money, a run on an empty plan first shows the plot it will need and its price, and places nothing until you buy the licence; Cancel stops the run.
 [/list]
 [h2][b]Requirements[/b][/h2]
 [list]
