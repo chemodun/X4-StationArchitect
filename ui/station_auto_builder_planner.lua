@@ -28,8 +28,10 @@ ffi.cdef [[
   double GetContainerWareProduction(UniverseID containerid, const char* wareid, bool ignorestate);
   uint32_t GetNumBlueprints(const char* set, const char* category, const char* macroname);
   uint32_t GetNumProductionMethodResources(const char* wareid, const char* productionmethod);
+  uint32_t GetNumStationModules(UniverseID stationid, bool includeconstructions, bool includewrecks);
   ProductionMethodInfo3 GetProductionMethodInfo2(const char* wareid, const char* productionmethod);
   uint32_t GetProductionMethodResources(UIWareAmount* result, uint32_t resultlen, const char* wareid, const char* productionmethod);
+  uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID stationid, bool includeconstructions, bool includewrecks);
 ]]
 
 local sab = StationAutoBuilder
@@ -316,6 +318,31 @@ local function liveWorkforceFraction(station)
   return 0
 end
 
+-- The station's pier docks and trade dock areas: the open build menu's plan on it (built and planned), else
+-- its modules and constructions.
+local function stationDocks(station)
+  local macros = {}
+  local menu = sab.menu
+  if menu and menu.shown and menu.holomap ~= 0 and menu.container == station then
+    for _, e in ipairs(sab.ReadPlan()) do macros[#macros + 1] = e.macro end
+  else
+    local n = C.GetNumStationModules(station, true, false)
+    local buf = ffi.new("UniverseID[?]", n)
+    n = C.GetStationModules(buf, n, station, true, false)
+    for i = 0, tonumber(n) - 1 do macros[#macros + 1] = GetComponentData(ConvertStringTo64Bit(tostring(buf[i])), "macro") end
+  end
+  local pierDocks, areas = 0, 0
+  for _, macro in ipairs(macros) do
+    if IsMacroClass(macro, "pier") then
+      local bays = ExtraData and ExtraData.GetMacroDataEx(macro, "dockingbays")
+      pierDocks = pierDocks + (bays and #bays or 0)
+    elseif IsMacroClass(macro, "dockarea") and not GetMacroData(macro, "isventuremodule") then
+      areas = areas + 1
+    end
+  end
+  return pierDocks, areas
+end
+
 -- *** the plan ***
 
 -- target = { set, station, kind = "ware" | "ship", ware, rate (per hour: net ware amount, or ships),
@@ -451,10 +478,15 @@ function planner.Plan(target)
     if #cands > 0 then ladder(cands, volume, counts) else warn("no owned %s storage", tostring(transport)) end
   end
   local flow = plan.flow.import + plan.flow.export
-  -- a station trades through nothing else: one pier and one dock area at the least, whatever the coverage
+  -- the new trade gets its own docks; one pier and one dock area at the least while the station has none
   local perPierDock, perArea = perDock(target)
+  local havePierDocks, haveAreas = 0, 0
+  if target.station then havePierDocks, haveAreas = stationDocks(target.station) end
   local piers = candidates(cat.dock, race, function(e) return e.group == "pier" end)
-  if #piers > 0 then
+  local need = math.max(havePierDocks > 0 and 0 or 1, ceil(flow / perPierDock))
+  if need > 0 and #piers == 0 then
+    warn("no owned pier")
+  elseif need > 0 then
     -- one big pier at most, the rest from the smaller ones
     local small, big = {}, nil
     for _, e in ipairs(piers) do
@@ -465,20 +497,18 @@ function planner.Plan(target)
       if a.approaches ~= b.approaches then return a.approaches < b.approaches end
       return a.macro < b.macro
     end)
-    local need = math.max(1, ceil(flow / perPierDock))
     if big and (need >= big.capacity or #small == 0) then
       counts[big.macro] = (counts[big.macro] or 0) + 1
       need = need - big.capacity
     end
     if #small > 0 then ladder(small, need, counts) elseif need > 0 then ladder(piers, need, counts) end
-  else
-    warn("no owned pier")
   end
   local areas = candidates(cat.dock, race, function(e) return e.group == "dock" end)
-  if #areas > 0 then
-    counts[areas[1].macro] = (counts[areas[1].macro] or 0) + math.max(1, ceil(flow / perArea))
-  else
+  local needAreas = math.max(haveAreas > 0 and 0 or 1, ceil(flow / perArea))
+  if needAreas > 0 and #areas == 0 then
     warn("no owned dock area")
+  elseif needAreas > 0 then
+    counts[areas[1].macro] = (counts[areas[1].macro] or 0) + needAreas
   end
   return plan
 end

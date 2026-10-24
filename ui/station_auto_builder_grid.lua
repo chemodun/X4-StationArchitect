@@ -571,18 +571,33 @@ local function dockShape(macro, pose)
     end
     pose.zones[#pose.zones + 1] = box
   end
+  pose.down = 0
+  for _, z in ipairs(pose.zones) do
+    if z.dir[2] < -0.99 then pose.down = pose.down + 1 end
+  end
 end
 
--- Paid plot volume of a grid-frame box, in whole km per face from the station's position; nil past the cap.
-local function plotKm3(D, b)
-  local v = 1
-  for i = 1, 3 do
-    local lo, hi = b.min[i] + D.shift[i], b.max[i] + D.shift[i]
-    local n = math.max(0, math.ceil(hi / 1000 - 0.001)) + math.max(0, math.ceil(-lo / 1000 - 0.001))
-    if n > D.maxPlot then return nil end
-    v = v * math.max(1, n)
-  end
-  return v
+-- Whole km of one axis from the station's position to both faces of the layout grown to lo..hi.
+local function axisKm(D, i, lo, hi)
+  lo, hi = math.min(lo, D.all.min[i]) + D.shift[i], math.max(hi, D.all.max[i]) + D.shift[i]
+  return math.max(0, math.ceil(hi / 1000 - 0.001)) + math.max(0, math.ceil(-lo / 1000 - 0.001))
+end
+
+-- Paid plot volume of the layout grown to a grid-frame box, in whole km per face; nil past the cap.
+local function grownKm3(D, x0, y0, z0, x1, y1, z1)
+  local nx, ny, nz = axisKm(D, 1, x0, x1), axisKm(D, 2, y0, y1), axisKm(D, 3, z0, z1)
+  local cap = D.maxPlot
+  if nx > cap or ny > cap or nz > cap then return nil end
+  return math.max(1, nx) * math.max(1, ny) * math.max(1, nz)
+end
+
+-- Whether x0..x1 / z0..z1 lies wholly past the face of DIRS index fi of box F.
+local function beyond(fi, F, x0, z0, x1, z1)
+  local d = DIRS[fi]
+  if d[1] > 0 then return x0 >= F.max[1] - 1 end
+  if d[1] < 0 then return x1 <= F.min[1] + 1 end
+  if d[3] > 0 then return z0 >= F.max[3] - 1 end
+  return z1 <= F.min[3] + 1
 end
 
 local function union(a, b)
@@ -703,7 +718,8 @@ local function dockPlace(g, D, it)
   local isPier = IsMacroClass(it.macro, "pier")
   local big = isPier and #(ExtraData.GetMacroDataEx(it.macro, "dockingbays") or {}) > sab.planner.bigPier
   local firstOfKind = (isPier and D.piers or D.areas) == 0
-  local baseKm3 = plotKm3(D, D.all)
+  local A = D.all
+  local baseKm3 = grownKm3(D, A.min[1], A.min[2], A.min[3], A.max[1], A.max[2], A.max[3])
   local centre = { (F.min[1] + F.max[1]) / 2, (F.min[2] + F.max[2]) / 2, (F.min[3] + F.max[3]) / 2 }
   local otherFaces = {}
   for _, fi in ipairs({ 1, 2, 5, 6 }) do
@@ -727,64 +743,75 @@ local function dockPlace(g, D, it)
   end
   ---@async
   local function try(node, di, cost, extra)
-    local o = { node[1] * u, node[2] * u, node[3] * u }
+    local ox, oy, oz = node[1] * u, node[2] * u, node[3] * u
+    local o
     for _, pose in ipairs(byDi[di]) do
       work(g, 40)
-      local body = shifted(pose.body, o)
+      local pb = pose.body
+      local x0, y0, z0 = pb.min[1] + ox, pb.min[2] + oy, pb.min[3] + oz
+      local x1, y1, z1 = pb.max[1] + ox, pb.max[2] + oy, pb.max[3] + oz
       -- outside the block: under it or past a pier face, never wholly past the other faces or above
-      local under = body.max[2] <= F.min[2] + 1
+      local under = y1 <= F.min[2] + 1
       local past = false
       for _, fi in ipairs(grid.pierFaces) do
-        local d = DIRS[fi]
-        local i = d[1] ~= 0 and 1 or 3
-        if (d[i] > 0 and body.min[i] >= F.max[i] - 1) or (d[i] < 0 and body.max[i] <= F.min[i] + 1) then past = true end
+        if beyond(fi, F, x0, z0, x1, z1) then past = true end
       end
-      local away = body.min[2] >= F.max[2] - 1
+      local away = y0 >= F.max[2] - 1
       for _, fi in ipairs(otherFaces) do
-        local d = DIRS[fi]
-        local i = d[1] ~= 0 and 1 or 3
-        if (d[i] > 0 and body.min[i] >= F.max[i] - 1) or (d[i] < 0 and body.max[i] <= F.min[i] + 1) then away = true end
+        if beyond(fi, F, x0, z0, x1, z1) then away = true end
       end
-      if (under or past) and not away then
-        local down, inward = 0, 0
-        local bc = { (body.min[1] + body.max[1]) / 2, (body.min[2] + body.max[2]) / 2, (body.min[3] + body.max[3]) / 2 }
-        local out = sab.geo.unit({ bc[1] - centre[1], bc[2] - centre[2], bc[3] - centre[3] })
-        for _, z in ipairs(pose.zones) do
-          if z.dir[2] < -0.99 then down = down + 1 end
-          if z.dir[1] * out[1] + z.dir[2] * out[2] + z.dir[3] * out[3] < 0.5 then inward = inward + 1 end
-        end
-        local wanted
-        if isPier then wanted = not big or under else wanted = under and down == #pose.zones end
-        local km3 = plotKm3(D, union(D.all, body))
-        if km3 then
-          local near = math.sqrt((bc[1] - D.firstAt[1]) ^ 2 + (bc[2] - D.firstAt[2]) ^ 2 + (bc[3] - D.firstAt[3]) ^ 2) / u
-          local order = { km3 - baseKm3 }
-          if isPier then order[#order + 1] = inward end
-          if firstOfKind then order[#order + 1] = near; order[#order + 1] = cost else order[#order + 1] = cost; order[#order + 1] = near end
-          local rank = wanted and 1 or 2
-          local cur = best[rank]
-          if not cur or less(order, cur.order) then
-            local path = extra.path or {}
-            local ok = not blocked(body, path, false)
-            if ok then
-              for _, z in ipairs(pose.zones) do
-                local zb = shifted(z, o)
-                if blocked(zb, path, true) then ok = false break end
-              end
-            end
-            if ok then best[rank] = { order = order, node = node, di = di, pose = pose, cost = cost, cross = extra.cross, path = extra.path, from = extra.from, free = extra.free } end
+      local wanted
+      if isPier then wanted = not big or under else wanted = under and pose.down == #pose.zones end
+      local rank = wanted and 1 or 2
+      local cur = best[rank]
+      local km3 = (under or past) and not away and not (rank == 2 and best[1]) and grownKm3(D, x0, y0, z0, x1, y1, z1)
+      -- the plot growth leads the order: a worse one needs no further keys
+      if km3 and not (cur and km3 - baseKm3 > cur.order[1]) then
+        local bx, by, bz = (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2
+        local order = { km3 - baseKm3 }
+        if isPier then
+          local cx, cy, cz = bx - centre[1], by - centre[2], bz - centre[3]
+          local len = math.sqrt(cx * cx + cy * cy + cz * cz)
+          local inward = 0
+          for _, z in ipairs(pose.zones) do
+            if len == 0 or (z.dir[1] * cx + z.dir[2] * cy + z.dir[3] * cz) / len < 0.5 then inward = inward + 1 end
           end
+          order[2] = inward
+        end
+        local near = math.sqrt((bx - D.firstAt[1]) ^ 2 + (by - D.firstAt[2]) ^ 2 + (bz - D.firstAt[3]) ^ 2) / u
+        if firstOfKind then order[#order + 1] = near; order[#order + 1] = cost else order[#order + 1] = cost; order[#order + 1] = near end
+        if not cur or less(order, cur.order) then
+          o = o or { ox, oy, oz }
+          local body = shifted(pb, o)
+          local path = extra.path or {}
+          local ok = not blocked(body, path, false)
+          if ok then
+            for _, z in ipairs(pose.zones) do
+              local zb = shifted(z, o)
+              if blocked(zb, path, true) then ok = false break end
+            end
+          end
+          if ok then best[rank] = { order = order, node = node, di = di, pose = pose, cost = cost, cross = extra.cross, path = extra.path, from = extra.from, free = extra.free } end
         end
       end
     end
+  end
+  -- keys never go below 0: no place d new crosses away beats a wanted one with no growth or inward zone and fewer
+  local function settled(d)
+    local b = best[1]
+    if not b or firstOfKind or b.order[1] > 0 then return false end
+    if isPier then return b.order[2] == 0 and b.order[3] < d end
+    return b.order[2] < d
   end
   for _, X in pairs(g.crosses) do
     for di = 1, 6 do
       if not X.arms[di] then try(X.node, di, 0, { cross = X }) end
     end
   end
-  local levels, from = dockReach(g, D)
+  local levels, from = {}, {}
+  if not settled(1) then levels, from = dockReach(g, D) end
   for d = 1, DOCK_REACH do
+    if settled(d) then break end
     for _, n in ipairs(levels[d] or {}) do
       local path, m = {}, n
       while true do
