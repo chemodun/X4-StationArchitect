@@ -600,6 +600,13 @@ local function beyond(fi, F, x0, z0, x1, z1)
   return z1 <= F.min[3] + 1
 end
 
+-- Whether direction d runs level and along the face of DIRS index fi.
+local function levelAlong(d, fi)
+  if not fi or math.abs(d[2]) >= 0.1 then return false end
+  local n = DIRS[fi]
+  return math.abs(d[1] * n[1] + d[3] * n[3]) < 0.1
+end
+
 local function union(a, b)
   return { min = { math.min(a.min[1], b.min[1]), math.min(a.min[2], b.min[2]), math.min(a.min[3], b.min[3]) },
     max = { math.max(a.max[1], b.max[1]), math.max(a.max[2], b.max[2]), math.max(a.max[3], b.max[3]) } }
@@ -715,9 +722,9 @@ local function dockPlace(g, D, it)
     end
     D.poses[it.macro] = byDi
   end
-  local isPier = IsMacroClass(it.macro, "pier")
+  local isPier, isBuild = IsMacroClass(it.macro, "pier"), IsMacroClass(it.macro, "buildmodule")
   local big = isPier and #(ExtraData.GetMacroDataEx(it.macro, "dockingbays") or {}) > sab.planner.bigPier
-  local firstOfKind = (isPier and D.piers or D.areas) == 0
+  local firstOfKind = not isBuild and (isPier and D.piers or D.areas) == 0
   local A = D.all
   local baseKm3 = grownKm3(D, A.min[1], A.min[2], A.min[3], A.max[1], A.max[2], A.max[3])
   local centre = { (F.min[1] + F.max[1]) / 2, (F.min[2] + F.max[2]) / 2, (F.min[3] + F.max[3]) / 2 }
@@ -750,21 +757,39 @@ local function dockPlace(g, D, it)
       local pb = pose.body
       local x0, y0, z0 = pb.min[1] + ox, pb.min[2] + oy, pb.min[3] + oz
       local x1, y1, z1 = pb.max[1] + ox, pb.max[2] + oy, pb.max[3] + oz
-      -- outside the block: under it or past a pier face, never wholly past the other faces or above
+      -- outside the block: under it or past a pier face (a build module only past one), never wholly past the
+      -- other faces or above
       local under = y1 <= F.min[2] + 1
-      local past = false
+      local past, f1, f2 = false, nil, nil
       for _, fi in ipairs(grid.pierFaces) do
-        if beyond(fi, F, x0, z0, x1, z1) then past = true end
+        if beyond(fi, F, x0, z0, x1, z1) then
+          past = true
+          if f1 then f2 = fi else f1 = fi end
+        end
       end
       local away = y0 >= F.max[2] - 1
       for _, fi in ipairs(otherFaces) do
         if beyond(fi, F, x0, z0, x1, z1) then away = true end
       end
+      -- a build module's approach zones run level along a face it is past
+      local off = 0
+      if isBuild then
+        for _, z in ipairs(pose.zones) do
+          if not (levelAlong(z.dir, f1) or levelAlong(z.dir, f2)) then off = off + 1 end
+        end
+      end
       local wanted
-      if isPier then wanted = not big or under else wanted = under and pose.down == #pose.zones end
+      if isBuild then
+        wanted = off == 0
+      elseif isPier then
+        wanted = not big or under
+      else
+        wanted = under and pose.down == #pose.zones
+      end
       local rank = wanted and 1 or 2
       local cur = best[rank]
-      local km3 = (under or past) and not away and not (rank == 2 and best[1]) and grownKm3(D, x0, y0, z0, x1, y1, z1)
+      local outside = past or (under and not isBuild)
+      local km3 = outside and not away and not (rank == 2 and best[1]) and grownKm3(D, x0, y0, z0, x1, y1, z1)
       -- the plot growth leads the order: a worse one needs no further keys
       if km3 and not (cur and km3 - baseKm3 > cur.order[1]) then
         local bx, by, bz = (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2
@@ -777,6 +802,8 @@ local function dockPlace(g, D, it)
             if len == 0 or (z.dir[1] * cx + z.dir[2] * cy + z.dir[3] * cz) / len < 0.5 then inward = inward + 1 end
           end
           order[2] = inward
+        elseif isBuild then
+          order[2] = off
         end
         local near = math.sqrt((bx - D.firstAt[1]) ^ 2 + (by - D.firstAt[2]) ^ 2 + (bz - D.firstAt[3]) ^ 2) / u
         if firstOfKind then order[#order + 1] = near; order[#order + 1] = cost else order[#order + 1] = cost; order[#order + 1] = near end
@@ -796,11 +823,12 @@ local function dockPlace(g, D, it)
       end
     end
   end
-  -- keys never go below 0: no place d new crosses away beats a wanted one with no growth or inward zone and fewer
+  -- keys never go below 0: no place d new crosses away beats a wanted one with no growth, no inward or off
+  -- zone and fewer
   local function settled(d)
     local b = best[1]
     if not b or firstOfKind or b.order[1] > 0 then return false end
-    if isPier then return b.order[2] == 0 and b.order[3] < d end
+    if isPier or isBuild then return b.order[2] == 0 and b.order[3] < d end
     return b.order[2] < d
   end
   for _, X in pairs(g.crosses) do
@@ -881,13 +909,14 @@ local function dockCommit(g, D, it, best)
   end
 end
 
--- Piers first, then dock areas, each in bill order.
+-- Build modules first, then piers, then dock areas, each in bill order.
 ---@async
 local function docks(g, run)
   local list = {}
-  for pass = 1, 2 do
+  for pass = 1, 3 do
     for _, it in ipairs(run.items) do
-      if it.column and IsMacroClass(it.macro, "pier") == (pass == 1) then list[#list + 1] = it end
+      local kind = IsMacroClass(it.macro, "buildmodule") and 1 or it.column and (IsMacroClass(it.macro, "pier") and 2 or 3)
+      if kind == pass then list[#list + 1] = it end
     end
   end
   local D = dockState(g, run.kit)
@@ -901,8 +930,11 @@ local function docks(g, run)
     local best, wanted = dockPlace(g, D, it)
     if best then
       dockCommit(g, D, it, best)
-      local isPier = IsMacroClass(it.macro, "pier")
-      if isPier then D.piers = D.piers + 1 else D.areas = D.areas + 1 end
+      if IsMacroClass(it.macro, "pier") then
+        D.piers = D.piers + 1
+      elseif it.column then
+        D.areas = D.areas + 1
+      end
       if best.free then dropped = dropped + 1 else placed = placed + 1 end
       sab.Debug("grid: %s %s at %d %d %d arm %d, %d new crosses, plot +%d km3%s", it.macro, best.free and "free" or "hangs", best.node[1], best.node[2], best.node[3],
         best.di, best.cost, best.order[1], wanted and "" or ", not the wanted place")
@@ -1089,7 +1121,7 @@ local function pack(run)
   local base, cells, spanXZ, tallest, byMacro = {}, 0, 1, 1, {}
   for _, it in ipairs(run.items) do
     it.gridRec = nil
-    if not it.isConnector and not it.column then
+    if not it.isConnector and not it.column and not IsMacroClass(it.macro, "buildmodule") then
       local m = byMacro[it.macro]
       if not m then
         local ps, minCells, minSpan = poses(probe, it.macro), math.huge, math.huge

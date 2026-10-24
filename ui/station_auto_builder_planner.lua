@@ -727,8 +727,10 @@ function planner.Turns(plan)
     end
     for _, e in ipairs(producers) do placedWorkforce = placedWorkforce + e.workforce end
     if f then placedWorkforce = placedWorkforce + f.workforce end
-    -- the final module first, so it runs on imports while the rest is built; then what it trades through
-    if f then turn[#turn + 1] = f.macro end
+    -- the final module first, so it runs on imports while the rest is built; then what it trades through. A
+    -- build module is the final stage: last in its turn
+    local buildLast = target.kind == "ship"
+    if f and not buildLast then turn[#turn + 1] = f.macro end
     local function emitStorage(ofFinal)
       for _, transport in ipairs(transports) do
         if (finalTransports[transport] or false) == ofFinal then
@@ -747,6 +749,7 @@ function planner.Turns(plan)
     for _, e in ipairs(producers) do turn[#turn + 1] = e.macro end
     emitStorage(false)
     placedHabitat = emitWhile(turn, habitats, placedHabitat, placedWorkforce)
+    if f and buildLast then turn[#turn + 1] = f.macro end
     turns[t] = turn
   end
   -- whatever rounding left over goes with the last turn
