@@ -108,6 +108,13 @@ function sab.ReadConfig()
   local cfg = GetNPCBlackboard(sab.playerId, sab.configBlackboard)
   sab.cfg = (type(cfg) == "table") and cfg or {}
   sab.debugLevel = tostring(sab.cfg.debugLevel or "none")
+  sab.panelDirty = true
+end
+
+-- The Options page's cap on a station's modules, connection structures aside.
+function sab.MaxModules()
+  local n = tonumber(sab.cfg.maxModules)
+  return n and math.max(100, math.min(1000, n)) or 300
 end
 
 -- *** module sizes ***
@@ -2559,9 +2566,6 @@ local function rowKit(ftable, idle, buttonHeight, dirty)
   return kit
 end
 
--- the module count slider's top
-local MAX_MODULES = 100
-
 -- The target form: the inputs, `extraRows(kit)` if given, then the planned bill and balance as a preview;
 -- the plan is recomputed on every rebuild and returned (nil when the planner fails).
 local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
@@ -2571,7 +2575,19 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
   local kit = rowKit(ftable, idle, buttonHeight, dirty)
   local input, dropdown, number, checkbox = kit.input, kit.dropdown, kit.number, kit.checkbox
   local current = t.kind == "ware" and currentOf(ctx, t.ware)
-  if current then t.modules = math.max(1, current.modules, math.min(MAX_MODULES, t.modules or 1)) end
+  -- the largest target within the Options page's module cap
+  local okMax, max = pcall(sab.planner.MaxTarget, sab.TargetSpec(ctx), sab.MaxModules())
+  if not okMax then
+    sab.Error("max target failed: %s", tostring(max))
+    max = nil
+  end
+  local top
+  if current then
+    top = math.max(1, current.modules, current.modules + (max or 0))
+    t.modules = math.max(1, current.modules, math.min(top, t.modules or 1))
+  elseif t.kind == "ship" and max and max > 0 and t.shipRate > max then
+    t.shipRate = max
+  end
   local ok, plan = pcall(sab.planner.Plan, sab.TargetSpec(ctx))
 
   local kinds = { option("ware", ReadText(PAGE, 111)), option("ship", ReadText(PAGE, 112)), option("repair", ReadText(PAGE, 113)) }
@@ -2582,7 +2598,7 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
     local row = ftable:addRow(true, {})
     local low = math.max(1, current.modules)
     row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low,
-      max = math.max(low, MAX_MODULES), start = t.modules, step = 1, active = idle })
+      max = top, start = t.modules, step = 1, active = idle })
     row[1].handlers.onSliderCellChanged = function(_, value) t.modules = value end
     row[1].handlers.onSliderCellConfirm = dirty
     local planned = ok and current.net + (plan.produced[t.ware] or 0) - (plan.consumed[t.ware] or 0) or current.net
@@ -2594,7 +2610,11 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
     if t.kind == "ship" then
       local sizes = { option("s", "S"), option("m", "M"), option("l", "L"), option("xl", "XL") }
       dropdown(input(ReadText(1001, 9648)), sizes, t.shipSize, function(id) t.shipSize = id end)
-      number(input(ReadText(PAGE, 118)), t.shipRate, function(v) if v and v > 0 then t.shipRate = v end end)
+      local row = input(ReadText(PAGE, 118))
+      if max then
+        row[2]:createText(string.format("%s %s", ReadText(1001, 19), tostring(max)), { halign = "right", color = Color["text_inactive"] })
+      end
+      number(row, t.shipRate, function(v) if v and v > 0 then t.shipRate = (max and max > 0) and math.min(v, max) or v end end)
     end
   end
   checkbox(input(ReadText(PAGE, 119)), t.fullCycle, true, function(v) t.fullCycle = v end)

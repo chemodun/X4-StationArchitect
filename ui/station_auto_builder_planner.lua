@@ -318,9 +318,9 @@ local function liveWorkforceFraction(station)
   return 0
 end
 
--- The station's pier docks and trade dock areas: the open build menu's plan on it (built and planned), else
--- its modules and constructions.
-local function stationDocks(station)
+-- The station's module macros: the open build menu's plan on it (built and planned), else its modules and
+-- constructions.
+local function stationMacros(station)
   local macros = {}
   local menu = sab.menu
   if menu and menu.shown and menu.holomap ~= 0 and menu.container == station then
@@ -331,8 +331,13 @@ local function stationDocks(station)
     n = C.GetStationModules(buf, n, station, true, false)
     for i = 0, tonumber(n) - 1 do macros[#macros + 1] = GetComponentData(ConvertStringTo64Bit(tostring(buf[i])), "macro") end
   end
+  return macros
+end
+
+-- The station's pier docks and trade dock areas.
+local function stationDocks(station)
   local pierDocks, areas = 0, 0
-  for _, macro in ipairs(macros) do
+  for _, macro in ipairs(stationMacros(station)) do
     if IsMacroClass(macro, "pier") then
       local bays = ExtraData and ExtraData.GetMacroDataEx(macro, "dockingbays")
       pierDocks = pierDocks + (bays and #bays or 0)
@@ -352,7 +357,7 @@ end
 --   into StartBill's list.
 function planner.Plan(target)
   local set = target.set or "factory"
-  local cat = planner.Catalogue(set, true)
+  local cat = planner.Catalogue(set, not planner.keepCatalogue)
   local race = target.race or "generic"
   local sunlight = target.sunlight
   if not sunlight and target.station then
@@ -527,6 +532,58 @@ local function makes(cat, macro, ware)
     productsCache[macro] = wares
   end
   return wares[ware] == true
+end
+
+-- Modules a plan adds; the grid's connection structures come on top.
+local function planModules(plan)
+  local n = 0
+  for _, c in pairs(plan.counts) do n = n + c end
+  return n
+end
+
+local maxCache, maxCached = {}, 0
+
+-- The largest target whose plan keeps the station within cap modules (connection structures aside): the
+-- producer modules to add for a ware target, ships per hour in tenths for a ship target; nil for repair.
+function planner.MaxTarget(spec, cap)
+  if spec.repair then return nil end
+  local have = 0
+  if spec.station then
+    for _, macro in ipairs(stationMacros(spec.station)) do
+      if not IsMacroClass(macro, "connectionmodule") then have = have + 1 end
+    end
+  end
+  local key = table.concat({ tostring(spec.station), tostring(spec.set), spec.kind, tostring(spec.ware), tostring(spec.buildMacro),
+    tostring(spec.shipSize), tostring(spec.fullCycle), tostring(spec.workforce), tostring(spec.selfSufficient), tostring(spec.race),
+    tostring(spec.docking), cap, have }, "|")
+  if maxCache[key] then return maxCache[key] end
+  local room, field = cap - have, spec.kind == "ship" and "rate" or "modules"
+  local step = field == "rate" and 0.1 or 1
+  local probe = {}
+  for k, v in pairs(spec) do probe[k] = v end
+  -- k whole steps
+  local function fits(k)
+    probe[field] = k * step
+    return planModules(planner.Plan(probe)) <= room
+  end
+  planner.Catalogue(spec.set or "factory", true)
+  planner.keepCatalogue = true
+  local ok, best = pcall(function()
+    if room <= 0 or not fits(1) then return 0 end
+    local lo, hi = 1, 2
+    while hi < 1e6 and fits(hi) do lo, hi = hi, hi * 2 end
+    while hi - lo > 1 do
+      local mid = math.floor((lo + hi) / 2)
+      if fits(mid) then lo = mid else hi = mid end
+    end
+    return lo
+  end)
+  planner.keepCatalogue = nil
+  if not ok then error(best) end
+  local value = tonumber(best) * step
+  if maxCached > 64 then maxCache, maxCached = {}, 0 end
+  maxCache[key], maxCached = value, maxCached + 1
+  return value
 end
 
 -- The current hourly balance of a ware on an existing station, workforce use included, plus what the open
