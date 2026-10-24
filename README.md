@@ -48,7 +48,7 @@ Open the build menu of one of your stations. The planner panel sits under the me
 
 1. Pick a category and a module from your blueprints, set the count, press Add. Repeat for every module type you want; a row's X removes it, Clear empties the bill.
 2. Press Run. Modules are placed one after another; the panel counts placed, failed and left. Stop halts the run after the current module.
-3. When the run ends, check the plan, move or remove what you like by hand, and press Apply as usual. Undo run removes every module the last run placed, as long as the plan was not changed since.
+3. When the run ends, check the plan, move or remove what you like by hand, and press Apply as usual. The build menu's own Cancel discards the whole unconfirmed plan. Optimize plot fits the plot to the planned modules on every side (the smallest plot on an empty plan), so a plot a run grew or one you emptied is not paid larger than needed.
 
 ![A run in progress](docs/images/panel_running.png)
 

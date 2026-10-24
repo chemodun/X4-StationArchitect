@@ -766,12 +766,7 @@ end
 function planner.Run(target)
   local plan = planner.Plan(target)
   sab.Debug("planned:\n%s", planner.Print(plan))
-  -- docking is not on the grid yet
-  local bill = {}
-  for _, b in ipairs(planner.Turns(plan)) do
-    if b.group ~= "dock" and b.group ~= "pier" then bill[#bill + 1] = b end
-  end
-  return sab.StartBill(bill, { grid = true, subdivide = target.dense and 2 or nil }), plan
+  return sab.StartBill(planner.Turns(plan), { grid = true, subdivide = target.dense and 2 or nil }), plan
 end
 
 sab.planner = planner

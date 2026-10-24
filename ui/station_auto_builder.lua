@@ -806,8 +806,8 @@ end
 
 -- Each face of the plot moved on its own to cover box (station coordinates; the station's position stays inside);
 -- shrink lets faces move inwards. Capped per axis; paid as vanilla's plot menu pays it.
-function sab.FitPlot(box, shrink)
-  local menu = sab.menu
+-- The face moves FitPlot would make: pos, neg (metres per axis) and whether any face moves.
+local function plotChange(box, shrink, quiet)
   local have = plotFaces()
   local pos, neg, change = { x = 0, y = 0, z = 0 }, { x = 0, y = 0, z = 0 }, false
   for i, axis in ipairs(AXES) do
@@ -816,7 +816,7 @@ function sab.FitPlot(box, shrink)
     if not shrink then p, n = math.max(p, have.pos[i]), math.max(n, have.neg[i]) end
     if p + n == 0 then p = 1 end
     if (p + n) * PLOT_STEP > MAX_PLOT then
-      sab.Debug("the layout needs %.1f km on %s, above the plot cap %.0f km", (p + n) * PLOT_STEP / 1000, axis, MAX_PLOT / 1000)
+      if not quiet then sab.Debug("the layout needs %.1f km on %s, above the plot cap %.0f km", (p + n) * PLOT_STEP / 1000, axis, MAX_PLOT / 1000) end
       while (p + n) * PLOT_STEP > MAX_PLOT do
         if p - have.pos[i] >= n - have.neg[i] and p > 0 then p = p - 1 else n = n - 1 end
       end
@@ -824,6 +824,12 @@ function sab.FitPlot(box, shrink)
     pos[axis], neg[axis] = (p - have.pos[i]) * PLOT_STEP, (n - have.neg[i]) * PLOT_STEP
     if pos[axis] ~= 0 or neg[axis] ~= 0 then change = true end
   end
+  return pos, neg, change
+end
+
+function sab.FitPlot(box, shrink)
+  local menu = sab.menu
+  local pos, neg, change = plotChange(box, shrink)
   if not change then return false end
   if not C.ExtendBuildPlot(menu.container, pos, neg, true) then
     sab.Debug("plot change refused: +%.0f %.0f %.0f / -%.0f %.0f %.0f m", pos.x, pos.y, pos.z, neg.x, neg.y, neg.z)
@@ -840,6 +846,39 @@ function sab.FitPlot(box, shrink)
   sab.Debug("plot faces now x +%d -%d, y +%d -%d, z +%d -%d km (%d x %d x %d)", f.pos[1], f.neg[1], f.pos[2], f.neg[2], f.pos[3], f.neg[3],
     f.pos[1] + f.neg[1], f.pos[2] + f.neg[2], f.pos[3] + f.neg[3])
   return true
+end
+
+-- What Optimize plot fits the plot to: the plan's modules, an empty box on an empty plan; nil while a plan
+-- module has no known size (requested) or the editor is not reachable.
+local function optimizeBox(log)
+  local menu = sab.menu
+  if sab.run or not menu or menu.holomap == 0 then return nil end
+  sab.ReadSizes()
+  local plan, missing = sab.ReadPlan(), {}
+  for _, e in ipairs(plan) do
+    if not sab.sizes[e.macro] then missing[#missing + 1] = e.macro end
+  end
+  if #missing > 0 then
+    sab.RequestSizes(missing)
+    if log then sab.Debug("optimize plot: no size yet for %d plan modules (%s), requested; the plot stays", #missing, missing[1]) end
+    return nil
+  end
+  if #plan == 0 then return { min = { 0, 0, 0 }, max = { 0, 0, 0 } } end
+  local box = sab.PlanBox()
+  if not box and log then sab.Debug("optimize plot: the editor is not reachable; the plot stays") end
+  return box
+end
+
+-- Offered only when the fit would move a face of the plot.
+function sab.CanOptimizePlot()
+  local box = optimizeBox(false)
+  return box ~= nil and select(3, plotChange(box, true, true))
+end
+
+-- The plot fitted to the plan's modules on each side, the smallest plot on an empty plan.
+function sab.OptimizePlot()
+  local box = optimizeBox(true)
+  if box and sab.FitPlot(box, true) then sab.panelDirty = true end
 end
 
 -- The box around every plan entry with a known size, nil on an empty plan.
@@ -2120,17 +2159,6 @@ function sab.StartRun(items, connector, turns, floors, opts)
   return true
 end
 
--- Undo the last n map changes, newest first.
-function sab.Undo(n)
-  local menu = sab.menu
-  for _ = 1, n or 1 do
-    if not C.CanUndoConstructionMapChange(menu.holomap) then break end
-    C.UndoConstructionMapChange(menu.holomap)
-  end
-  menu.refreshPlan()
-  menu.displayMenu()
-end
-
 function sab.StopRun(reason)
   local run = sab.run
   if not run then return end
@@ -2146,8 +2174,7 @@ function sab.StopRun(reason)
     local box = sab.PlanBox()
     if box then sab.FitPlot(box, true) end
   end
-  sab.lastRun = { placed = run.placed, failed = run.failed,
-    planCount = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) }
+  sab.lastRun = { placed = run.placed, failed = run.failed }
   refreshPlanTable(run.placed > 0)
 end
 
@@ -2259,7 +2286,7 @@ local CATEGORIES = {
   { mode = "moduletypes_venture", text = 2454 },
 }
 
--- { mode, macro, count } rows, kept across menu openings; the last run for Undo run
+-- { mode, macro, count } rows, kept across menu openings; the last run for the progress line
 sab.bill = {}
 sab.lastRun = nil
 sab.panelDirty = nil
@@ -2284,8 +2311,6 @@ end
 sab.lastSpot = nil
 sab.dialog = nil
 sab.pendingTarget = nil
--- plot side = plotFactor x cube root of the bill's padded box volume (the HQ's 280 modules: 12.5 x 5.4 x 17.6 km)
-sab.plotFactor = 2
 
 local function option(id, text) return { id = id, text = tostring(text), icon = "", displayremoveoption = false } end
 
@@ -2385,21 +2410,6 @@ function sab.RouteOk()
   return sab.Editor() ~= nil
 end
 
--- Undo run is offered while the plan still has the count the run left behind.
-function sab.CanUndoRun()
-  local menu, last = sab.menu, sab.lastRun
-  if sab.run or not last or last.placed == 0 or menu.holomap == 0 then return false end
-  local unchanged = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) == last.planCount
-  return unchanged and C.CanUndoConstructionMapChange(menu.holomap)
-end
-
-function sab.UndoRun()
-  if not sab.CanUndoRun() then return end
-  local n = sab.lastRun.placed
-  sab.lastRun = nil
-  sab.Undo(n)
-end
-
 function sab.RunBill()
   local bill = {}
   for _, row in ipairs(sab.bill) do
@@ -2427,18 +2437,20 @@ local function progressDetail()
   if not item then return "" end
   if run.phase == "probe" then return string.format(tostring(ReadText(PAGE, 137)), run.probeTotal - #run.probeList, run.probeTotal) end
   local p = run.phase == "pack" and run.packProgress
+  if p and p.dock then return string.format(tostring(ReadText(PAGE, 139)), p.dock, p.docks) end
   if p then return string.format(tostring(ReadText(PAGE, 136)), p.pack, p.packs, p.module, p.modules) end
   local text = string.format(tostring(ReadText(PAGE, 131)), GetMacroData(item.macro, "name"), item.candidates and item.cursor - 1 or 0, item.candidates and #item.candidates or 0)
   if item.turn and run.turns and run.floors ~= "grid" then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
   return text
 end
 
--- the bar: probed macros, then packed modules over every layout, then plan entries of the planned total
+-- the bar: probed macros, then packed modules over every layout, docks with a place found, then plan entries of the planned total
 local function progressValues()
   local run = sab.run
   if not run then return 0, 1 end
   if run.phase == "probe" then return run.probeTotal - #run.probeList, math.max(1, run.probeTotal) end
   local p = run.phase == "pack" and run.packProgress
+  if p and p.dock then return p.dock - 1, math.max(1, p.docks) end
   if p then return (p.pack - 1) * p.modules + p.module, math.max(1, p.packs * p.modules) end
   return run.n, math.max(1, run.n + math.max(0, #run.items - run.next + 1))
 end
@@ -2686,6 +2698,7 @@ function sab.DisplayPanel()
     contentY = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize
   end
 
+  local canOptimize = idle and sab.CanOptimizePlot()
   local btable = frame:addTable(4, { tabOrder = 3, highlightMode = "off", reserveScrollBar = false, y = contentY })
   local row = btable:addRow(true, {})
   row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1,
@@ -2698,8 +2711,8 @@ function sab.DisplayPanel()
     row[1].handlers.onClick = sab.RunTarget
     row[2]:createButton({ height = buttonHeight, active = function() return sab.run ~= nil end }):setText(ReadText(PAGE, 104), { halign = "center" })
     row[2].handlers.onClick = function() sab.StopRun("stopped") end
-    row[3]:createButton({ height = buttonHeight, active = sab.CanUndoRun }):setText(ReadText(PAGE, 105), { halign = "center" })
-    row[3].handlers.onClick = sab.UndoRun
+    row[3]:createButton({ height = buttonHeight, active = canOptimize }):setText(ReadText(PAGE, 105), { halign = "center" })
+    row[3].handlers.onClick = sab.OptimizePlot
     row[4]:createButton({ height = buttonHeight, active = idle }):setText(ReadText(1001, 3318), { halign = "center" })
     row[4].handlers.onClick = sab.ResetTarget
   else
@@ -2716,8 +2729,8 @@ function sab.DisplayPanel()
     row[4]:createButton({ height = buttonHeight, active = function() return sab.run ~= nil end }):setText(ReadText(PAGE, 104), { halign = "center" })
     row[4].handlers.onClick = function() sab.StopRun("stopped") end
     row = btable:addRow(true, {})
-    row[1]:createButton({ height = buttonHeight, active = sab.CanUndoRun }):setText(ReadText(PAGE, 105), { halign = "center" })
-    row[1].handlers.onClick = sab.UndoRun
+    row[1]:createButton({ height = buttonHeight, active = canOptimize }):setText(ReadText(PAGE, 105), { halign = "center" })
+    row[1].handlers.onClick = sab.OptimizePlot
   end
 
   frame:display()
@@ -2743,34 +2756,6 @@ local function buildMethodOptions()
   return options
 end
 
--- A cube with room for the bill's boxes, each padded by its outward clearance, whole kilometres, 4 km at least;
--- wider when the dock rows need it (half the piers per side, the dock areas beside them), deeper for two rows.
-function sab.EstimatePlotKm(bill)
-  sab.ReadSizes()
-  local volume, piers, docks, pierW, pierD, dockW = 0, 0, 0, 0, 0, 0
-  for _, b in ipairs(bill) do
-    local s = sab.sizes[b.macro]
-    if s then
-      local m, n = outerMargin(b.macro) or 0, b.count or 1
-      volume = volume + n * 8 * (s.maxX + m) * (s.maxY + m) * (s.maxZ + m)
-      if IsMacroClass(b.macro, "pier") then
-        piers, pierW, pierD = piers + n, math.max(pierW, 2 * math.max(s.maxX, s.maxZ)), math.max(pierD, 2 * math.min(s.maxX, s.maxZ))
-      elseif IsMacroClass(b.macro, "dockarea") then
-        docks, dockW = docks + n, math.max(dockW, 2 * math.max(s.maxX, s.maxZ))
-      end
-    end
-  end
-  local side = volume ^ (1 / 3) * sab.plotFactor
-  if piers + docks > 0 then
-    local perSide = math.ceil(piers / 2)
-    local extraDocks = math.max(0, docks - 2 * math.max(perSide - 1, 0))
-    local width = perSide * (pierW + 4 * ROW_GAP) + math.ceil(extraDocks / 2) * (dockW + 4 * ROW_GAP) + 2 * WING_GAP
-    local depth = side + 2 * (pierD + WING_GAP + 2 * ROW_GAP)
-    side = math.max(side, width, depth)
-  end
-  return math.max(4, math.ceil(side / 1000))
-end
-
 local function dialogContext(d)
   return { set = "factory", sunlight = GetComponentData(d.sector, "sunlight") }
 end
@@ -2781,7 +2766,7 @@ function sab.OpenPlotDialog()
     sab.Debug("plot dialog: no planner, map or spot")
     return
   end
-  sab.dialog = { sector = spot.sector, x = spot.x, y = spot.y, z = spot.z, loadout = 1.0, method = "global", plotKm = nil }
+  sab.dialog = { sector = spot.sector, x = spot.x, y = spot.y, z = spot.z, loadout = 1.0, method = "global" }
   sab.dialogDirty = true
 end
 
@@ -2820,17 +2805,7 @@ function sab.DisplayDialog()
     kit.dropdown(kit.input(ReadText(1001, 11298)), buildMethodOptions(), d.method, function(id) d.method = id end)
   end)
 
-  local km = d.plotKm or (plan and sab.EstimatePlotKm(sab.planner.Bill(plan))) or 4
-  local kit = rowKit(ftable, true, buttonHeight, dirty)
-  local row = kit.input(ReadText(1001, 11285) .. " (" .. ReadText(1001, 108) .. ")")
-  kit.number(row, km, function(v) if v and v >= 1 then d.plotKm = math.ceil(v) end end)
-  local size = km * 1000
-  local loc = ffi.new("UIPosRot")
-  loc.x, loc.y, loc.z = d.x, d.y, d.z
-  local price = tonumber(C.GetBuildPlotPrice(d.sector, loc, size, size, size, "player")) or 0
-  row = kit.input(ReadText(1001, 2808))
-  row[2]:setColSpan(3):createText(ConvertMoneyString(price, false, true, nil, true) .. " " .. ReadText(1001, 101),
-    { halign = "right", minRowHeight = buttonHeight, color = price > GetPlayerMoney() and Color["text_warning"] or nil })
+  local row
   if d.error then
     row = ftable:addRow(true, {})
     row[1]:setColSpan(4):createText(d.error, { color = Color["text_warning"] })
@@ -2856,15 +2831,15 @@ function sab.ConfirmDialog()
     sab.Error("plan failed: %s", tostring(plan))
     return
   end
-  local km = d.plotKm or sab.EstimatePlotKm(sab.planner.Bill(plan))
-  local size = km * 1000
+  -- the smallest plot: the run grows it to the modules
+  local size = PLOT_STEP
   local loc = ffi.new("UIPosRot")
   loc.x, loc.y, loc.z = d.x, d.y, d.z
   local station = C.ReserveBuildPlot(d.sector, "player", "factory", loc, size, size, size)
   if station == 0 then
     d.error = ReadText(PAGE, 129)
     sab.dialogDirty = true
-    sab.Debug("plot of %d km refused at %s %.0f %.0f %.0f", km, tostring(d.sector), d.x, d.y, d.z)
+    sab.Debug("plot of %d m refused at %s %.0f %.0f %.0f", size, tostring(d.sector), d.x, d.y, d.z)
     return
   end
   station = ConvertStringTo64Bit(tostring(station))
@@ -2876,7 +2851,7 @@ function sab.ConfirmDialog()
   local buildstorage = ConvertIDTo64Bit(GetComponentData(station, "buildstorage")) or 0
   if buildstorage ~= 0 then C.SetContainerBuildMethod(buildstorage, method) end
   sab.pendingTarget = { station = station, spec = spec, method = buildstorage == 0 and method or nil, since = getElapsedTime() }
-  sab.Debug("plot reserved: station %s, %d km, loadout %s, method '%s', build storage %s", tostring(station), km,
+  sab.Debug("plot reserved: station %s, %d m, loadout %s, method '%s', build storage %s", tostring(station), size,
     tostring(d.loadout), method, tostring(buildstorage))
   sab.dialog, sab.dialogFrame = nil, nil
   AddUITriggeredEvent(menu.name, "initiateconstruction_station", station)

@@ -867,7 +867,10 @@ local function docks(g, run)
   local D = dockState(g, run.kit)
   grid.lastDocks = D
   local placed, dropped, failed = 0, 0, 0
-  for _, it in ipairs(list) do
+  local progress = run.packProgress
+  progress.docks = #list
+  for i, it in ipairs(list) do
+    progress.dock = i
     local best, wanted = dockPlace(g, D, it)
     if best then
       dockCommit(g, D, it, best)

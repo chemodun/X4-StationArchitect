@@ -12,7 +12,7 @@
       <t id="102">Count</t>
       <t id="103">Run</t>
       <t id="104">Stop</t>
-      <t id="105">Undo run</t>
+      <t id="105">Optimize plot</t>
       <t id="106">Placed %s, failed %s, left %s</t>
       <t id="107">Last run: %s placed, %s failed</t>
       <t id="108">The editor is not reachable on this game build</t>
@@ -46,6 +46,7 @@
       <t id="136">Packing layout %s of %s: module %s of %s</t>
       <t id="137">Reading module shapes: %s of %s</t>
       <t id="138">Modules per frame</t>
+      <t id="139">Finding places for docks and piers: %s of %s</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>
