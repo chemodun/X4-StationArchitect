@@ -565,10 +565,27 @@ end
 
 local VALID_RETRIES = 10
 
+-- The snapped pose equals the planned one (within a metre and a near-identical rotation).
+local function samePlace(pose, pos, rows)
+  if math.abs(pose.x - pos.x) > 1 or math.abs(pose.y - pos.y) > 1 or math.abs(pose.z - pos.z) > 1 then return false end
+  for i = 1, 3 do
+    local a, b = pose.rows[i], rows and rows[i]
+    if b and a[1] * b[1] + a[2] * b[2] + a[3] * b[3] < 0.999 then return false end
+  end
+  return true
+end
+
+-- the slider's placements per frame, under the run's cap after a failure
+local function perFrame(run)
+  return math.min(sab.perFrame, run.cap or sab.perFrame)
+end
+
 local function beginPlacement(run, item)
   local menu = sab.menu
   run.countBefore = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
-  C.AddMacroToConstructionMap(menu.holomap, item.macro, true)
+  -- dragged: the drop waits a frame; not dragged: the editor takes it in the frame of the float
+  item.dragged = perFrame(run) <= 1
+  C.AddMacroToConstructionMap(menu.holomap, item.macro, item.dragged)
   menu.floatingNewModule = item.macro
   run.phase = "drop"
 end
@@ -612,10 +629,20 @@ local function finishPlacement(run, item)
     local pose = sab.PoseForPair(entry, stationConn, moduleConn, item.roll)
     pos, rows = pose.pos, pose.rows
   end
+  -- an undragged float drops only inside the plot
+  local size = sab.sizes[item.macro]
+  if not item.dragged and run.plot and size then
+    sab.FitPlot(sab.geo.worldBox(size, { pos.x, pos.y, pos.z }, rows or sab.ReadFloating(editor).rows), false)
+  end
   sab.WriteFloating(editor, pos, rows)
   local snap = sab.Snap(editor)
   local wrongEntry = snap.snapped and ((item.entryIdx and snap.entryIdx ~= item.entryIdx)
     or (pair and (snap.entryIdx ~= entryIdx or snap.connection ~= pair.connection or snap.predecessorConnection ~= pair.predecessorConnection)))
+  -- a module touching two free connections may take the other one: the same place is the planned placement
+  if wrongEntry and pair and not item.entryIdx and samePlace(snap.pose, pos, rows) then
+    sab.Debug("%s: snapped to entry %d %s / %s, the planned place", item.macro, snap.entryIdx, snap.predecessorConnection, snap.connection)
+    wrongEntry = false
+  end
   if (snap.snapped and not wrongEntry) or (item.free and snap.valid) then
     C.AddFloatingSequenceToConstructionPlan(menu.holomap)
   end
@@ -1902,7 +1929,7 @@ end
 local function advance(run)
   run.next = run.next + 1
   run.phase = "begin"
-  if tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) > run.countBefore then refreshPlanTable(true) end
+  if tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) > run.countBefore then sab.planRefresh = true end
 end
 
 -- The drop phase of a pack item; the module stays floated across frames while candidates remain.
@@ -2046,12 +2073,13 @@ function sab.StartBill(bill, opts)
     local centre = C.GetBuildPlotCenterOffset(menu.container)
     items[1].pack, items[1].free, items[1].pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
   end
-  return sab.StartRun(items, connector, turns > 0 and turns or nil, floors, opts and opts.stopOnFail, opts and opts.packOnly)
+  return sab.StartRun(items, connector, turns > 0 and turns or nil, floors, opts)
 end
 
 -- floors: probe the connection geometry first, then build on the floor layout (StartBill, empty plan only).
--- stopOnFail: the run stops at its first failed placement. packOnly: a grid run stops once packed (layout experiments).
-function sab.StartRun(items, connector, turns, floors, stopOnFail, packOnly)
+-- opts.stopOnFail: the run stops at its first failed placement. opts.packOnly: a grid run stops once packed (layout
+-- experiments). opts.subdivide: grid occupancy cells per cell side (nil: grid.subdivide).
+function sab.StartRun(items, connector, turns, floors, opts)
   if sab.run then
     sab.Error("a run is already active")
     return false
@@ -2066,7 +2094,8 @@ function sab.StartRun(items, connector, turns, floors, stopOnFail, packOnly)
     sab.Error("the editor is not reachable")
     return false
   end
-  local run = { items = items, next = 1, phase = "begin", placed = 0, failed = 0, connector = connector, turns = turns, stopOnFail = stopOnFail, packOnly = packOnly }
+  local run = { items = items, next = 1, phase = "begin", placed = 0, failed = 0, connector = connector, turns = turns,
+    stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, subdivide = opts and opts.subdivide }
   sab.ReadSizes()
   readPlanState(run, editor)
   run.fromEmpty = run.n == 0
@@ -2087,6 +2116,7 @@ function sab.StartRun(items, connector, turns, floors, stopOnFail, packOnly)
       if floors == "grid" or it.group == "production" or it.group == "build" or it.column then want(it.macro) end
     end
   end
+  run.probeTotal = #run.probeList
   sab.run = run
   sab.panelDirty = true
   sab.Debug("run started: %d items, %d entries, %d connections, connector %s, probing %d macros%s", #items, run.n, #run.conns,
@@ -2145,7 +2175,8 @@ local function registerEntry(run, item)
   notePlaced(run, item, added.idx, nil)
 end
 
-function sab.Tick()
+-- chained: placements already made in this frame (up to sab.perFrame)
+function sab.Tick(chained)
   local run = sab.run
   if not run then return end
   local menu = sab.menu
@@ -2181,17 +2212,35 @@ function sab.Tick()
       if aimItem(run, item) then return end
     end
     beginPlacement(run, item)
-  else
-    local item = run.items[run.next]
-    if item.pack then
-      packStep(run, item)
-    else
-      local placed, retry = finishPlacement(run, item)
-      if retry then return end
-      if placed then registerEntry(run, item) end
-      advance(run)
-    end
+    if item.pack or item.dragged then return end
   end
+  local item = run.items[run.next]
+  if item.pack then
+    packStep(run, item)
+    return
+  end
+  local placed, retry = finishPlacement(run, item)
+  if retry then return end
+  if not placed then
+    local limit = perFrame(run)
+    if limit > 1 then
+      -- the same item again next frame at half the rate; what is placed stays
+      run.failed = run.failed - 1
+      run.cap = math.floor(limit / 2)
+      item.validRetries = nil
+      run.phase = "begin"
+      sab.Debug("%s failed at %d per frame, again at %d", item.macro, limit, run.cap)
+      return
+    end
+    sab.StopRun("stopped at a failure at one per frame")
+    return
+  end
+  registerEntry(run, item)
+  advance(run)
+  chained = (chained or 0) + 1
+  -- one per frame: the next item floats in the frame of this drop
+  local limit = perFrame(run)
+  if sab.run == run and (limit <= 1 or chained < limit) then return sab.Tick(chained) end
 end
 
 -- *** panel ***
@@ -2224,9 +2273,12 @@ sab.tab = "target"
 sab.expanded = false
 -- ware, build module and race are filled from the catalogue on the first panel build (targetChoices)
 local function defaultTarget()
-  return { kind = "ware", rate = 1000, shipRate = 1, shipSize = "m", fullCycle = false, workforce = true, selfSufficient = false, docking = "high" }
+  return { kind = "ware", rate = 1000, shipRate = 1, shipSize = "m", fullCycle = false, workforce = true, selfSufficient = false, docking = "high", dense = false }
 end
 sab.target = defaultTarget()
+-- placements per frame; 1 keeps the dragged float, more drop undragged floats in the same frame
+local MAX_PER_FRAME = 10
+sab.perFrame = 1
 
 function sab.ResetTarget()
   sab.target = defaultTarget()
@@ -2293,7 +2345,7 @@ function sab.TargetSpec(ctx)
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, kind = ship and "ship" or "ware", repair = t.kind == "repair",
     ware = t.ware, rate = ship and t.shipRate or t.rate, buildMacro = t.buildMacro, shipSize = t.shipSize, count = 1,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
-    race = t.race, docking = t.docking }
+    race = t.race, docking = t.docking, dense = t.dense }
 end
 
 function sab.RunTarget()
@@ -2364,7 +2416,7 @@ end
 local function progressText()
   local run = sab.run
   if run then
-    return string.format(tostring(ReadText(PAGE, 106)), run.placed, run.failed, math.max(0, #run.items - run.next + 1))
+    return string.format(tostring(ReadText(PAGE, 135)), run.n, run.n + math.max(0, #run.items - run.next + 1), run.failed)
   end
   if not sab.RouteOk() then return ReadText(PAGE, 108) end
   local last = sab.lastRun
@@ -2377,24 +2429,31 @@ local function progressDetail()
   local run = sab.run
   local item = run and run.items[run.next]
   if not item then return "" end
+  if run.phase == "probe" then return string.format(tostring(ReadText(PAGE, 137)), run.probeTotal - #run.probeList, run.probeTotal) end
+  local p = run.phase == "pack" and run.packProgress
+  if p then return string.format(tostring(ReadText(PAGE, 136)), p.pack, p.packs, p.module, p.modules) end
   local text = string.format(tostring(ReadText(PAGE, 131)), GetMacroData(item.macro, "name"), item.candidates and item.cursor - 1 or 0, item.candidates and #item.candidates or 0)
-  if item.turn and run.turns then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
+  if item.turn and run.turns and run.floors ~= "grid" then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
   return text
 end
 
-local function progressDone()
+-- the bar: probed macros, then packed modules over every layout, then plan entries of the planned total
+local function progressValues()
   local run = sab.run
-  return run and run.placed + run.failed or 0
+  if not run then return 0, 1 end
+  if run.phase == "probe" then return run.probeTotal - #run.probeList, math.max(1, run.probeTotal) end
+  local p = run.phase == "pack" and run.packProgress
+  if p then return (p.pack - 1) * p.modules + p.module, math.max(1, p.packs * p.modules) end
+  return run.n, math.max(1, run.n + math.max(0, #run.items - run.next + 1))
 end
 
-local function progressPlaced()
-  local run = sab.run
-  return run and run.placed or 0
+local function progressDone()
+  return (progressValues())
 end
 
 local function progressTotal()
-  local run = sab.run
-  return run and math.max(1, #run.items) or 1
+  local _, total = progressValues()
+  return total
 end
 
 -- Input rows of a 4-column form table; a change marks the owning frame dirty through `dirty`.
@@ -2424,6 +2483,18 @@ local function rowKit(ftable, idle, buttonHeight, dirty)
   return kit
 end
 
+-- the rate slider spans one module's output to this many times it
+local MAX_MODULE_RATES = 100
+
+-- One module's output per hour at the form's settings (workforce, sunlight), or nil.
+local function oneModuleRate(ctx, ware)
+  local spec = sab.TargetSpec(ctx)
+  spec.rate = 1
+  local ok, plan = pcall(sab.planner.Plan, spec)
+  local rate = ok and plan.produced[ware]
+  return rate and rate > 0 and math.floor(rate + 0.5) or nil
+end
+
 -- The target form: the inputs, `extraRows(kit)` if given, then the planned bill and balance as a preview;
 -- the plan is recomputed on every rebuild and returned (nil when the planner fails).
 local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
@@ -2442,7 +2513,18 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
       local row = input(ReadText(PAGE, 115))
       row[2]:setColSpan(3):createText(string.format(tostring(ReadText(PAGE, 123)), string.format("%+d", current.net)), { halign = "right", minRowHeight = buttonHeight })
     end
-    number(input(ReadText(PAGE, 116)), t.rate, function(v) if v and v > 0 then t.rate = v end end)
+    local oneRate = t.ware and oneModuleRate(ctx, t.ware)
+    if oneRate then
+      t.rate = math.max(oneRate, math.min(MAX_MODULE_RATES * oneRate, t.rate))
+      input(ReadText(PAGE, 116))
+      local row = ftable:addRow(true, {})
+      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = oneRate, minSelect = oneRate,
+        max = MAX_MODULE_RATES * oneRate, start = t.rate, step = 1, active = idle })
+      row[1].handlers.onSliderCellChanged = function(_, value) t.rate = value end
+      row[1].handlers.onSliderCellConfirm = dirty
+    else
+      number(input(ReadText(PAGE, 116)), t.rate, function(v) if v and v > 0 then t.rate = v end end)
+    end
   else
     dropdown(input(ReadText(PAGE, 117)), choices.builds, t.buildMacro, function(id) t.buildMacro = id end)
     if t.kind == "ship" then
@@ -2457,6 +2539,9 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
   dropdown(input(ReadText(1001, 2428)), choices.races, t.race, function(id) t.race = id end)
   local dockings = { option("high", ReadText(1001, 7738)), option("mid", ReadText(1001, 7737)), option("low", ReadText(1001, 7736)) }
   dropdown(input(ReadText(PAGE, 133)), dockings, t.docking or "high", function(id) t.docking = id end)
+  -- the grid packs an empty plan only
+  local fresh = not ctx.station or (sab.menu.holomap ~= 0 and tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) == 0)
+  checkbox(input(ReadText(PAGE, 134)), t.dense, fresh, function(v) t.dense = v end)
   if extraRows then extraRows(kit) end
 
   local header = ftable:addRow(false, {})
@@ -2581,7 +2666,7 @@ function sab.DisplayPanel()
   prow[1]:setColSpan(3):createText(progressText, { halign = "left", minRowHeight = buttonHeight })
   if not idle then
     prow = head:addRow(true, {})
-    prow[1]:setColSpan(3):createStatusBar({ current = progressDone, start = progressPlaced, max = progressTotal, cellBGColor = Color["row_background"],
+    prow[1]:setColSpan(3):createStatusBar({ current = progressDone, start = progressDone, max = progressTotal, cellBGColor = Color["row_background"],
       valueColor = Color["slider_value"], posChangeColor = Color["statusbar_diff_neg_default"], markerColor = Color["statusbar_marker_hidden"],
       width = width - 2 * Helper.borderSize, height = Helper.scaleY(Helper.standardTextHeight), x = Helper.borderSize, scaling = false })
     prow = head:addRow(true, {})
@@ -2607,6 +2692,10 @@ function sab.DisplayPanel()
 
   local btable = frame:addTable(4, { tabOrder = 3, highlightMode = "off", reserveScrollBar = false, y = contentY })
   local row = btable:addRow(true, {})
+  row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1,
+    max = MAX_PER_FRAME, start = sab.perFrame, step = 1 }):setText(ReadText(PAGE, 138))
+  row[1].handlers.onSliderCellChanged = function(_, value) sab.perFrame = value end
+  row = btable:addRow(true, {})
   if target then
     local function canRun() return sab.run == nil and sab.RouteOk() end
     row[1]:createButton({ height = buttonHeight, active = canRun }):setText(ReadText(PAGE, 103), { halign = "center" })
@@ -2917,6 +3006,10 @@ local function hookMenu()
       if not ok then
         sab.Error("tick failed: %s", tostring(err))
         sab.run = nil
+      end
+      if sab.planRefresh and menu.shown then
+        sab.planRefresh = nil
+        refreshPlanTable(true)
       end
     elseif sab.pendingTarget and menu.shown and menu.holomap ~= 0 then
       local ok, err = pcall(sab.StartPending)

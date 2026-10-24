@@ -41,6 +41,11 @@
       <t id="131">%s, candidate %s of %s</t>
       <t id="132">Turn %s of %s</t>
       <t id="133">Docking coverage</t>
+      <t id="134">Denser packing (slower planning)</t>
+      <t id="135">Modules in the plan: %s of %s, failed %s</t>
+      <t id="136">Packing layout %s of %s: module %s of %s</t>
+      <t id="137">Reading module shapes: %s of %s</t>
+      <t id="138">Modules per frame</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>
