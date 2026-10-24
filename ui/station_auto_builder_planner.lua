@@ -39,6 +39,7 @@ local planner = {
   storageHours = 4,           -- storage per ware: hours of its hourly flow
   pierDockM3PerHour = 40000,  -- trade volume one L/XL dock serves per hour
   dockAreaM3PerHour = 150000, -- one dock area per this much trade volume per hour, at least one
+  docking = { high = 1, mid = 2, low = 4 }, -- target.docking: the volume per dock scales by this
   -- set -> catalogue of owned module blueprints
   catalogue = {},
   -- ware -> { name, transport, volume }
@@ -58,6 +59,11 @@ local LIBS = {
 local GROUPS = { "build", "production", "habitation", "storage", "dock", "pier" }
 
 local function ceil(x) return math.ceil(x - 1e-6) end
+
+local function perDock(target)
+  local scale = planner.docking[target.docking or "high"] or 1
+  return planner.pierDockM3PerHour * scale, planner.dockAreaM3PerHour * scale
+end
 
 function planner.Ware(ware)
   local w = planner.wares[ware]
@@ -437,13 +443,13 @@ function planner.Plan(target)
     if #cands > 0 then ladder(cands, volume, counts) else warn("no owned %s storage", tostring(transport)) end
   end
   local flow = plan.flow.import + plan.flow.export
-  if flow > 0 then
-    local piers = candidates(cat.dock, race, function(e) return e.group == "pier" end)
-    if #piers > 0 then ladder(piers, ceil(flow / planner.pierDockM3PerHour), counts) else warn("no owned pier") end
-  end
+  -- a station trades through nothing else: one pier and one dock area at the least, whatever the coverage
+  local perPierDock, perArea = perDock(target)
+  local piers = candidates(cat.dock, race, function(e) return e.group == "pier" end)
+  if #piers > 0 then ladder(piers, math.max(1, ceil(flow / perPierDock)), counts) else warn("no owned pier") end
   local areas = candidates(cat.dock, race, function(e) return e.group == "dock" end)
   if #areas > 0 then
-    counts[areas[1].macro] = (counts[areas[1].macro] or 0) + math.max(1, ceil(flow / planner.dockAreaM3PerHour))
+    counts[areas[1].macro] = (counts[areas[1].macro] or 0) + math.max(1, ceil(flow / perArea))
   else
     warn("no owned dock area")
   end
@@ -571,10 +577,33 @@ function planner.Turns(plan)
     end
     if not changed then break end
   end
+  -- a producer nothing in the chain consumes (food, medical for the habitats) goes after the chain
+  local deepest, inChain = 0, {}
+  for _, e in ipairs(upstream) do
+    for _, p in ipairs(e.products or {}) do
+      for _, m in ipairs(consumers[p.ware] or {}) do if m ~= e.macro then inChain[e.macro] = true end end
+    end
+    if inChain[e.macro] and level[e.macro] > deepest then deepest = level[e.macro] end
+  end
+  for _, e in ipairs(upstream) do
+    if not inChain[e.macro] then level[e.macro] = deepest + 1 end
+  end
+  -- shallow first: a final module's direct inputs come before their own inputs, imports fill the gap meanwhile
   table.sort(upstream, function(a, b)
-    if level[a.macro] ~= level[b.macro] then return level[a.macro] > level[b.macro] end
+    if level[a.macro] ~= level[b.macro] then return level[a.macro] < level[b.macro] end
     return a.name < b.name
   end)
+  -- the transport types of what a final module makes and takes: its storage comes right after it
+  local finalTransports = {}
+  for _, e in ipairs(finals) do
+    for _, p in ipairs(e.products or {}) do
+      finalTransports[planner.Ware(p.ware).transport] = true
+      for w in pairs(p.resources) do finalTransports[planner.Ware(w).transport] = true end
+    end
+  end
+  if target.kind == "ship" then
+    for w in pairs(plan.consumed) do finalTransports[planner.Ware(w).transport] = true end
+  end
   -- the unit lists, largest first; a storage unit goes to the first transport type it serves
   local habitats, piers, areas = unitsOf(cat, counts, "habitation"), unitsOf(cat, counts, "pier"), unitsOf(cat, counts, "dock")
   local transports, storages = {}, {}
@@ -591,6 +620,7 @@ function planner.Turns(plan)
   end
 
   local flow = plan.flow.import + plan.flow.export
+  local perPierDock, perArea = perDock(target)
   local turns, cum = {}, {}
   local placedWorkforce, placedHabitat, placedDocks, placedAreas, placedStorage = 0, 0, 0, 0, {}
   local finalIdx = 1
@@ -618,19 +648,26 @@ function planner.Turns(plan)
     end
     for _, e in ipairs(producers) do placedWorkforce = placedWorkforce + e.workforce end
     if f then placedWorkforce = placedWorkforce + f.workforce end
-    for _, transport in ipairs(transports) do
-      placedStorage[transport] = emitWhile(turn, storages[transport] or {}, placedStorage[transport] or 0, (plan.storage[transport] or 0) * share)
+    -- the final module first, so it runs on imports while the rest is built; then what it trades through
+    if f then turn[#turn + 1] = f.macro end
+    local function emitStorage(ofFinal)
+      for _, transport in ipairs(transports) do
+        if (finalTransports[transport] or false) == ofFinal then
+          placedStorage[transport] = emitWhile(turn, storages[transport] or {}, placedStorage[transport] or 0, (plan.storage[transport] or 0) * share)
+        end
+      end
     end
-    placedDocks = emitWhile(turn, piers, placedDocks, math.max(1, ceil(flow * share / planner.pierDockM3PerHour)))
-    placedAreas = emitWhile(turn, areas, placedAreas, math.max(1, ceil(flow * share / planner.dockAreaM3PerHour)), 1)
+    emitStorage(true)
+    placedAreas = emitWhile(turn, areas, placedAreas, math.max(1, ceil(flow * share / perArea)), 1)
+    placedDocks = emitWhile(turn, piers, placedDocks, math.max(1, ceil(flow * share / perPierDock)))
     if t == 1 then
       for _, e in ipairs(others) do
         for _ = 1, counts[e.macro] do turn[#turn + 1] = e.macro end
       end
     end
-    placedHabitat = emitWhile(turn, habitats, placedHabitat, placedWorkforce)
     for _, e in ipairs(producers) do turn[#turn + 1] = e.macro end
-    if f then turn[#turn + 1] = f.macro end
+    emitStorage(false)
+    placedHabitat = emitWhile(turn, habitats, placedHabitat, placedWorkforce)
     turns[t] = turn
   end
   -- whatever rounding left over goes with the last turn
@@ -655,7 +692,8 @@ function planner.Turns(plan)
       if prev and prev.turn == t and prev.macro == macro then
         prev.count = prev.count + 1
       else
-        bill[#bill + 1] = { macro = macro, count = 1, turn = t }
+        local e = cat.byMacro[macro]
+        bill[#bill + 1] = { macro = macro, count = 1, turn = t, group = e and e.group or "other" }
       end
     end
   end
@@ -696,7 +734,7 @@ end
 function planner.Run(target)
   local plan = planner.Plan(target)
   sab.Debug("planned:\n%s", planner.Print(plan))
-  return sab.StartBill(planner.Turns(plan)), plan
+  return sab.StartBill(planner.Turns(plan), { floors = target.fullCycle }), plan
 end
 
 sab.planner = planner

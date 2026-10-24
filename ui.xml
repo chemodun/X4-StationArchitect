@@ -8,5 +8,6 @@
     <dependency name="extra_data_api" />
     <file name="ui/station_auto_builder.lua" />
     <file name="ui/station_auto_builder_planner.lua" />
+    <file name="ui/station_auto_builder_grid.lua" />
   </environment>
 </addon>
