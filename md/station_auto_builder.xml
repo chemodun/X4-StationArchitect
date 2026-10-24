@@ -24,7 +24,6 @@
       <actions>
         <set_value name="$cfg" exact="table[
           $debugLevel = 'none',
-          $maxModules = 300,
         ]" />
         <do_if value="@player.entity.$StationAutoBuilderConfig == null">
           <set_value name="player.entity.$StationAutoBuilderConfig" exact="$cfg" />
@@ -61,28 +60,13 @@
           </actions>
         </cue>
 
-        <cue name="Options_Menu" instantiate="true" version="1">
+        <cue name="Options_Menu" instantiate="true" version="2">
           <conditions>
             <event_cue_signalled />
           </conditions>
           <actions>
             <include_actions ref="Ensure_Config" />
             <set_value name="$cfg" exact="player.entity.$StationAutoBuilderConfig" />
-
-            <run_actions ref="md.Options_Helper.Add_Title_Row">
-              <param name="title" value="{1972092448, 90100}" />
-            </run_actions>
-            <run_actions ref="md.Options_Helper.Add_Slider">
-              <param name="id" value="'maxModules'" />
-              <param name="text" value="{1972092448, 90110}" />
-              <param name="min" value="100" />
-              <param name="max" value="1000" />
-              <param name="step" value="10" />
-              <param name="textColSpan" value="6" />
-              <param name="colSpan" value="6" />
-              <param name="data" value="$cfg" />
-              <param name="handle" value="Handle_Slider_Changed" />
-            </run_actions>
 
             <run_actions ref="md.Options_Helper.Add_Title_Row">
               <param name="title" value="{1972092448, 90900}" />
@@ -155,21 +139,6 @@
             <raise_lua_event name="'StationAutoBuilder.ConfigChanged'" />
             <include_actions ref="ReadDebugChances" />
             <debug_text text="'StationAutoBuilder: Options: %s set to %s'.[event.param.$echo.$valueId, @event.param.$option.$value]" chance="$debugChance" />
-            <include_actions ref="ClearDebugChances" />
-          </actions>
-        </cue>
-
-        <cue name="Handle_Slider_Changed" instantiate="true" version="1">
-          <conditions>
-            <event_cue_signalled />
-          </conditions>
-          <actions>
-            <set_value name="$resultTable" exact="player.entity.$StationAutoBuilderConfig" />
-            <include_actions ref="md.Options_Helper.Process_Slider_Changed" />
-            <remove_value name="$resultTable" />
-            <raise_lua_event name="'StationAutoBuilder.ConfigChanged'" />
-            <include_actions ref="ReadDebugChances" />
-            <debug_text text="'StationAutoBuilder: Options: %s set to %s'.[event.param.$echo.$valueId, @event.param.$value]" chance="$debugChance" />
             <include_actions ref="ClearDebugChances" />
           </actions>
         </cue>

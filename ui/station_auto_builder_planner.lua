@@ -265,8 +265,9 @@ end
 
 -- *** targets ***
 
--- Per-ship build resources averaged over the owned ship blueprints of a size (s, m, l, xl), those of the
--- race when it owns any (Terran hulls need other wares than Commonwealth ones).
+-- Per-ship build resources and build hours averaged over the owned ship blueprints of a size (s, m, l, xl),
+-- those of the race when it owns any (Terran hulls need other wares than Commonwealth ones); each ship by
+-- the race's method, else "default", else its first.
 local function shipResources(size, race)
   local macros, ofRace = blueprints("", "shiptypes_" .. size), {}
   for _, macro in ipairs(macros) do
@@ -276,11 +277,14 @@ local function shipResources(size, race)
     end
   end
   if #ofRace > 0 then macros = ofRace end
-  local total, ships = {}, 0
+  local total, ships, seconds = {}, 0, 0
   for _, macro in ipairs(macros) do
     local ware = GetMacroData(macro, "ware")
-    local methods = ware and GetWareData(ware, "productionmethods") or {}
-    local method = methods[1]
+    local methods = ware and GetWareData(ware, "productionmethods")
+    local method
+    for _, m in ipairs(type(methods) == "table" and methods or {}) do
+      if m == race or (m == "default" and method ~= race) or not method then method = m end
+    end
     if method then
       local n = C.GetNumProductionMethodResources(ware, method)
       if n > 0 then
@@ -291,13 +295,14 @@ local function shipResources(size, race)
           total[res] = (total[res] or 0) + buf[i].amount
         end
         ships = ships + 1
+        seconds = seconds + C.GetProductionMethodInfo2(ware, method).productiontime
       end
     end
   end
   if ships > 0 then
     for w, amount in pairs(total) do total[w] = amount / ships end
   end
-  return total, ships
+  return total, ships, ships > 0 and seconds / ships / 3600 or 0
 end
 
 -- A product's hourly rate under a workforce fraction and sunlight; the engine multiplies the two bonuses
@@ -350,14 +355,15 @@ end
 
 -- *** the plan ***
 
--- target = { set, station, kind = "ware" | "ship", ware, rate (per hour: net ware amount, or ships),
+-- target = { set, station, kind = "ware" | "ship", ware, rate (net ware amount per hour), modules,
 --   buildMacro (the chosen wharf, shipyard or maintenance bay; the game exposes no size or kind for them),
---   shipSize, repair (no ship resource chain), count, fullCycle, workforce, race, selfSufficient, sunlight }.
+--   shipSize, repair (no ship resource chain), count (build modules; plan.shipRate follows from them),
+--   fullCycle, workforce, race, selfSufficient, sunlight }.
 --   The result carries counts per macro, the ware balance, the workforce and the warnings; Bill() turns it
 --   into StartBill's list.
 function planner.Plan(target)
   local set = target.set or "factory"
-  local cat = planner.Catalogue(set, not planner.keepCatalogue)
+  local cat = planner.Catalogue(set, true)
   local race = target.race or "generic"
   local sunlight = target.sunlight
   if not sunlight and target.station then
@@ -378,16 +384,19 @@ function planner.Plan(target)
   local base, use, habWares, fixedWorkforce = {}, {}, {}, 0
   if target.kind == "ship" then
     local e = target.buildMacro and cat.byMacro[target.buildMacro]
+    local bays = target.count or 1
+    if not target.repair then
+      -- one ship per bay at a time
+      local perShip, ships, hours = shipResources(target.shipSize or "m", race)
+      if ships == 0 then warn("no owned %s ship blueprint", tostring(target.shipSize)) end
+      plan.shipRate = hours > 0 and bays / hours or 0
+      for w, amount in pairs(perShip) do use[w] = amount * plan.shipRate end
+    end
     if e then
-      counts[e.macro] = target.count or 1
-      fixedWorkforce = e.workforce * counts[e.macro]
+      counts[e.macro] = bays
+      fixedWorkforce = e.workforce * bays
     else
       warn("no owned build module %s", tostring(target.buildMacro))
-    end
-    if not target.repair then
-      local perShip, ships = shipResources(target.shipSize or "m", race)
-      if ships == 0 then warn("no owned %s ship blueprint", tostring(target.shipSize)) end
-      for w, amount in pairs(perShip) do use[w] = amount * (target.rate or 1) end
     end
   else
     base[target.ware] = target.rate or 0
@@ -534,57 +543,6 @@ local function makes(cat, macro, ware)
   return wares[ware] == true
 end
 
--- Modules a plan adds; the grid's connection structures come on top.
-local function planModules(plan)
-  local n = 0
-  for _, c in pairs(plan.counts) do n = n + c end
-  return n
-end
-
-local maxCache, maxCached = {}, 0
-
--- The largest target whose plan keeps the station within cap modules (connection structures aside): the
--- producer modules to add for a ware target, ships per hour in tenths for a ship target; nil for repair.
-function planner.MaxTarget(spec, cap)
-  if spec.repair then return nil end
-  local have = 0
-  if spec.station then
-    for _, macro in ipairs(stationMacros(spec.station)) do
-      if not IsMacroClass(macro, "connectionmodule") then have = have + 1 end
-    end
-  end
-  local key = table.concat({ tostring(spec.station), tostring(spec.set), spec.kind, tostring(spec.ware), tostring(spec.buildMacro),
-    tostring(spec.shipSize), tostring(spec.fullCycle), tostring(spec.workforce), tostring(spec.selfSufficient), tostring(spec.race),
-    tostring(spec.docking), cap, have }, "|")
-  if maxCache[key] then return maxCache[key] end
-  local room, field = cap - have, spec.kind == "ship" and "rate" or "modules"
-  local step = field == "rate" and 0.1 or 1
-  local probe = {}
-  for k, v in pairs(spec) do probe[k] = v end
-  -- k whole steps
-  local function fits(k)
-    probe[field] = k * step
-    return planModules(planner.Plan(probe)) <= room
-  end
-  planner.Catalogue(spec.set or "factory", true)
-  planner.keepCatalogue = true
-  local ok, best = pcall(function()
-    if room <= 0 or not fits(1) then return 0 end
-    local lo, hi = 1, 2
-    while hi < 1e6 and fits(hi) do lo, hi = hi, hi * 2 end
-    while hi - lo > 1 do
-      local mid = math.floor((lo + hi) / 2)
-      if fits(mid) then lo = mid else hi = mid end
-    end
-    return lo
-  end)
-  planner.keepCatalogue = nil
-  if not ok then error(best) end
-  local value = tonumber(best) * step
-  if maxCached > 64 then maxCache, maxCached = {}, 0 end
-  maxCache[key], maxCached = value, maxCached + 1
-  return value
-end
 
 -- The current hourly balance of a ware on an existing station, workforce use included, plus what the open
 -- build menu's plan still has to build (planned entries and modules under construction) at the station's

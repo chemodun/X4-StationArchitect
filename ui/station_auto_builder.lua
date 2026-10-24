@@ -111,12 +111,6 @@ function sab.ReadConfig()
   sab.panelDirty = true
 end
 
--- The Options page's cap on a station's modules, connection structures aside.
-function sab.MaxModules()
-  local n = tonumber(sab.cfg.maxModules)
-  return n and math.max(100, math.min(1000, n)) or 300
-end
-
 -- *** module sizes ***
 -- half-extents about a centre, metres, from the Extra Data API; nil when it cannot answer
 
@@ -2353,9 +2347,12 @@ sab.tab = "target"
 sab.expanded = false
 -- ware, build module and race are filled from the catalogue on the first panel build (targetChoices)
 local function defaultTarget()
-  return { kind = "ware", modules = 1, shipRate = 1, shipSize = "m", fullCycle = false, workforce = true, selfSufficient = false, docking = "high", dense = false }
+  return { kind = "ware", modules = 1, bays = 1, shipSize = "m", fullCycle = false, workforce = true, selfSufficient = false, docking = "high", dense = false }
 end
 sab.target = defaultTarget()
+-- slider tops: producer modules a ware target adds, build modules of a ship or repair target
+local MAX_ADD_MODULES = 100
+local MAX_BAYS = 10
 -- placements per frame; 1 keeps the dragged float, more drop undragged floats in the same frame
 local MAX_PER_FRAME = 10
 sab.perFrame = 1
@@ -2429,7 +2426,7 @@ function sab.TargetSpec(ctx)
   local ship = t.kind ~= "ware"
   local add = not ship and math.max(0, (t.modules or 1) - currentOf(ctx, t.ware).modules) or nil
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, kind = ship and "ship" or "ware", repair = t.kind == "repair",
-    ware = t.ware, rate = ship and t.shipRate or nil, modules = add, buildMacro = t.buildMacro, shipSize = t.shipSize, count = 1,
+    ware = t.ware, modules = add, buildMacro = t.buildMacro, shipSize = t.shipSize, count = ship and t.bays or nil,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
     race = t.race, docking = t.docking, dense = t.dense }
 end
@@ -2553,12 +2550,6 @@ local function rowKit(ftable, idle, buttonHeight, dirty)
       if id ~= current then onChange(id); dirty() end
     end
   end
-  function kit.number(row, value, onChange)
-    row[3]:setColSpan(2):createEditBox({ height = buttonHeight, active = idle }):setText(tostring(value), { halign = "center" })
-    row[3].handlers.onEditBoxDeactivated = function(_, text, textchanged)
-      if textchanged then onChange(tonumber(text)); dirty() end
-    end
-  end
   function kit.checkbox(row, checked, active, onChange)
     row[4]:createCheckBox(checked, { height = buttonHeight, width = buttonHeight, active = idle and active })
     row[4].handlers.onClick = function(_, value) onChange(value); dirty() end
@@ -2573,20 +2564,14 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
   local cat = sab.planner.Catalogue(ctx.set, true)
   local choices = targetChoices(cat)
   local kit = rowKit(ftable, idle, buttonHeight, dirty)
-  local input, dropdown, number, checkbox = kit.input, kit.dropdown, kit.number, kit.checkbox
+  local input, dropdown, checkbox = kit.input, kit.dropdown, kit.checkbox
   local current = t.kind == "ware" and currentOf(ctx, t.ware)
-  -- the largest target within the Options page's module cap
-  local okMax, max = pcall(sab.planner.MaxTarget, sab.TargetSpec(ctx), sab.MaxModules())
-  if not okMax then
-    sab.Error("max target failed: %s", tostring(max))
-    max = nil
-  end
-  local top
+  local low, top
   if current then
-    top = math.max(1, current.modules, current.modules + (max or 0))
-    t.modules = math.max(1, current.modules, math.min(top, t.modules or 1))
-  elseif t.kind == "ship" and max and max > 0 and t.shipRate > max then
-    t.shipRate = max
+    low, top = math.max(1, current.modules), current.modules + MAX_ADD_MODULES
+    t.modules = math.max(low, math.min(top, t.modules or 1))
+  else
+    t.bays = math.max(1, math.min(MAX_BAYS, t.bays or 1))
   end
   local ok, plan = pcall(sab.planner.Plan, sab.TargetSpec(ctx))
 
@@ -2596,7 +2581,6 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
     dropdown(input(ReadText(PAGE, 114)), choices.wares, t.ware, function(id) t.ware = id end)
     input(ReadText(PAGE, 116))
     local row = ftable:addRow(true, {})
-    local low = math.max(1, current.modules)
     row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low,
       max = top, start = t.modules, step = 1, active = idle })
     row[1].handlers.onSliderCellChanged = function(_, value) t.modules = value end
@@ -2607,14 +2591,17 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
       string.format("%+d", math.floor(planned + 0.5))), { halign = "right", minRowHeight = buttonHeight })
   else
     dropdown(input(ReadText(PAGE, 117)), choices.builds, t.buildMacro, function(id) t.buildMacro = id end)
+    input(ReadText(1001, 2439))
+    local row = ftable:addRow(true, {})
+    row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1,
+      max = MAX_BAYS, start = t.bays, step = 1, active = idle })
+    row[1].handlers.onSliderCellChanged = function(_, value) t.bays = value end
+    row[1].handlers.onSliderCellConfirm = dirty
     if t.kind == "ship" then
       local sizes = { option("s", "S"), option("m", "M"), option("l", "L"), option("xl", "XL") }
       dropdown(input(ReadText(1001, 9648)), sizes, t.shipSize, function(id) t.shipSize = id end)
-      local row = input(ReadText(PAGE, 118))
-      if max then
-        row[2]:createText(string.format("%s %s", ReadText(1001, 19), tostring(max)), { halign = "right", color = Color["text_inactive"] })
-      end
-      number(row, t.shipRate, function(v) if v and v > 0 then t.shipRate = (max and max > 0) and math.min(v, max) or v end end)
+      row = input(ReadText(PAGE, 118))
+      row[2]:setColSpan(3):createText(ok and string.format("%.1f", plan.shipRate or 0) or "", { halign = "right", minRowHeight = buttonHeight })
     end
   end
   checkbox(input(ReadText(PAGE, 119)), t.fullCycle, true, function(v) t.fullCycle = v end)

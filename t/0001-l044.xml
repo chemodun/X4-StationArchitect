@@ -54,10 +54,6 @@
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>
 
-      <!-- Section: Planning (90100) -->
-      <t id="90100">Planning</t>
-      <t id="90110">Max modules per station</t>
-
       <!-- Section: Debug (90900) -->
       <t id="90900">Debug</t>
       <t id="90910">Debug Level</t>
