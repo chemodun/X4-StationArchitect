@@ -111,7 +111,7 @@
         </cue>
 
         <!-- The Lua side has no macro bounding box: it asks per macro, the answer lands in the player's blackboard -->
-        <cue name="BBox" instantiate="true" version="2">
+        <cue name="BBox" instantiate="true" version="3">
           <conditions>
             <event_object_signalled object="player.entity" param="'StationAutoBuilder.BBox'" />
             <check_value value="typeof event.param2 == datatype.string" />
@@ -122,8 +122,6 @@
             <do_if value="@player.entity.$StationAutoBuilderBBox == null">
               <set_value name="player.entity.$StationAutoBuilderBBox" exact="table[]" />
             </do_if>
-            <!-- the Lua library entry reports 0 docks for piers -->
-            <set_value name="$pierDocks" exact="if @$macro.numpierdocks != null then $macro.numpierdocks else 0" />
             <do_if value="$macro.boundingbox.exists">
               <set_value name="player.entity.$StationAutoBuilderBBox.{$key}" exact="table[
                 $maxX = $macro.boundingbox.max.x,
@@ -132,11 +130,10 @@
                 $cX = $macro.boundingbox.center.x,
                 $cY = $macro.boundingbox.center.y,
                 $cZ = $macro.boundingbox.center.z,
-                $pierDocks = $pierDocks,
               ]" />
             </do_if>
             <do_else>
-              <set_value name="player.entity.$StationAutoBuilderBBox.{$key}" exact="table[$maxX = 0, $maxY = 0, $maxZ = 0, $cX = 0, $cY = 0, $cZ = 0, $pierDocks = $pierDocks]" />
+              <set_value name="player.entity.$StationAutoBuilderBBox.{$key}" exact="table[$maxX = 0, $maxY = 0, $maxZ = 0, $cX = 0, $cY = 0, $cZ = 0]" />
             </do_else>
             <include_actions ref="ReadDebugChances" />
             <debug_text text="'StationAutoBuilder: bbox of %s: %s'.[event.param2, player.entity.$StationAutoBuilderBBox.{$key}]" chance="$traceChance" />

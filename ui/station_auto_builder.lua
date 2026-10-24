@@ -66,7 +66,7 @@ local MENU_NAME = "StationConfigurationMenu"
 -- so the finite ctype table runs out after enough calls ("table overflow")
 local P, U8PP, U16P, U32P, I32P, U64P = ffi.typeof("uint8_t*"), ffi.typeof("uint8_t**"), ffi.typeof("uint16_t*"), ffi.typeof("uint32_t*"), ffi.typeof("int32_t*"), ffi.typeof("uint64_t*")
 local FLOATP, VOIDPP, CHARP, CHARPP, UPTR = ffi.typeof("float*"), ffi.typeof("void**"), ffi.typeof("const char*"), ffi.typeof("const char**"), ffi.typeof("uintptr_t")
-local FN_RESOLVE, FN_UPDATE, FN_DEFAULTS = ffi.typeof("void*(*)(void*, uint64_t, uint32_t)"), ffi.typeof("void(*)(void*, uint8_t, const float*)"), ffi.typeof("void*(*)(void*)")
+local FN_RESOLVE, FN_UPDATE = ffi.typeof("void*(*)(void*, uint64_t, uint32_t)"), ffi.typeof("void(*)(void*, uint8_t, const float*)")
 local FN_U8_I32 = ffi.typeof("uint8_t(*)(void*, int32_t)")
 local PLAN_ENTRIES = ffi.typeof("UIConstructionPlanEntry2[?]")
 
@@ -79,8 +79,10 @@ local sab = {
   menu = nil,
   -- the active run; nil between runs
   run = nil,
-  -- macro -> { maxX, maxY, maxZ, cX, cY, cZ, pierDocks } from MD
+  -- macro -> { maxX, maxY, maxZ, cX, cY, cZ } from MD
   sizes = {},
+  -- macro -> snap connections from the Extra Data API
+  snapCache = {},
   -- "entry macro|station connection|module macro|module connection" the engine refused to snap
   incompatible = {},
 }
@@ -234,12 +236,10 @@ local UPDATE = { 0x4c, 0x8d, 0x05, false, false, false, false, 0x0f, 0x11, 0x87,
   0x00, 0x0f, 0x28, 0x05, false, false, false, false, 0x0f, 0x11, 0x87, 0x60, 0x04, 0x00, 0x00, 0xe8,
   false, false, false, false }
 local UPDATE_AT = 0x163
--- inside the update, +0x266: module defaults of the first floating macro, then its connection vector +0x900/+0x908
+-- inside the update, +0x1f9: cmp byte [r15 + disp32], r12b, the editor's dragging flag that gates the snap search
 ---@type (integer|false)[]
-local DEFAULTS = { 0x48, 0x8b, 0x9d, 0xa8, 0x02, 0x00, 0x00, 0x48, 0x8b, 0xcb, 0xe8, false, false, false, false,
-  0x48, 0x8b, 0x88, 0x08, 0x09, 0x00, 0x00, 0x48, 0x89, 0x4c, 0x24, 0x70, 0x48, 0x8b, 0x80, 0x00, 0x09, 0x00,
-  0x00 }
-local DEFAULTS_AT = 0x266
+local DRAGGING = { 0x45, 0x38, 0xa7, false, false, false, false }
+local DRAGGING_AT = 0x1f9
 
 -- nil: not located yet, false: unavailable, table: located
 ---@type table|false|nil
@@ -312,16 +312,17 @@ local function detect()
   local at = routine + UPDATE_AT
   if not (inText(img, at, #UPDATE) and matchBytes(img.base + at, UPDATE)) then return false, "update call mismatch" end
   local update = rel32(img, at + #UPDATE - 4)
-  at = update + DEFAULTS_AT
-  if not (inText(img, at, #DEFAULTS) and matchBytes(img.base + at, DEFAULTS)) then return false, "defaults call mismatch" end
-  local defaults = rel32(img, at + 11)
-  if not (inText(img, resolver, 16) and inText(img, update, 16) and inText(img, defaults, 16)) then return false, "target outside .text" end
-  sab.Debug("engine located (%s): resolver 0x%x registry 0x%x update 0x%x defaults 0x%x", img.id, resolver, registry, update, defaults)
+  at = update + DRAGGING_AT
+  if not (inText(img, at, #DRAGGING) and matchBytes(img.base + at, DRAGGING)) then return false, "dragging flag mismatch" end
+  local dragging = i32(img.base + at + 3)
+  if dragging <= 0 or dragging > 0x1000 then return false, "dragging flag offset out of range" end
+  if not (inText(img, resolver, 16) and inText(img, update, 16)) then return false, "target outside .text" end
+  sab.Debug("engine located (%s): resolver 0x%x registry 0x%x update 0x%x dragging +0x%x", img.id, resolver, registry, update, dragging)
   return {
     resolve = ffi.cast(FN_RESOLVE, img.base + resolver),
     registry = ffi.cast(VOIDPP, img.base + registry),
     update = ffi.cast(FN_UPDATE, img.base + update),
-    defaults = ffi.cast(FN_DEFAULTS, img.base + defaults),
+    dragging = dragging,
   }
 end
 
@@ -410,25 +411,17 @@ function sab.FloatingMacro(editor)
   return pp(e + 8)[0]
 end
 
--- A macro's snap connections from its module defaults: name, position and direction in the macro's frame.
+-- A macro's snap connections from the Extra Data API: name, position and direction in the macro's frame.
 function sab.Connections(macro)
+  if macro == nil then return {} end
+  local name = stdString(macro + 0x20)
+  if not name then return {} end
+  if sab.snapCache[name] then return sab.snapCache[name] end
   local list = {}
-  if macro == nil then return list end
-  local d = ffi.cast(P, engine.defaults(macro))
-  if d == nil then return list end
-  local first, last = pp(d + 0x900)[0], pp(d + 0x908)[0]
-  if first == nil then return list end
-  local n = tonumber((uptr(last) - uptr(first)) / 8)
-  if n < 0 or n > 256 then return list end
-  for i = 0, n - 1 do
-    local c = pp(first)[i]
-    if c ~= nil then
-      local m = pp(c + 0xa0)[0]
-      if m == nil then m = c + 0x60 end
-      local t = readTransform(m)
-      list[#list + 1] = { name = stdString(c + 0x10), pos = { t.x, t.y, t.z }, dir = t.rows[3], rows = t.rows }
-    end
+  for _, c in ipairs(ExtraData.GetMacroDataEx(name, "snapconnections") or {}) do
+    list[#list + 1] = { name = c.name, pos = c.position, dir = c.direction, rows = c.rows }
   end
+  if #list > 0 then sab.snapCache[name] = list end
   return list
 end
 
@@ -544,8 +537,8 @@ end
 -- Run the editor's update without a cursor: the snap search from the floating transform as written.
 -- A target entry pointer at +0x4b8.. means the nearest compatible pair inside the snap radius was found.
 function sab.Snap(editor)
-  -- the snap search runs only with +0x570 set, which vanilla ties to the cursor being over the map
-  editor[0x570] = 1
+  -- the snap search runs only while the editor drags a module
+  editor[engine.dragging] = 1
   engine.update(editor, 0, zeroRay)
   local r = { snapped = pp(editor + 0x4c0)[0] ~= nil, valid = editor[0x4b0] ~= 0 }
   if r.snapped then

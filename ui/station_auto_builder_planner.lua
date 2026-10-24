@@ -126,16 +126,16 @@ local function effectsOf(ware, method)
   return { work = work or 0, sunlight = sunlight or 0 }
 end
 
--- One module as the planner sees it. Rates are per hour. The pier dock count the library does not carry
--- comes from the MD per-macro answer in sab.sizes.
+-- One module as the planner sees it. Rates are per hour. The library carries no pier docks (0 for every
+-- pier), so a pier's count is its docking bays from the Extra Data API.
 local function entryOf(group, lib, macro)
   local data = GetLibraryEntry(lib, macro)
   local races = GetMacroData(macro, "makerraceid")
   races = type(races) == "table" and races or { races }
-  local md = sab.sizes[macro] or {}
+  local bays = lib == "moduletypes_dock" and IsMacroClass(macro, "pier") and ExtraData and ExtraData.GetMacroDataEx(macro, "dockingbays")
   local e = { macro = macro, group = group, name = data.name, race = races[1] or "generic", races = {},
     workforce = data.maxworkforce or 0, docksS = data.docks_s or 0, docksM = data.docks_m or 0,
-    pierDocks = md.pierDocks or 0 }
+    pierDocks = bays and #bays or 0 }
   for _, r in ipairs(races) do e.races[r] = true end
   if data.products then
     local cycle = 0
