@@ -40,6 +40,7 @@ local planner = {
   pierDockM3PerHour = 40000,  -- trade volume one L/XL dock serves per hour
   dockAreaM3PerHour = 150000, -- one dock area per this much trade volume per hour, at least one
   docking = { high = 1, mid = 2, low = 4 }, -- target.docking: the volume per dock scales by this
+  bigPier = 3,                -- piers with more docks: one per station at most, at the bottom
   -- set -> catalogue of owned module blueprints
   catalogue = {},
   -- ware -> { name, transport, volume }
@@ -161,7 +162,19 @@ local function entryOf(group, lib, macro)
     local scale = (data.workforceproductamount or 0) > 0 and e.capacity / data.workforceproductamount or 0
     for _, r in ipairs(data.workforceresources or {}) do e.needs[r.ware] = r.amount * 3600 / r.cycle * scale end
   elseif group == "dock" then
-    if e.pierDocks > 0 then e.group = "pier"; e.capacity = e.pierDocks else e.capacity = e.docksM + e.docksS end
+    if e.pierDocks > 0 then
+      e.group, e.capacity = "pier", e.pierDocks
+      -- approach directions: a one-sided pier needs the least plot
+      local dirs = {}
+      for _, z in ipairs(ExtraData.GetMacroDataEx(macro, "exclusionzones") or {}) do
+        local d = z.direction
+        dirs[string.format("%.1f,%.1f,%.1f", d[1], d[2], d[3])] = true
+      end
+      e.approaches = 0
+      for _ in pairs(dirs) do e.approaches = e.approaches + 1 end
+    else
+      e.capacity = e.docksM + e.docksS
+    end
   end
   return e
 end
@@ -446,7 +459,26 @@ function planner.Plan(target)
   -- a station trades through nothing else: one pier and one dock area at the least, whatever the coverage
   local perPierDock, perArea = perDock(target)
   local piers = candidates(cat.dock, race, function(e) return e.group == "pier" end)
-  if #piers > 0 then ladder(piers, math.max(1, ceil(flow / perPierDock)), counts) else warn("no owned pier") end
+  if #piers > 0 then
+    -- one big pier at most, the rest from the smaller ones
+    local small, big = {}, nil
+    for _, e in ipairs(piers) do
+      if e.capacity <= planner.bigPier then small[#small + 1] = e elseif not big then big = e end
+    end
+    table.sort(small, function(a, b)
+      if a.capacity ~= b.capacity then return a.capacity > b.capacity end
+      if a.approaches ~= b.approaches then return a.approaches < b.approaches end
+      return a.macro < b.macro
+    end)
+    local need = math.max(1, ceil(flow / perPierDock))
+    if big and (need >= big.capacity or #small == 0) then
+      counts[big.macro] = (counts[big.macro] or 0) + 1
+      need = need - big.capacity
+    end
+    if #small > 0 then ladder(small, need, counts) elseif need > 0 then ladder(piers, need, counts) end
+  else
+    warn("no owned pier")
+  end
   local areas = candidates(cat.dock, race, function(e) return e.group == "dock" end)
   if #areas > 0 then
     counts[areas[1].macro] = (counts[areas[1].macro] or 0) + math.max(1, ceil(flow / perArea))

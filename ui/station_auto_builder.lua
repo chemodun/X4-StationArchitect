@@ -664,6 +664,8 @@ local function finishPlacement(run, item)
   elseif snap.snapped then
     sab.Debug("%s on entry %d rejected by the editor (valid %s): %s / %s, roll %.0f deg, at %.0f %.0f %.0f", item.macro, snap.entryIdx, tostring(snap.valid),
       pair and pair.predecessorConnection or "-", pair and pair.connection or "-", math.deg(item.roll or 0), pos.x, pos.y, pos.z)
+  elseif item.free then
+    sab.Debug("free drop of %s at %.0f %.0f %.0f refused by the editor (valid %s)", item.macro, pos.x, pos.y, pos.z, tostring(snap.valid))
   else
     sab.Debug("no snap for %s at %.0f %.0f %.0f", item.macro, pos.x, pos.y, pos.z)
   end
@@ -686,6 +688,7 @@ local OUTER = { dockarea = 1000, pier = 2000, buildmodule = 2000, defencemodule 
 local TRIES_PER_FRAME, CHECKS_PER_FRAME = 8, 400
 local ROLLS = { 0, math.pi / 2, math.pi, 3 * math.pi / 2 }
 local RELAXED_TRIES, MAX_REACH, MAX_SPURS, MAX_PLOT, PLOT_STEP = 200, 6, 3, 20000, 1000
+sab.maxPlotKm = MAX_PLOT / 1000
 local AXES = { "x", "y", "z" }
 local STRAIGHT = 0.9
 local LATTICE_GAP, WING_GAP, LATERAL_WEIGHT, ROW_GAP = 100, 500, 0.25, 100
@@ -952,7 +955,7 @@ local function strutFor(kit, length, vertical)
 end
 
 -- for the grid layout (station_auto_builder_grid.lua)
-sab.geo = { rotate = rotate, unit = unit, worldBox = worldBox, armOf = armOf, strutFor = strutFor }
+sab.geo = { rotate = rotate, unit = unit, mulRows = mulRows, worldBox = worldBox, armOf = armOf, strutFor = strutFor }
 
 -- The shortest combination of at most four struts spanning need or more: lengths, longest first.
 local function spanWith(lengths, need)
