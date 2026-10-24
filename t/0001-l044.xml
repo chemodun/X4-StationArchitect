@@ -22,8 +22,8 @@
       <t id="112">Build ships</t>
       <t id="113">Maintain ships</t>
       <t id="114">Ware</t>
-      <t id="115">Current net rate</t>
-      <t id="116">Add per hour</t>
+      <t id="115">Net, now / planned</t>
+      <t id="116">Production modules</t>
       <t id="117">Build module</t>
       <t id="118">Ships per hour</t>
       <t id="119">Full cycle</t>
@@ -47,6 +47,9 @@
       <t id="137">Reading module shapes: %s of %s</t>
       <t id="138">Modules per frame</t>
       <t id="139">Finding places for docks and piers: %s of %s</t>
+      <t id="140">%s / %s /h</t>
+      <t id="142">Plot licence for %s x %s x %s km: %s</t>
+      <t id="143">Plot licence declined, nothing placed</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>

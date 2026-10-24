@@ -39,22 +39,11 @@
       </actions>
     </library>
 
-    <cue name="Init" version="2">
+    <cue name="Init" version="3">
       <actions>
         <include_actions ref="Ensure_Config" />
-        <set_value name="player.entity.$StationAutoBuilderBBox" exact="table[]" />
       </actions>
       <cues>
-        <!-- module data is read from the game of this session, never carried over in a save -->
-        <cue name="Reset_Module_Data" instantiate="true" version="1">
-          <conditions>
-            <event_game_loaded />
-          </conditions>
-          <actions>
-            <set_value name="player.entity.$StationAutoBuilderBBox" exact="table[]" />
-          </actions>
-        </cue>
-
         <cue name="Register_Menu" instantiate="true" version="1">
           <conditions>
             <event_cue_signalled cue="@md.Simple_Menu_API.Reloaded" />
@@ -107,37 +96,6 @@
             <remove_value name="$debugLevelIndexes" />
             <remove_value name="$debugLevelCurrentIndex" />
             <remove_value name="$cfg" />
-          </actions>
-        </cue>
-
-        <!-- The Lua side has no macro bounding box: it asks per macro, the answer lands in the player's blackboard -->
-        <cue name="BBox" instantiate="true" version="3">
-          <conditions>
-            <event_object_signalled object="player.entity" param="'StationAutoBuilder.BBox'" />
-            <check_value value="typeof event.param2 == datatype.string" />
-          </conditions>
-          <actions>
-            <set_value name="$macro" exact="macro.{event.param2}" />
-            <set_value name="$key" exact="'$%s'.[event.param2]" />
-            <do_if value="@player.entity.$StationAutoBuilderBBox == null">
-              <set_value name="player.entity.$StationAutoBuilderBBox" exact="table[]" />
-            </do_if>
-            <do_if value="$macro.boundingbox.exists">
-              <set_value name="player.entity.$StationAutoBuilderBBox.{$key}" exact="table[
-                $maxX = $macro.boundingbox.max.x,
-                $maxY = $macro.boundingbox.max.y,
-                $maxZ = $macro.boundingbox.max.z,
-                $cX = $macro.boundingbox.center.x,
-                $cY = $macro.boundingbox.center.y,
-                $cZ = $macro.boundingbox.center.z,
-              ]" />
-            </do_if>
-            <do_else>
-              <set_value name="player.entity.$StationAutoBuilderBBox.{$key}" exact="table[$maxX = 0, $maxY = 0, $maxZ = 0, $cX = 0, $cY = 0, $cZ = 0]" />
-            </do_else>
-            <include_actions ref="ReadDebugChances" />
-            <debug_text text="'StationAutoBuilder: bbox of %s: %s'.[event.param2, player.entity.$StationAutoBuilderBBox.{$key}]" chance="$traceChance" />
-            <include_actions ref="ClearDebugChances" />
           </actions>
         </cue>
 

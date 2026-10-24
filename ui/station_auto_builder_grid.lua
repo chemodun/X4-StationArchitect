@@ -863,8 +863,8 @@ local function docks(g, run)
       if it.column and IsMacroClass(it.macro, "pier") == (pass == 1) then list[#list + 1] = it end
     end
   end
-  if #list == 0 then return end
   local D = dockState(g, run.kit)
+  if #list == 0 then return D end
   grid.lastDocks = D
   local placed, dropped, failed = 0, 0, 0
   local progress = run.packProgress
@@ -887,6 +887,16 @@ local function docks(g, run)
   local saved = compress(g, run.kit)
   g.connectors = g.connectors + (D.newCrosses or 0) - saved
   sab.Debug("grid: docking %d hung, %d free, %d without a place, %d new crosses, %d saved by struts", placed, dropped, failed, D.newCrosses or 0, saved)
+  return D
+end
+
+-- Every body of the layout (crosses, modules, docks) in one station-frame box.
+local function layoutBox(D)
+  local all
+  for _, list in ipairs({ D.solid, D.bodies }) do
+    for _, b in ipairs(list) do all = all and union(all, b) or b end
+  end
+  return all and shifted(all, D.shift)
 end
 
 -- Run items in build order: the bill order, each module after the crosses and modules it hangs on.
@@ -1117,7 +1127,7 @@ local function pack(run)
   local H = g.top + 1
   local centre = C.GetBuildPlotCenterOffset(sab.menu.container)
   g.origin = { centre.x - (g.sx - 1) * g.u / 2, centre.y - (H - 1) * g.u / 2, centre.z - (g.sz - 1) * g.u / 2 }
-  docks(g, run)
+  run.plotBox = layoutBox(docks(g, run))
   sab.Debug("grid: kept footprint %d x %d, occupancy 1/%d, cost %g: %d modules, %d failed, %d connectors, %.1f x %.1f x %.1f km, %d frames for %d packs",
     g.sx, g.sz, g.R, g.cost, #g.modules, #g.failed, g.connectors, g.used[1] * g.u / 1000, g.used[2] * g.u / 1000, g.used[3] * g.u / 1000, frames, packs)
   run.grid = g
@@ -1146,6 +1156,6 @@ function grid.Step(run)
   end
   if coroutine.status(run.packer) == "dead" then
     run.packer = nil
-    run.phase = "begin"
+    sab.OfferPlot(run)
   end
 end

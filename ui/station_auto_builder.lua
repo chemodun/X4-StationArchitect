@@ -48,6 +48,9 @@ ffi.cdef [[
   void RemoveFloatingSequenceFromConstructionPlan(UniverseID holomapid);
   void UpdateConstructionMapItemLoadout(UniverseID holomapid, size_t itemidx, UniverseID defensibleid, UILoadout uiloadout);
   int64_t GetBuildPlotPrice(UniverseID sectorid, UIPosRot location, float x, float y, float z, const char* factionid);
+  int64_t GetBuildPlotPayment(UniverseID stationid, bool* positionchanged);
+  UIPosRot GetObjectPositionInSector(UniverseID objectid);
+  UniverseID GetSectorControlStation(UniverseID sectorid);
   const char* GetContainerBuildMethod(UniverseID containerid);
   uint32_t GetNumPlayerBuildMethods(void);
   uint32_t GetPlayerBuildMethods(ProductionMethodInfo* result, uint32_t resultlen);
@@ -72,14 +75,13 @@ local PLAN_ENTRIES = ffi.typeof("UIConstructionPlanEntry2[?]")
 
 local sab = {
   configBlackboard = "$StationAutoBuilderConfig",
-  sizesBlackboard = "$StationAutoBuilderBBox",
   playerId = nil,
   cfg = {},
   debugLevel = "none",
   menu = nil,
   -- the active run; nil between runs
   run = nil,
-  -- macro -> { maxX, maxY, maxZ, cX, cY, cZ } from MD
+  -- macro -> { maxX, maxY, maxZ, cX, cY, cZ }, read on first use
   sizes = {},
   -- macro -> snap connections from the Extra Data API
   snapCache = {},
@@ -109,36 +111,15 @@ function sab.ReadConfig()
 end
 
 -- *** module sizes ***
--- Lua has no macro bounding box; the MD cue BBox answers a per-macro signal into the player's blackboard,
--- half-extents about a centre, metres. MD does not run while paused, so the asking is at menu open.
+-- half-extents about a centre, metres, from the Extra Data API; nil when it cannot answer
 
-function sab.ReadSizes()
-  local sizes = sab.playerId ~= 0 and GetNPCBlackboard(sab.playerId, sab.sizesBlackboard) or nil
-  sab.sizes = (type(sizes) == "table") and sizes or {}
-  return sab.sizes
-end
-
--- Asks for every macro the blackboard lacks; MD clears the table on every load, a repeat ask is harmless.
-function sab.RequestSizes(macros)
-  if sab.playerId == 0 then return end
-  local sizes = sab.ReadSizes()
-  local asked = 0
-  for _, macro in ipairs(macros) do
-    if not sizes[macro] then
-      SignalObject(sab.playerId, "StationAutoBuilder.BBox", macro)
-      asked = asked + 1
-    end
-  end
-  if asked > 0 then sab.Debug("asked MD for %d module data entries", asked) end
-end
-
-function sab.MenuMacros()
-  local macros = {}
-  for _, list in pairs(sab.menu and sab.menu.modules or {}) do
-    for _, macro in ipairs(list) do macros[#macros + 1] = macro end
-  end
-  return macros
-end
+setmetatable(sab.sizes, { __index = function(sizes, macro)
+  local box = ExtraData and ExtraData.GetMacroDataEx(macro, "boundingbox")
+  if not box then return nil end
+  local size = { maxX = box.max[1], maxY = box.max[2], maxZ = box.max[3], cX = box.centre[1], cY = box.centre[2], cZ = box.centre[3] }
+  sizes[macro] = size
+  return size
+end })
 
 -- *** plan read-back ***
 
@@ -792,39 +773,49 @@ local function readPlanState(run, editor)
   readPlot(run)
 end
 
--- The plot's faces in whole steps from the station's position, { pos = { x, y, z }, neg = { x, y, z } }, as vanilla's plot menu counts them.
-local function plotFaces()
+-- The plot's face distances from the station's position in metres, { pos = { x, y, z }, neg = { x, y, z } };
+-- a map-reserved plot has faces half a step out.
+local function plotExtents()
   local menu = sab.menu
   local size, centre = C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container)
-  local f = { pos = {}, neg = {} }
+  local e = { pos = {}, neg = {} }
   for i, axis in ipairs(AXES) do
-    f.pos[i] = math.floor((size[axis] / 2 + centre[axis]) / PLOT_STEP + 0.5)
-    f.neg[i] = math.floor((size[axis] / 2 - centre[axis]) / PLOT_STEP + 0.5)
+    e.pos[i] = size[axis] / 2 + centre[axis]
+    e.neg[i] = size[axis] / 2 - centre[axis]
   end
-  return f
+  return e
 end
 
--- Each face of the plot moved on its own to cover box (station coordinates; the station's position stays inside);
--- shrink lets faces move inwards. Capped per axis; paid as vanilla's plot menu pays it.
--- The face moves FitPlot would make: pos, neg (metres per axis) and whether any face moves.
+-- Each face of the plot moved on its own to whole steps from the station's position that cover box (station
+-- coordinates; the station's position stays inside); shrink lets faces move inwards. Capped per axis.
+-- Returns the face moves (metres per axis), whether any face moves, and the new faces in steps.
 local function plotChange(box, shrink, quiet)
-  local have = plotFaces()
+  local have = plotExtents()
   local pos, neg, change = { x = 0, y = 0, z = 0 }, { x = 0, y = 0, z = 0 }, false
+  local faces = { pos = {}, neg = {} }
   for i, axis in ipairs(AXES) do
+    local hp, hn = math.ceil(have.pos[i] / PLOT_STEP - 0.001), math.ceil(have.neg[i] / PLOT_STEP - 0.001)
     local p = math.max(0, math.ceil(box.max[i] / PLOT_STEP - 0.001))
     local n = math.max(0, math.ceil(-box.min[i] / PLOT_STEP - 0.001))
-    if not shrink then p, n = math.max(p, have.pos[i]), math.max(n, have.neg[i]) end
+    if not shrink then p, n = math.max(p, hp), math.max(n, hn) end
     if p + n == 0 then p = 1 end
     if (p + n) * PLOT_STEP > MAX_PLOT then
       if not quiet then sab.Debug("the layout needs %.1f km on %s, above the plot cap %.0f km", (p + n) * PLOT_STEP / 1000, axis, MAX_PLOT / 1000) end
       while (p + n) * PLOT_STEP > MAX_PLOT do
-        if p - have.pos[i] >= n - have.neg[i] and p > 0 then p = p - 1 else n = n - 1 end
+        if p - hp >= n - hn and p > 0 then p = p - 1 else n = n - 1 end
       end
     end
-    pos[axis], neg[axis] = (p - have.pos[i]) * PLOT_STEP, (n - have.neg[i]) * PLOT_STEP
-    if pos[axis] ~= 0 or neg[axis] ~= 0 then change = true end
+    pos[axis], neg[axis] = p * PLOT_STEP - have.pos[i], n * PLOT_STEP - have.neg[i]
+    if math.abs(pos[axis]) > 1 or math.abs(neg[axis]) > 1 then change = true end
+    faces.pos[i], faces.neg[i] = p, n
   end
-  return pos, neg, change
+  return pos, neg, change, faces
+end
+
+-- Vanilla's licence rule: free where the sector owner is nobody, the Xenon or the player.
+local function plotIsFree(sector)
+  local owner = GetComponentData(sector, "owner")
+  return owner == "ownerless" or owner == "xenon" or GetComponentData(sector, "isplayerowned")
 end
 
 function sab.FitPlot(box, shrink)
@@ -836,31 +827,89 @@ function sab.FitPlot(box, shrink)
     return false
   end
   C.UpdateConstructionMapBuildPlot(menu.holomap)
-  local sector = GetComponentData(menu.container, "sectorid")
-  local owner = GetComponentData(sector, "owner")
-  if owner == "ownerless" or owner == "xenon" or GetComponentData(sector, "isplayerowned") then
+  if plotIsFree(GetComponentData(menu.container, "sectorid")) then
     C.PayBuildPlotSize(menu.container, C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container))
   end
   if sab.run then readPlot(sab.run) end
-  local f = plotFaces()
-  sab.Debug("plot faces now x +%d -%d, y +%d -%d, z +%d -%d km (%d x %d x %d)", f.pos[1], f.neg[1], f.pos[2], f.neg[2], f.pos[3], f.neg[3],
-    f.pos[1] + f.neg[1], f.pos[2] + f.neg[2], f.pos[3] + f.neg[3])
+  local e = plotExtents()
+  sab.Debug("plot faces now x +%.1f -%.1f, y +%.1f -%.1f, z +%.1f -%.1f km", e.pos[1] / 1000, e.neg[1] / 1000, e.pos[2] / 1000, e.neg[2] / 1000,
+    e.pos[3] / 1000, e.neg[3] / 1000)
   return true
 end
 
+-- The licence still to pay for the plot as it is now (vanilla's plot menu price).
+local function plotPrice(sector)
+  local menu = sab.menu
+  local size, buf = C.GetBuildPlotSize(menu.container), ffi.new("bool[1]", 0)
+  local full = tonumber(C.GetBuildPlotPrice(sector, C.GetObjectPositionInSector(menu.container), size.x, size.y, size.z, "player"))
+  return full - tonumber(C.GetBuildPlotPayment(menu.container, buf))
+end
+
+-- After the pack: the plot the layout grows to (run.plotBox, station frame) and its licence price less what is
+-- paid; a price to pay waits in phase "confirm" for the panel's answer, else the placement begins.
+function sab.OfferPlot(run)
+  local menu, box = sab.menu, run.plotBox
+  local sector = ConvertIDTo64Bit(GetComponentData(menu.container, "sectorid"))
+  if not box or plotIsFree(sector) then
+    run.phase = "begin"
+    return
+  end
+  local pos, neg, change, f = plotChange(box, false, true)
+  local size = { x = (f.pos[1] + f.neg[1]) * PLOT_STEP, y = (f.pos[2] + f.neg[2]) * PLOT_STEP, z = (f.pos[3] + f.neg[3]) * PLOT_STEP }
+  -- the predicted plot, not the current one: plotPrice reads the plot as it is
+  local buf = ffi.new("bool[1]", 0)
+  local full = tonumber(C.GetBuildPlotPrice(sector, C.GetObjectPositionInSector(menu.container), size.x, size.y, size.z, "player"))
+  local price = full - tonumber(C.GetBuildPlotPayment(menu.container, buf))
+  sab.Debug("plot after the pack: %.0f x %.0f x %.0f km, licence %d Cr to pay", size.x / 1000, size.y / 1000, size.z / 1000, price)
+  if price <= 0 then
+    run.phase = "begin"
+    return
+  end
+  run.offer = { pos = pos, neg = neg, change = change, size = size, price = price, sector = sector }
+  run.phase = "confirm"
+  sab.expanded, sab.panelDirty = true, true
+end
+
+-- The panel's answer to the offer: pay and place, or stop with nothing placed.
+function sab.AnswerPlot(accept)
+  ---@type table?
+  local run = sab.run
+  local o = run and run.offer
+  if not o then return end
+  if not accept then
+    sab.StopRun("plot licence declined")
+    sab.lastRun = { placed = 0, failed = 0, declined = true }
+    return
+  end
+  if GetPlayerMoney() < o.price then return end
+  local menu = sab.menu
+  if o.change and not C.ExtendBuildPlot(menu.container, o.pos, o.neg, true) then
+    sab.Debug("plot change refused: +%.0f %.0f %.0f / -%.0f %.0f %.0f m", o.pos.x, o.pos.y, o.pos.z, o.neg.x, o.neg.y, o.neg.z)
+    sab.StopRun("plot change refused")
+    return
+  end
+  C.UpdateConstructionMapBuildPlot(menu.holomap)
+  -- the plot as extended is what gets paid; the offer was its prediction
+  local price = math.min(o.price, plotPrice(o.sector))
+  if price > 0 then TransferPlayerMoneyTo(price, ConvertStringTo64Bit(tostring(C.GetSectorControlStation(o.sector)))) end
+  C.PayBuildPlotSize(menu.container, C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container))
+  sab.Debug("plot licence paid: %d Cr (offered %d)", price, o.price)
+  readPlot(run)
+  run.offer, run.phase = nil, "begin"
+  sab.panelDirty = true
+end
+
 -- What Optimize plot fits the plot to: the plan's modules, an empty box on an empty plan; nil while a plan
--- module has no known size (requested) or the editor is not reachable.
+-- module has no known size or the editor is not reachable.
 local function optimizeBox(log)
   local menu = sab.menu
   if sab.run or not menu or menu.holomap == 0 then return nil end
-  sab.ReadSizes()
   local plan, missing = sab.ReadPlan(), {}
   for _, e in ipairs(plan) do
     if not sab.sizes[e.macro] then missing[#missing + 1] = e.macro end
   end
   if #missing > 0 then
-    sab.RequestSizes(missing)
-    if log then sab.Debug("optimize plot: no size yet for %d plan modules (%s), requested; the plot stays", #missing, missing[1]) end
+    if log then sab.Debug("optimize plot: no size for %d plan modules (%s); the plot stays", #missing, missing[1]) end
     return nil
   end
   if #plan == 0 then return { min = { 0, 0, 0 }, max = { 0, 0, 0 } } end
@@ -2077,7 +2126,6 @@ function sab.StartBill(bill, opts)
     sab.Error("the build menu is not open")
     return false
   end
-  sab.ReadSizes()
   local items, connector, turns = {}, nil, 0
   for _, b in ipairs(bill) do
     local count = tonumber(b.count) or 1
@@ -2131,7 +2179,6 @@ function sab.StartRun(items, connector, turns, floors, opts)
   end
   local run = { items = items, next = 1, phase = "begin", placed = 0, failed = 0, connector = connector, turns = turns,
     stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, subdivide = opts and opts.subdivide }
-  sab.ReadSizes()
   readPlanState(run, editor)
   run.fromEmpty = run.n == 0
   -- the connection geometry probe: every connector (spurs), with floors the lattice modules too
@@ -2175,6 +2222,8 @@ function sab.StopRun(reason)
     if box then sab.FitPlot(box, true) end
   end
   sab.lastRun = { placed = run.placed, failed = run.failed }
+  -- the panel folds to its title and this result until expanded
+  sab.expanded, sab.panelDirty = false, true
   refreshPlanTable(run.placed > 0)
 end
 
@@ -2224,6 +2273,7 @@ function sab.Tick(chained)
     sab.grid.Step(run)
     return
   end
+  if run.phase == "confirm" then return end
   if run.phase == "begin" then
     local item = run.items[run.next]
     if not item then
@@ -2296,7 +2346,7 @@ sab.tab = "target"
 sab.expanded = false
 -- ware, build module and race are filled from the catalogue on the first panel build (targetChoices)
 local function defaultTarget()
-  return { kind = "ware", rate = 1000, shipRate = 1, shipSize = "m", fullCycle = false, workforce = true, selfSufficient = false, docking = "high", dense = false }
+  return { kind = "ware", modules = 1, shipRate = 1, shipSize = "m", fullCycle = false, workforce = true, selfSufficient = false, docking = "high", dense = false }
 end
 sab.target = defaultTarget()
 -- placements per frame; 1 keeps the dragged float, more drop undragged floats in the same frame
@@ -2358,19 +2408,29 @@ function sab.PanelContext()
   return { set = menu.set, station = menu.container ~= 0 and menu.container or nil }
 end
 
+-- The ware's modules and production on the panel's station now; none on a spot before the station exists.
+local function currentOf(ctx, ware)
+  if not (ctx.station and ware) then return { modules = 0, production = 0, net = 0 } end
+  return sab.planner.Current(ctx.station, ware)
+end
+
+-- t.modules is the wanted total of the ware's modules; the plan adds the difference.
 function sab.TargetSpec(ctx)
   local t = sab.target
   -- a run before the form was ever built (eval, a collapsed panel) still needs the defaults
   if not (t.ware and t.buildMacro and t.race) then targetChoices(sab.planner.Catalogue(ctx.set, true)) end
   local ship = t.kind ~= "ware"
+  local add = not ship and math.max(0, (t.modules or 1) - currentOf(ctx, t.ware).modules) or nil
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, kind = ship and "ship" or "ware", repair = t.kind == "repair",
-    ware = t.ware, rate = ship and t.shipRate or t.rate, buildMacro = t.buildMacro, shipSize = t.shipSize, count = 1,
+    ware = t.ware, rate = ship and t.shipRate or nil, modules = add, buildMacro = t.buildMacro, shipSize = t.shipSize, count = 1,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
     race = t.race, docking = t.docking, dense = t.dense }
 end
 
 function sab.RunTarget()
-  if sab.planner and sab.planner.Run(sab.TargetSpec(sab.PanelContext())) then sab.panelDirty = true end
+  local spec = sab.planner and sab.TargetSpec(sab.PanelContext())
+  if not spec or spec.modules == 0 then return end
+  if sab.planner.Run(spec) then sab.panelDirty = true end
 end
 
 local function categoryOptions()
@@ -2426,20 +2486,28 @@ local function progressText()
   end
   if not sab.RouteOk() then return ReadText(PAGE, 108) end
   local last = sab.lastRun
+  if last and last.declined then return ReadText(PAGE, 143) end
   if last then return string.format(tostring(ReadText(PAGE, 107)), last.placed, last.failed) end
   return ""
 end
 
--- the item in work and how far its candidate list is
+-- the item in work and how far its candidate list is; the plot offer while it waits
 local function progressDetail()
   local run = sab.run
+  local o = run and run.phase == "confirm" and run.offer
+  if o then
+    return string.format(tostring(ReadText(PAGE, 142)), math.floor(o.size.x / 1000 + 0.5), math.floor(o.size.y / 1000 + 0.5), math.floor(o.size.z / 1000 + 0.5),
+      ConvertMoneyString(o.price, false, true, 0, true) .. " " .. ReadText(1001, 101))
+  end
   local item = run and run.items[run.next]
   if not item then return "" end
   if run.phase == "probe" then return string.format(tostring(ReadText(PAGE, 137)), run.probeTotal - #run.probeList, run.probeTotal) end
   local p = run.phase == "pack" and run.packProgress
   if p and p.dock then return string.format(tostring(ReadText(PAGE, 139)), p.dock, p.docks) end
   if p then return string.format(tostring(ReadText(PAGE, 136)), p.pack, p.packs, p.module, p.modules) end
-  local text = string.format(tostring(ReadText(PAGE, 131)), GetMacroData(item.macro, "name"), item.candidates and item.cursor - 1 or 0, item.candidates and #item.candidates or 0)
+  -- grid and pair items snap to a planned connection: no candidate list to count
+  local name = GetMacroData(item.macro, "name")
+  local text = item.candidates and string.format(tostring(ReadText(PAGE, 131)), name, item.cursor - 1, #item.candidates) or tostring(name)
   if item.turn and run.turns and run.floors ~= "grid" then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
   return text
 end
@@ -2491,17 +2559,8 @@ local function rowKit(ftable, idle, buttonHeight, dirty)
   return kit
 end
 
--- the rate slider spans one module's output to this many times it
-local MAX_MODULE_RATES = 100
-
--- One module's output per hour at the form's settings (workforce, sunlight), or nil.
-local function oneModuleRate(ctx, ware)
-  local spec = sab.TargetSpec(ctx)
-  spec.rate = 1
-  local ok, plan = pcall(sab.planner.Plan, spec)
-  local rate = ok and plan.produced[ware]
-  return rate and rate > 0 and math.floor(rate + 0.5) or nil
-end
+-- the module count slider's top
+local MAX_MODULES = 100
 
 -- The target form: the inputs, `extraRows(kit)` if given, then the planned bill and balance as a preview;
 -- the plan is recomputed on every rebuild and returned (nil when the planner fails).
@@ -2511,28 +2570,25 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
   local choices = targetChoices(cat)
   local kit = rowKit(ftable, idle, buttonHeight, dirty)
   local input, dropdown, number, checkbox = kit.input, kit.dropdown, kit.number, kit.checkbox
+  local current = t.kind == "ware" and currentOf(ctx, t.ware)
+  if current then t.modules = math.max(1, current.modules, math.min(MAX_MODULES, t.modules or 1)) end
+  local ok, plan = pcall(sab.planner.Plan, sab.TargetSpec(ctx))
 
   local kinds = { option("ware", ReadText(PAGE, 111)), option("ship", ReadText(PAGE, 112)), option("repair", ReadText(PAGE, 113)) }
   dropdown(input(ReadText(PAGE, 109)), kinds, t.kind, function(id) t.kind = id end)
-  if t.kind == "ware" then
+  if current then
     dropdown(input(ReadText(PAGE, 114)), choices.wares, t.ware, function(id) t.ware = id end)
-    if t.ware and ctx.station then
-      local current = sab.planner.Current(ctx.station, t.ware)
-      local row = input(ReadText(PAGE, 115))
-      row[2]:setColSpan(3):createText(string.format(tostring(ReadText(PAGE, 123)), string.format("%+d", current.net)), { halign = "right", minRowHeight = buttonHeight })
-    end
-    local oneRate = t.ware and oneModuleRate(ctx, t.ware)
-    if oneRate then
-      t.rate = math.max(oneRate, math.min(MAX_MODULE_RATES * oneRate, t.rate))
-      input(ReadText(PAGE, 116))
-      local row = ftable:addRow(true, {})
-      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = oneRate, minSelect = oneRate,
-        max = MAX_MODULE_RATES * oneRate, start = t.rate, step = 1, active = idle })
-      row[1].handlers.onSliderCellChanged = function(_, value) t.rate = value end
-      row[1].handlers.onSliderCellConfirm = dirty
-    else
-      number(input(ReadText(PAGE, 116)), t.rate, function(v) if v and v > 0 then t.rate = v end end)
-    end
+    input(ReadText(PAGE, 116))
+    local row = ftable:addRow(true, {})
+    local low = math.max(1, current.modules)
+    row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low,
+      max = math.max(low, MAX_MODULES), start = t.modules, step = 1, active = idle })
+    row[1].handlers.onSliderCellChanged = function(_, value) t.modules = value end
+    row[1].handlers.onSliderCellConfirm = dirty
+    local planned = ok and current.net + (plan.produced[t.ware] or 0) - (plan.consumed[t.ware] or 0) or current.net
+    row = input(ReadText(PAGE, 115))
+    row[2]:setColSpan(3):createText(string.format(tostring(ReadText(PAGE, 140)), string.format("%+d", math.floor(current.net + 0.5)),
+      string.format("%+d", math.floor(planned + 0.5))), { halign = "right", minRowHeight = buttonHeight })
   else
     dropdown(input(ReadText(PAGE, 117)), choices.builds, t.buildMacro, function(id) t.buildMacro = id end)
     if t.kind == "ship" then
@@ -2554,7 +2610,6 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
 
   local header = ftable:addRow(false, {})
   header[1]:setColSpan(4):createText(ReadText(PAGE, 122), Helper.subHeaderTextProperties)
-  local ok, plan = pcall(sab.planner.Plan, sab.TargetSpec(ctx))
   if not ok then
     local row = ftable:addRow(true, {})
     row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 125)), tostring(plan)), { color = Color["text_warning"] })
@@ -2649,9 +2704,14 @@ function sab.DisplayPanel()
       :setIcon(sab.expanded and "widget_arrow_up_01" or "widget_arrow_down_01")
   title[3].handlers.onClick = function()
     sab.expanded = not sab.expanded
+    if sab.expanded then sab.lastRun = nil end
     sab.panelDirty = true
   end
   if not sab.expanded then
+    if sab.lastRun and idle then
+      local status = head:addRow(true, {})
+      status[1]:setColSpan(3):createText(progressText, { halign = "left", minRowHeight = buttonHeight })
+    end
     frame:display()
     return
   end
@@ -2682,7 +2742,7 @@ function sab.DisplayPanel()
   end
   local contentY = head.properties.y + head:getVisibleHeight() + Helper.borderSize
 
-  local canAdd = false
+  local canAdd, plan = false, nil
   if idle then
     -- the button table below needs two rows of the view
     local ftable = frame:addTable(4, { tabOrder = 2, highlightMode = "off", reserveScrollBar = false, y = contentY,
@@ -2691,7 +2751,7 @@ function sab.DisplayPanel()
     ftable:setColWidth(3, Helper.scaleX(50), false)
     ftable:setColWidth(4, Helper.scaleY(buttonHeight), false)
     if target then
-      addTargetRows(ftable, idle, buttonHeight, sab.PanelContext(), function() sab.panelDirty = true end)
+      plan = addTargetRows(ftable, idle, buttonHeight, sab.PanelContext(), function() sab.panelDirty = true end)
     else
       canAdd = addBillRows(ftable, idle, buttonHeight)
     end
@@ -2700,13 +2760,25 @@ function sab.DisplayPanel()
 
   local canOptimize = idle and sab.CanOptimizePlot()
   local btable = frame:addTable(4, { tabOrder = 3, highlightMode = "off", reserveScrollBar = false, y = contentY })
-  local row = btable:addRow(true, {})
+  local row
+  local offer = sab.run and sab.run.phase == "confirm" and sab.run.offer
+  if offer then
+    row = btable:addRow(true, {})
+    row[1]:setColSpan(2):createButton({ height = buttonHeight, active = function() return GetPlayerMoney() >= offer.price end })
+        :setText(ReadText(1001, 9233), { halign = "center" })
+    row[1].handlers.onClick = function() sab.AnswerPlot(true) end
+    row[3]:setColSpan(2):createButton({ height = buttonHeight }):setText(ReadText(1001, 64), { halign = "center" })
+    row[3].handlers.onClick = function() sab.AnswerPlot(false) end
+  end
+  row = btable:addRow(true, {})
   row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1,
     max = MAX_PER_FRAME, start = sab.perFrame, step = 1 }):setText(ReadText(PAGE, 138))
   row[1].handlers.onSliderCellChanged = function(_, value) sab.perFrame = value end
   row = btable:addRow(true, {})
   if target then
-    local function canRun() return sab.run == nil and sab.RouteOk() end
+    -- nothing to add: the module count is at what the station has
+    local adds = plan ~= nil and plan.target.modules ~= 0
+    local function canRun() return adds and sab.run == nil and sab.RouteOk() end
     row[1]:createButton({ height = buttonHeight, active = canRun }):setText(ReadText(PAGE, 103), { halign = "center" })
     row[1].handlers.onClick = sab.RunTarget
     row[2]:createButton({ height = buttonHeight, active = function() return sab.run ~= nil end }):setText(ReadText(PAGE, 104), { halign = "center" })
@@ -2859,7 +2931,7 @@ function sab.ConfirmDialog()
   menu.cleanup()
 end
 
--- The build menu opened on the reserved plot: start the planned run once the module sizes are in (5 s at most).
+-- The build menu opened on the reserved plot: start the planned run.
 function sab.StartPending()
   local menu, p = sab.menu, sab.pendingTarget
   local age = getElapsedTime() - p.since
@@ -2873,11 +2945,6 @@ function sab.StartPending()
   if not sab.RouteOk() then
     sab.pendingTarget = nil
     return
-  end
-  local bill = sab.planner.Bill(sab.planner.Plan(p.spec))
-  sab.ReadSizes()
-  for _, b in ipairs(bill) do
-    if not sab.sizes[b.macro] and age < 5 then return end
   end
   sab.pendingTarget = nil
   if p.method and menu.buildstorage ~= 0 then C.SetContainerBuildMethod(menu.buildstorage, p.method) end
@@ -3029,12 +3096,6 @@ local function hookMenu()
     if sab.run then sab.StopRun("menu closed") end
     return onCloseElement(...)
   end
-  local onShowMenu = menu.onShowMenu
-  menu.onShowMenu = function(...)
-    onShowMenu(...)
-    local ok, err = pcall(function() sab.RequestSizes(sab.MenuMacros()) end)
-    if not ok then sab.Error("size request failed: %s", tostring(err)) end
-  end
 end
 
 local function init()
@@ -3044,7 +3105,6 @@ local function init()
   hookMenu()
   hookInteractMenu()
   hookMapMenu()
-  if sab.planner then sab.RequestSizes(sab.planner.AllMacros()) end
   sab.Debug("initialised")
 end
 

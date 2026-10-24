@@ -179,19 +179,9 @@ local function entryOf(group, lib, macro)
   return e
 end
 
--- Every owned module macro of the planner's libraries; the blueprint set does not narrow them.
-function planner.AllMacros()
-  local macros = {}
-  for _, lib in pairs(LIBS) do
-    for _, macro in ipairs(blueprints("", lib)) do macros[#macros + 1] = macro end
-  end
-  return macros
-end
-
 function planner.Catalogue(set, refresh)
   local cat = planner.catalogue[set]
   if cat and not refresh then return cat end
-  sab.RequestSizes(planner.AllMacros())
   cat = { byMacro = {} }
   for _, group in ipairs({ "production", "processing", "storage", "habitation", "dock", "build" }) do
     cat[group] = {}
@@ -392,6 +382,11 @@ function planner.Plan(target)
       for macro, n in pairs(habCounts) do capacity = capacity + cat.byMacro[macro].capacity * n end
     end
     local fraction = target.workforce and (workforce > 0 and math.min(1, capacity / workforce) or 0) or liveFraction
+    -- a module count target: that many of the ware's producer at this round's fraction
+    if target.modules and target.ware then
+      local _, p = producerFor(cat, target.ware, race)
+      base[target.ware] = p and target.modules * rateOf(p, fraction, sunlight) or 0
+    end
     -- the balance of the current counts
     for w, r in pairs(use) do consumed[w] = r end
     for macro, n in pairs(prodCounts) do
@@ -488,18 +483,35 @@ function planner.Plan(target)
   return plan
 end
 
+-- macro -> { ware = true } of a production or processing module, owned blueprint or not
+local productsCache = {}
+
+local function makes(cat, macro, ware)
+  local wares = productsCache[macro]
+  if not wares then
+    wares = {}
+    local entry = cat.byMacro[macro]
+    local lib = (IsMacroClass(macro, "production") and LIBS.production) or (IsMacroClass(macro, "processingmodule") and LIBS.processing)
+    local products = entry and entry.products or (lib and GetLibraryEntry(lib, macro).products) or {}
+    for _, p in ipairs(products) do wares[p.ware] = true end
+    productsCache[macro] = wares
+  end
+  return wares[ware] == true
+end
+
 -- The current hourly balance of a ware on an existing station, workforce use included, plus what the open
 -- build menu's plan still has to build (planned entries and modules under construction) at the station's
--- live workforce fraction and sunlight.
+-- live workforce fraction and sunlight; modules: the station's modules making the ware, planned ones included.
 function planner.Current(station, ware)
   local production = tonumber(C.GetContainerWareProduction(station, ware, false)) or 0
   local consumption = (tonumber(C.GetContainerWareConsumption(station, ware, false)) or 0) + (Helper.getWorkforceConsumption(station, ware) or 0)
-  local pending = 0
+  local pending, modules = 0, 0
   local menu = sab.menu
   if menu and menu.shown and menu.holomap ~= 0 and menu.container == station then
     local cat = planner.Catalogue(menu.set or "")
     local fraction, sunlight
     for _, e in ipairs(sab.ReadPlan()) do
+      if makes(cat, e.macro, ware) then modules = modules + 1 end
       if e.component == 0 or IsComponentConstruction(e.component) then
         local entry = cat.byMacro[e.macro]
         for _, p in ipairs(entry and entry.products or {}) do
@@ -515,8 +527,13 @@ function planner.Current(station, ware)
         end
       end
     end
+  else
+    local cat = planner.Catalogue("")
+    for _, module in ipairs(GetProductionModules(station) or {}) do
+      if makes(cat, GetComponentData(module, "macro"), ware) then modules = modules + 1 end
+    end
   end
-  return { production = production, consumption = consumption, net = production - consumption, pending = pending }
+  return { production = production, consumption = consumption, net = production - consumption, pending = pending, modules = modules }
 end
 
 -- The plan as StartBill takes it, grouped: build, production, habitation, storage, dock areas, piers.
