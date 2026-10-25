@@ -45,6 +45,7 @@ ffi.cdef [[
   size_t GetNumBuildMapConstructionPlan(UniverseID holomapid, bool usestoredplan);
   size_t GetNumUpgradeSlots(UniverseID destructibleid, const char* macroname, const char* upgradetypename);
   UniverseID GetPlayerID(void);
+  bool HasBuildMapFloatingSelection(UniverseID holomapid);
   void RemoveFloatingSequenceFromConstructionPlan(UniverseID holomapid);
   void UpdateConstructionMapItemLoadout(UniverseID holomapid, size_t itemidx, UniverseID defensibleid, UILoadout uiloadout);
   int64_t GetBuildPlotPrice(UniverseID sectorid, UIPosRot location, float x, float y, float z, const char* factionid);
@@ -222,6 +223,8 @@ local UPDATE_AT = 0x163
 ---@type (integer|false)[]
 local DRAGGING = { 0x45, 0x38, 0xa7, false, false, false, false }
 local DRAGGING_AT = 0x1f9
+-- the editor layout every literal offset below belongs to; another value means its tail moved
+local DRAGGING_OFFSET = 0x570
 
 -- nil: not located yet, false: unavailable, table: located
 ---@type table|false|nil
@@ -242,9 +245,12 @@ local function mapImage(anchor)
   local base
   for _ = 1, 4096 do
     local p = ffi.cast(P, a)
-    if p[0] == 0x4d and p[1] == 0x5a and u32(p + i32(p + 0x3c)) == 0x4550 then
-      base = p
-      break
+    if p[0] == 0x4d and p[1] == 0x5a then
+      local lfanew = i32(p + 0x3c)
+      if lfanew >= 0x40 and lfanew <= 0x1000 and u32(p + lfanew) == 0x4550 then
+        base = p
+        break
+      end
     end
     a = a - 0x10000
   end
@@ -297,7 +303,7 @@ local function detect()
   at = update + DRAGGING_AT
   if not (inText(img, at, #DRAGGING) and matchBytes(img.base + at, DRAGGING)) then return false, "dragging flag mismatch" end
   local dragging = i32(img.base + at + 3)
-  if dragging <= 0 or dragging > 0x1000 then return false, "dragging flag offset out of range" end
+  if dragging ~= DRAGGING_OFFSET then return false, string.format("dragging flag at +0x%x, not +0x%x", dragging, DRAGGING_OFFSET) end
   if not (inText(img, resolver, 16) and inText(img, update, 16)) then return false, "target outside .text" end
   sab.Debug("engine located (%s): resolver 0x%x registry 0x%x update 0x%x dragging +0x%x", img.id, resolver, registry, update, dragging)
   return {
@@ -327,7 +333,9 @@ function sab.Editor()
   if engine == nil then locate() end
   local menu = sab.menu
   if not (engine and menu and menu.holomap ~= 0) then return nil end
-  local holo = engine.resolve(engine.registry[0], menu.holomap, 4)
+  local registry = engine.registry[0]
+  if registry == nil then return nil end
+  local holo = engine.resolve(registry, menu.holomap, 4)
   if holo == nil then return nil end
   if vfunc(holo, 0x11e0, FN_U8_I32)(holo, 0x3a) == 0 then return nil end
   local editor = pp(ffi.cast(P, holo) + 0x2c0)[0]
@@ -339,7 +347,7 @@ end
 -- MSVC std::string at p
 local function stdString(p)
   local size, cap = tonumber(u64(p + 0x10)), tonumber(u64(p + 0x18))
-  if size > 1024 then return nil end
+  if size > 1024 or cap < size or cap < 15 or cap > 0x10000 then return nil end
   return ffi.string(cap > 15 and ffi.cast(CHARPP, p)[0] or ffi.cast(CHARP, p), size)
 end
 
@@ -365,7 +373,7 @@ function sab.WriteFloating(editor, pos, rows)
   end
 end
 
--- Plan entries as the editor holds them: macro and transform, built ones included.
+-- A plan entry's transform as the editor holds it, built ones included.
 function sab.EntryPose(editor, idx)
   local vec = pp(editor + 0x300)[0]
   if vec == nil then return nil end
@@ -374,30 +382,35 @@ function sab.EntryPose(editor, idx)
   if idx < 0 or idx >= n then return nil end
   local e = pp(first)[idx]
   if e == nil then return nil end
-  local macro = pp(e + 8)[0]
   local pose = readTransform(e + 0x30)
-  pose.macro = macro ~= nil and stdString(macro + 0x20) or nil
-  pose.macroPtr = macro
   pose.count = n
   return pose
 end
 
--- The macro of the first floating entry, or nil.
-function sab.FloatingMacro(editor)
-  local vec = pp(editor + 0x3c0)[0]
-  if vec == nil then return nil end
-  local first, last = pp(vec)[0], pp(vec + 8)[0]
-  if first == nil or first == last then return nil end
-  local e = pp(first)[0]
-  if e == nil then return nil end
-  return pp(e + 8)[0]
+-- The editor's entry pose of a ReadPlan entry; a translation other than the plan's offset means the entry
+-- layout differs from GOG 9.00: the route turns off.
+local function checkedPose(editor, e)
+  local pose = sab.EntryPose(editor, e.idx)
+  if not pose then return nil end
+  local o = e.offset
+  if math.abs(pose.x - o.x) > 0.1 or math.abs(pose.y - o.y) > 0.1 or math.abs(pose.z - o.z) > 0.1 then
+    engine = false
+    sab.Error("engine access unavailable (entry %d %s at %.1f %.1f %.1f, the plan has %.1f %.1f %.1f)", e.idx, e.macro, pose.x, pose.y, pose.z, o.x, o.y, o.z)
+    return nil
+  end
+  return pose
+end
+
+-- the module data the route needs from the Extra Data API is readable on this build
+local function macroDataOk()
+  if not (ExtraData and ExtraData.Available) then return false end
+  local _, macros = ExtraData.Available()
+  return macros
 end
 
 -- A macro's snap connections from the Extra Data API: name, position and direction in the macro's frame.
-function sab.Connections(macro)
-  if macro == nil then return {} end
-  local name = stdString(macro + 0x20)
-  if not name then return {} end
+function sab.Connections(name)
+  if not (name and ExtraData) then return {} end
   if sab.snapCache[name] then return sab.snapCache[name] end
   local list = {}
   for _, c in ipairs(ExtraData.GetMacroDataEx(name, "snapconnections") or {}) do
@@ -468,7 +481,7 @@ end
 -- One entry's connections in the plan frame: { entryIdx, macro, name, pos, dir, used }.
 local function connectionsOf(entryIdx, macroName, pose, usedNames)
   local list = {}
-  for _, c in ipairs(sab.Connections(pose.macroPtr)) do
+  for _, c in ipairs(sab.Connections(macroName)) do
     local p = rotate(c.pos, pose.rows)
     list[#list + 1] = { entryIdx = entryIdx, macro = macroName, name = c.name,
       pos = { p[1] + pose.x, p[2] + pose.y, p[3] + pose.z }, dir = unit(rotate(c.dir, pose.rows)),
@@ -493,7 +506,7 @@ function sab.PlanConnections(editor)
   end
   local list = {}
   for _, e in ipairs(plan) do
-    local pose = sab.EntryPose(editor, e.idx)
+    local pose = checkedPose(editor, e)
     if pose then
       for _, c in ipairs(connectionsOf(e.idx, e.macro, pose, used[e.idx])) do list[#list + 1] = c end
     end
@@ -520,6 +533,7 @@ end
 -- Run the editor's update without a cursor: the snap search from the floating transform as written.
 -- A target entry pointer at +0x4b8.. means the nearest compatible pair inside the snap radius was found.
 function sab.Snap(editor)
+  if not C.HasBuildMapFloatingSelection(sab.menu.holomap) then return { snapped = false, valid = false } end
   -- the snap search runs only while the editor drags a module
   editor[engine.dragging] = 1
   engine.update(editor, 0, zeroRay)
@@ -569,11 +583,11 @@ end
 local function finishPlacement(run, item)
   local menu = sab.menu
   local editor = sab.Editor()
-  if not editor then
+  if not (editor and C.HasBuildMapFloatingSelection(menu.holomap)) then
     C.RemoveFloatingSequenceFromConstructionPlan(menu.holomap)
     menu.floatingNewModule = nil
     run.failed = run.failed + 1
-    sab.Error("no editor for %s", item.macro)
+    sab.Error(editor and "%s is not floating any more" or "no editor for %s", item.macro)
     return false
   end
   local pos, rows, pair = item.pos, item.rows, item.pair
@@ -589,10 +603,10 @@ local function finishPlacement(run, item)
   if pair then
     local entry = entryIdx and sab.EntryPose(editor, entryIdx)
     local stationConn, moduleConn
-    for _, c in ipairs(entry and sab.Connections(entry.macroPtr) or {}) do
+    for _, c in ipairs(entry and sab.Connections(run.macros[entryIdx]) or {}) do
       if c.name == pair.predecessorConnection then stationConn = c end
     end
-    for _, c in ipairs(sab.Connections(sab.FloatingMacro(editor))) do
+    for _, c in ipairs(sab.Connections(item.macro)) do
       if c.name == pair.connection then moduleConn = c end
     end
     if not (entry and stationConn and moduleConn) then
@@ -765,6 +779,7 @@ end
 
 local function addEntry(run, idx, macro, pose)
   run.n = run.n + 1
+  run.macros[idx] = macro
   run.sum[1], run.sum[2], run.sum[3] = run.sum[1] + pose.x, run.sum[2] + pose.y, run.sum[3] + pose.z
   local size = sab.sizes[macro]
   if size then
@@ -785,9 +800,9 @@ end
 -- The plan's connections, boxes, anchor and plot at the start of a run.
 local function readPlanState(run, editor)
   run.conns = sab.PlanConnections(editor)
-  run.boxes, run.zones, run.sum, run.n = {}, {}, { 0, 0, 0 }, 0
+  run.boxes, run.zones, run.macros, run.sum, run.n = {}, {}, {}, { 0, 0, 0 }, 0
   for _, e in ipairs(sab.ReadPlan()) do
-    local pose = sab.EntryPose(editor, e.idx)
+    local pose = checkedPose(editor, e)
     if pose then addEntry(run, e.idx, e.macro, pose) end
   end
   readPlot(run)
@@ -992,7 +1007,7 @@ function sab.PlanBox()
   if not editor then return nil end
   local box
   for _, e in ipairs(sab.ReadPlan()) do
-    local size, pose = sab.sizes[e.macro], sab.EntryPose(editor, e.idx)
+    local size, pose = sab.sizes[e.macro], checkedPose(editor, e)
     if size and pose then
       local b = worldBox(size, { pose.x, pose.y, pose.z }, pose.rows)
       if box then
@@ -1017,8 +1032,8 @@ local function anchorOf(run)
 end
 
 -- *** connectors ***
--- Connection geometry comes from a probe at the start of the run: every connector and, on the grid route,
--- every module is floated once and its connections read (cached per Lua state).
+-- Connection geometry from the Extra Data API at the start of the run: every connector and, on the grid
+-- route, every module (cached per Lua state).
 
 sab.macroConns = sab.macroConns or {}
 
@@ -1207,8 +1222,8 @@ local function notePlaced(run, item, addedIdx, cand)
   if item.reach and (cand or item.spurDir) then run.spur = { owner = item.owner, tipIdx = addedIdx, dir = cand and cand.f.dir or item.spurDir } end
 end
 
--- After the probe: the connector kit for spurs, then the grid packer, or the plain packer with the first item
--- dropped free at the plot centre.
+-- The connector kit for spurs, then the grid packer, or the plain packer with the first item dropped free at
+-- the plot centre.
 local function finishLayout(run)
   local menu = sab.menu
   run.kit = connectorKit(run.items[1] and raceOf(run.items[1].macro) or nil)
@@ -1228,32 +1243,12 @@ local function finishLayout(run)
   sab.grid.Start(run)
 end
 
--- One macro floated per frame, its connections read the frame after; the layout when the list is done.
-local function probeStep(run)
-  local menu = sab.menu
-  if run.probing then
-    local editor = sab.Editor()
-    sab.macroConns[run.probing] = editor and sab.Connections(sab.FloatingMacro(editor)) or {}
-    C.RemoveFloatingSequenceFromConstructionPlan(menu.holomap)
-    menu.floatingNewModule = nil
-    run.probing = nil
-  end
-  local macro = table.remove(run.probeList, 1)
-  if macro then
-    C.AddMacroToConstructionMap(menu.holomap, macro, true)
-    menu.floatingNewModule = macro
-    run.probing = macro
-  else
-    finishLayout(run)
-  end
-end
-
 -- One sorted list per item: every free connection x every module connection x four rolls; an outer or reach
 -- item takes outward connections only. Bonuses order the list: a reach connector continues straight from the
 -- spur tip, an item retried after a connector takes the tip (its straight connection first).
-local function buildCandidates(run, item, editor)
+local function buildCandidates(run, item)
   local anchor = anchorOf(run)
-  local mconns = sab.Connections(sab.FloatingMacro(editor))
+  local mconns = sab.Connections(item.macro)
   local size = sab.sizes[item.macro]
   local spur = run.spur
   local chain = item.reach and spur and spur.owner == item.owner and spur.tipIdx or nil
@@ -1350,7 +1345,7 @@ local function skip(item, reason)
 end
 
 local function addPlacement(run, editor, added, cand)
-  local pose = sab.EntryPose(editor, added.idx)
+  local pose = checkedPose(editor, added)
   if not pose then return end
   addEntry(run, added.idx, added.macro, pose)
   run.lastPlacedIdx = added.idx
@@ -1441,15 +1436,15 @@ end
 local function packStep(run, item)
   local menu = sab.menu
   local editor = sab.Editor()
-  if not editor then
+  if not (editor and C.HasBuildMapFloatingSelection(menu.holomap)) then
     C.RemoveFloatingSequenceFromConstructionPlan(menu.holomap)
     menu.floatingNewModule = nil
     run.failed = run.failed + 1
-    sab.Error("no editor for %s", item.macro)
+    sab.Error(editor and "%s is not floating any more" or "no editor for %s", item.macro)
     advance(run)
     return
   end
-  if not item.candidates then buildCandidates(run, item, editor) end
+  if not item.candidates then buildCandidates(run, item) end
   local result = tryCandidates(run, item, editor)
   if result == "more" then return end
   if result == "placed" then
@@ -1579,7 +1574,7 @@ function sab.StartBill(bill, opts)
   return sab.StartRun(items, connector, turns > 0 and turns or nil, gridRoute, opts)
 end
 
--- gridRoute: probe every module's connection geometry too, then pack on the grid (StartBill, empty plan only).
+-- gridRoute: read every module's connection geometry too, then pack on the grid (StartBill, empty plan only).
 -- opts.stopOnFail: the run stops at its first failed placement. opts.packOnly: a grid run stops once packed (layout
 -- experiments). opts.subdivide: grid occupancy cells per cell side (nil: grid.subdivide).
 function sab.StartRun(items, connector, turns, gridRoute, opts)
@@ -1597,18 +1592,19 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
     sab.Error("the editor is not reachable")
     return false
   end
+  if not macroDataOk() then
+    sab.Error("the Extra Data API cannot read module data on this build")
+    return false
+  end
   local run = { items = items, next = 1, phase = "begin", placed = 0, failed = 0, connector = connector, turns = turns,
     stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, subdivide = opts and opts.subdivide }
   readPlanState(run, editor)
+  if engine == false then return false end
   run.fromEmpty = run.n == 0
-  -- the connection geometry probe: every connector (spurs), on the grid route every module too
-  run.probeList, run.phase, run.gridRoute = {}, "probe", gridRoute
-  local seen = {}
+  run.gridRoute = gridRoute
+  -- connection geometry: every connector (spurs), on the grid route every module too
   local function want(m)
-    if m and not seen[m] and not sab.macroConns[m] then
-      seen[m] = true
-      run.probeList[#run.probeList + 1] = m
-    end
+    if m and not sab.macroConns[m] then sab.macroConns[m] = sab.Connections(m) end
   end
   for _, m in ipairs(menu.modules and menu.modules.moduletypes_other or {}) do
     if IsMacroClass(m, "connectionmodule") then want(m) end
@@ -1616,11 +1612,11 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
   if gridRoute then
     for _, it in ipairs(items) do want(it.macro) end
   end
-  run.probeTotal = #run.probeList
+  finishLayout(run)
   sab.run = run
   sab.panelDirty = true
-  sab.Debug("run started: %d items, %d entries, %d connections, connector %s, probing %d macros%s", #items, run.n, #run.conns,
-    connector and connector.macro or "none", #run.probeList, gridRoute and ", grid" or "")
+  sab.Debug("run started: %d items, %d entries, %d connections, connector %s%s", #items, run.n, #run.conns,
+    connector and connector.macro or "none", gridRoute and ", grid" or "")
   return true
 end
 
@@ -1652,7 +1648,7 @@ local function registerEntry(run, item)
   local plan = sab.ReadPlan()
   local added = plan[#plan]
   if not (editor and added) then return end
-  local pose = sab.EntryPose(editor, added.idx)
+  local pose = checkedPose(editor, added)
   if not pose then return end
   addEntry(run, added.idx, added.macro, pose)
   for _, f in ipairs(run.conns) do
@@ -1679,8 +1675,8 @@ function sab.Tick(chained)
     sab.StopRun("stopped at the first failure")
     return
   end
-  if run.phase == "probe" then
-    probeStep(run)
+  if engine == false then
+    sab.StopRun("engine access lost")
     return
   end
   if run.phase == "pack" then
@@ -1969,7 +1965,7 @@ function sab.AddBillRow()
 end
 
 function sab.RouteOk()
-  return sab.Editor() ~= nil
+  return sab.Editor() ~= nil and macroDataOk()
 end
 
 function sab.RunBill()
@@ -1986,7 +1982,8 @@ local function progressText()
   if run then
     return string.format(tostring(ReadText(PAGE, 135)), run.n, run.n + math.max(0, #run.items - run.next + 1), run.failed)
   end
-  if not sab.RouteOk() then return ReadText(PAGE, 108) end
+  if not sab.Editor() then return ReadText(PAGE, 108) end
+  if not macroDataOk() then return ReadText(PAGE, 153) end
   local last = sab.lastRun
   if last and last.declined then return ReadText(PAGE, 143) end
   if last and last.tooLarge then return string.format(tostring(ReadText(PAGE, 147)), last.tooLarge, MAX_PLOT / 1000) end
@@ -2004,7 +2001,6 @@ local function progressDetail()
   end
   local item = run and run.items[run.next]
   if not item then return "" end
-  if run.phase == "probe" then return string.format(tostring(ReadText(PAGE, 137)), run.probeTotal - #run.probeList, run.probeTotal) end
   local p = run.phase == "pack" and run.packProgress
   if p and p.dock then return string.format(tostring(ReadText(PAGE, 139)), p.dock, p.docks) end
   if p then return string.format(tostring(ReadText(PAGE, 136)), p.pack, p.packs, p.module, p.modules) end
@@ -2015,11 +2011,10 @@ local function progressDetail()
   return text
 end
 
--- the bar: probed macros, then packed modules over every layout, docks with a place found, then plan entries of the planned total
+-- the bar: packed modules over every layout, docks with a place found, then plan entries of the planned total
 local function progressValues()
   local run = sab.run
   if not run then return 0, 1 end
-  if run.phase == "probe" then return run.probeTotal - #run.probeList, math.max(1, run.probeTotal) end
   local p = run.phase == "pack" and run.packProgress
   if p and p.dock then return p.dock - 1, math.max(1, p.docks) end
   if p then return (p.pack - 1) * p.modules + p.module, math.max(1, p.packs * p.modules) end
@@ -2572,6 +2567,7 @@ function sab.StartPending()
   end
   if not sab.RouteOk() then
     sab.pendingTarget = nil
+    sab.Error("pending target dropped: the route is unavailable on this build")
     return
   end
   sab.pendingTarget = nil

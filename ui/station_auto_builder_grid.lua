@@ -712,7 +712,7 @@ local function dockPlace(g, D, it)
     D.poses[it.macro] = byDi
   end
   local isPier, isBuild = IsMacroClass(it.macro, "pier"), IsMacroClass(it.macro, "buildmodule")
-  local big = isPier and #(ExtraData.GetMacroDataEx(it.macro, "dockingbays") or {}) > sab.planner.bigPier
+  local big = isPier and #(ExtraData and ExtraData.GetMacroDataEx(it.macro, "dockingbays") or {}) > sab.planner.bigPier
   local firstOfKind = not isBuild and (isPier and D.piers or D.areas) == 0
   local A = D.all
   local baseKm3 = grownKm3(D, A.min[1], A.min[2], A.min[3], A.max[1], A.max[2], A.max[3])
@@ -1199,7 +1199,7 @@ local function pack(run)
   run.next = 1
 end
 
--- After the probe: pack in the background, one budget of checks per frame.
+-- Pack in the background, one budget of checks per frame.
 function grid.Start(run)
   run.packer = coroutine.create(pack)
   run.phase = "pack"
