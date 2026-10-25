@@ -52,6 +52,7 @@
       <t id="145">Add a target</t>
       <t id="146">Covers the station's shortfalls: %s</t>
       <t id="147">The layout needs %s km, above the %s km plot limit: nothing placed</t>
+      <t id="148">Storage, hours of flow</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>

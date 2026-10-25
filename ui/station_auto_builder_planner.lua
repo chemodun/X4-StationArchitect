@@ -53,7 +53,7 @@ local sab = StationAutoBuilder
 
 local planner = {
   -- sizing rules
-  storageHours = 4,           -- storage per ware: hours of its hourly flow
+  storageHours = 4,           -- storage per ware: hours of its hourly flow, unless the target sets its own
   shipLoadout = 0.5,          -- equipment of a planned ship: vanilla's Medium loadout preset
   lShare = 0.7,               -- share of the trade volume carried by L/XL ships, the rest by M
   pierDockM3PerHour = 250000, -- L/XL trade volume one pier dock serves per hour
@@ -647,7 +647,7 @@ local function goalsOf(target)
   return target.goals or { target }
 end
 
--- target = { set, station, goals, fullCycle, workforce, race, selfSufficient, sunlight }, each goal
+-- target = { set, station, goals, fullCycle, workforce, race, selfSufficient, sunlight, storageHours }, each goal
 --   { kind = "ware", ware, rate (net ware amount per hour) or modules } or { kind = "ship", buildMacro, count
 --   (build modules to add), bays (the station's total after the plan, supplied as a whole) }. A fabrication bay builds the ship sizes its builder classes name (shipSize
 --   overrides), a maintenance bay none (repair forces that); plan.shipRates and plan.shipHours per goal index.
@@ -810,7 +810,7 @@ function planner.Plan(target)
   for w, c in pairs(plan.consumed) do
     local p = plan.produced[w] or 0
     local ware = planner.Ware(w)
-    m3[ware.transport] = (m3[ware.transport] or 0) + planner.storageHours * math.max(p, c) * ware.volume
+    m3[ware.transport] = (m3[ware.transport] or 0) + (target.storageHours or planner.storageHours) * math.max(p, c) * ware.volume
     local net = p - c
     if net > 0 then plan.flow.export = plan.flow.export + net * ware.volume end
     if net < 0 then plan.flow.import = plan.flow.import - net * ware.volume end

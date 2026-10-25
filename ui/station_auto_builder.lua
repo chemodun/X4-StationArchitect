@@ -1767,6 +1767,8 @@ sab.topRows = {}
 -- slider tops above what the station has: producer modules of a ware target, build modules of a ship target
 local MAX_ADD_MODULES = 100
 local MAX_BAYS = 10
+-- storage per ware in hours of its flow; nil in a target keeps the planner's default
+local MAX_STORAGE_HOURS = 24
 -- placements per frame; 1 keeps the dragged float, more drop undragged floats in the same frame
 local MAX_PER_FRAME = 10
 sab.perFrame = 1
@@ -1914,7 +1916,7 @@ function sab.TargetSpec(ctx)
   end
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
-    race = t.race, dense = t.dense }
+    race = t.race, dense = t.dense, storageHours = t.storageHours }
 end
 
 function sab.RunTarget()
@@ -2174,6 +2176,12 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   -- the grid packs an empty plan only
   local fresh = not ctx.station or (sab.menu.holomap ~= 0 and tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) == 0)
   checkbox(input(ReadText(PAGE, 134)), t.dense, fresh, function(v) t.dense = v end)
+  row = ftable:addRow(true, {})
+  row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1, max = MAX_STORAGE_HOURS,
+    start = t.storageHours or sab.planner.storageHours, step = 1, active = idle }):setText(ReadText(PAGE, 148))
+  ---@diagnostic disable-next-line: inject-field
+  row[1].handlers.onSliderCellChanged = function(_, value) t.storageHours = value end
+  row[1].handlers.onSliderCellConfirm = dirty
   if extraRows then extraRows(kit) end
   y = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize
 
