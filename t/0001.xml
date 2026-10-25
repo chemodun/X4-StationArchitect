@@ -50,6 +50,8 @@
       <t id="140">%s / %s /h</t>
       <t id="142">Plot licence for %s x %s x %s km: %s</t>
       <t id="143">Plot licence declined, nothing placed</t>
+      <t id="144">Target %s</t>
+      <t id="145">Add a target</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>

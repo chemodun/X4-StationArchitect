@@ -361,10 +361,16 @@ end
 
 -- *** the plan ***
 
--- target = { set, station, kind = "ware" | "ship", ware, rate (net ware amount per hour), modules,
---   buildMacro (the chosen wharf, shipyard or maintenance bay; the game exposes no size or kind for them),
---   shipSize, repair (no ship resource chain), count (build modules; plan.shipRate follows from them),
---   fullCycle, workforce, race, selfSufficient, sunlight }.
+-- The target's goals; a target without a goals list is one goal itself.
+local function goalsOf(target)
+  return target.goals or { target }
+end
+
+-- target = { set, station, goals, fullCycle, workforce, race, selfSufficient, sunlight, docking }, each goal
+--   { kind = "ware", ware, rate (net ware amount per hour) or modules } or { kind = "ship", buildMacro (the
+--   chosen wharf, shipyard or maintenance bay; the game exposes no size or kind for them), shipSize, repair
+--   (no ship resource chain), count (build modules; plan.shipRates[goal index] follows from them) }. A goal
+--   ware another goal consumes gets its producers on top of that consumption.
 --   The result carries counts per macro, the ware balance, the workforce and the warnings; Bill() turns it
 --   into StartBill's list.
 function planner.Plan(target)
@@ -377,7 +383,8 @@ function planner.Plan(target)
   end
   sunlight = sunlight or 1
   local plan = { target = target, set = set, sunlight = sunlight, counts = {}, warnings = {}, produced = {},
-    consumed = {}, workforce = 0, workforceCapacity = 0, workforceFraction = 0, storage = {}, flow = { import = 0, export = 0 } }
+    consumed = {}, workforce = 0, workforceCapacity = 0, workforceFraction = 0, storage = {}, flow = { import = 0, export = 0 },
+    shipRates = {}, adds = false }
   local counts = plan.counts
   local function warn(fmt, ...) plan.warnings[#plan.warnings + 1] = string.format(fmt, ...) end
   if not (ExtraData and ExtraData.Available()) then
@@ -386,32 +393,50 @@ function planner.Plan(target)
   -- without planned habitats the new modules run at the station's current workforce
   local liveFraction = (not target.workforce) and liveWorkforceFraction(target.station) or 0
 
-  -- base: wares wanted beyond the station's own use; use: what the station itself takes (ship building)
-  local base, use, habWares, fixedWorkforce = {}, {}, {}, 0
-  if target.kind == "ship" then
-    local e = target.buildMacro and cat.byMacro[target.buildMacro]
-    local bays = target.count or 1
-    if not target.repair then
-      -- one ship per bay at a time
-      local perShip, ships, hours = shipResources(target.shipSize or "m", race)
-      if ships == 0 then warn("no owned %s ship blueprint", tostring(target.shipSize)) end
-      plan.shipRate = hours > 0 and bays / hours or 0
-      for w, amount in pairs(perShip) do use[w] = amount * plan.shipRate end
+  -- baseRate: wares wanted beyond the station's own use; modules: module count goals per ware; use: what
+  -- the station itself takes (ship building)
+  local baseRate, moduleGoals, use, habWares, fixedWorkforce = {}, {}, {}, {}, 0
+  ---@type table<string, any[]>
+  local bySize = {}
+  for i, goal in ipairs(goalsOf(target)) do
+    if goal.kind == "ship" then
+      local e = goal.buildMacro and cat.byMacro[goal.buildMacro]
+      local bays = goal.count or 1
+      if bays > 0 then plan.adds = true end
+      if not goal.repair then
+        -- one ship per bay at a time
+        local size = goal.shipSize or "m"
+        bySize[size] = bySize[size] or { shipResources(size, race) }
+        local perShip, ships, hours = bySize[size][1], bySize[size][2], bySize[size][3]
+        if ships == 0 then warn("no owned %s ship blueprint", tostring(size)) end
+        local shipRate = hours > 0 and bays / hours or 0
+        plan.shipRates[i] = shipRate
+        for w, amount in pairs(perShip) do use[w] = (use[w] or 0) + amount * shipRate end
+      end
+      if e then
+        counts[e.macro] = (counts[e.macro] or 0) + bays
+        fixedWorkforce = fixedWorkforce + e.workforce * bays
+      else
+        warn("no owned build module %s", tostring(goal.buildMacro))
+      end
+    elseif goal.ware then
+      if goal.modules then
+        moduleGoals[goal.ware] = (moduleGoals[goal.ware] or 0) + goal.modules
+        baseRate[goal.ware] = baseRate[goal.ware] or 0
+        if goal.modules > 0 then plan.adds = true end
+      else
+        baseRate[goal.ware] = (baseRate[goal.ware] or 0) + (goal.rate or 0)
+        if (goal.rate or 0) > 0 then plan.adds = true end
+      end
     end
-    if e then
-      counts[e.macro] = bays
-      fixedWorkforce = e.workforce * bays
-    else
-      warn("no owned build module %s", tostring(target.buildMacro))
-    end
-  else
-    base[target.ware] = target.rate or 0
   end
+  local base = {}
 
-  -- an existing station's surplus (built, building and planned modules alike) covers new consumption first
+  -- an existing station's surplus (built, building and planned modules alike) covers new consumption first;
+  -- a goal ware's surplus is the goal's own
   local surplus = {}
   local function surplusOf(w)
-    if not target.station then return 0 end
+    if not target.station or baseRate[w] then return 0 end
     if surplus[w] == nil then surplus[w] = math.max(0, planner.Current(target.station, w).net) end
     return surplus[w]
   end
@@ -429,10 +454,12 @@ function planner.Plan(target)
       for macro, n in pairs(habCounts) do capacity = capacity + cat.byMacro[macro].capacity * n end
     end
     local fraction = target.workforce and (workforce > 0 and math.min(1, capacity / workforce) or 0) or liveFraction
-    -- a module count target: that many of the ware's producer at this round's fraction
-    if target.modules and target.ware then
-      local _, p = producerFor(cat, target.ware, race)
-      base[target.ware] = p and target.modules * rateOf(p, fraction, sunlight) or 0
+    -- a module count goal: that many of the ware's producer at this round's fraction
+    base = {}
+    for w, r in pairs(baseRate) do base[w] = r end
+    for w, n in pairs(moduleGoals) do
+      local _, p = producerFor(cat, w, race)
+      base[w] = base[w] + (p and n * rateOf(p, fraction, sunlight) or 0)
     end
     -- the balance of the current counts
     for w, r in pairs(use) do consumed[w] = r end
@@ -621,10 +648,19 @@ end
 
 function planner.Turns(plan)
   local cat = planner.Catalogue(plan.set)
-  local counts, target = plan.counts, plan.target
+  local counts = plan.counts
+  local goalWares, goalBuilds, ships = {}, {}, false
+  for _, goal in ipairs(goalsOf(plan.target)) do
+    if goal.kind == "ship" then
+      if goal.buildMacro then goalBuilds[goal.buildMacro] = true end
+      ships = true
+    elseif goal.ware then
+      goalWares[goal.ware] = true
+    end
+  end
   local function isFinal(e)
-    if target.kind == "ship" then return e.macro == target.buildMacro end
-    for _, p in ipairs(e.products or {}) do if p.ware == target.ware then return true end end
+    if goalBuilds[e.macro] then return true end
+    for _, p in ipairs(e.products or {}) do if goalWares[p.ware] then return true end end
     return false
   end
   local finals, upstream, others = {}, {}, {}
@@ -695,7 +731,7 @@ function planner.Turns(plan)
       for w in pairs(p.resources) do finalTransports[planner.Ware(w).transport] = true end
     end
   end
-  if target.kind == "ship" then
+  if ships then
     for w in pairs(plan.consumed) do finalTransports[planner.Ware(w).transport] = true end
   end
   -- the unit lists, largest first; a storage unit goes to the first transport type it serves
@@ -716,7 +752,15 @@ function planner.Turns(plan)
   local flow = plan.flow.import + plan.flow.export
   local turns, cum = {}, {}
   local placedWorkforce, placedHabitat, placedDocks, placedAreas, placedStorage = 0, 0, 0, 0, {}
-  local finalIdx = 1
+  -- the final macro furthest behind its count, so every goal grows in step
+  local function nextFinal()
+    local pick, behind
+    for _, e in ipairs(finals) do
+      local done = (cum[e.macro] or 0) / counts[e.macro]
+      if done < 1 and (not pick or done < behind) then pick, behind = e, done end
+    end
+    return pick
+  end
   local function emitWhile(turn, list, placed, need, each)
     while list[1] and placed < need - 1e-6 do
       local u = table.remove(list, 1)
@@ -734,16 +778,13 @@ function planner.Turns(plan)
         producers[#producers + 1] = e
       end
     end
-    local f = finals[finalIdx]
-    if f then
-      cum[f.macro] = (cum[f.macro] or 0) + 1
-      if cum[f.macro] >= counts[f.macro] then finalIdx = finalIdx + 1 end
-    end
+    local f = nextFinal()
+    if f then cum[f.macro] = (cum[f.macro] or 0) + 1 end
     for _, e in ipairs(producers) do placedWorkforce = placedWorkforce + e.workforce end
     if f then placedWorkforce = placedWorkforce + f.workforce end
     -- the final module first, so it runs on imports while the rest is built; then what it trades through. A
     -- build module is the final stage: last in its turn
-    local buildLast = target.kind == "ship"
+    local buildLast = f and f.group == "build"
     if f and not buildLast then turn[#turn + 1] = f.macro end
     local function emitStorage(ofFinal)
       for _, transport in ipairs(transports) do
@@ -831,6 +872,8 @@ end
 function planner.Run(target)
   local plan = planner.Plan(target)
   sab.Debug("planned:\n%s", planner.Print(plan))
+  -- every goal is met already
+  if not plan.adds then return nil, plan end
   return sab.StartBill(planner.Turns(plan), { grid = true, subdivide = target.dense and 2 or nil }), plan
 end
 

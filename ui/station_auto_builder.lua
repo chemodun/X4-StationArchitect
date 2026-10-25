@@ -2346,8 +2346,11 @@ sab.tab = "target"
 -- the panel opens as its title bar only
 sab.expanded = false
 -- ware, build module and race are filled from the catalogue on the first panel build (targetChoices)
+local function defaultGoal()
+  return { kind = "ware", modules = 1, bays = 1, shipSize = "m" }
+end
 local function defaultTarget()
-  return { kind = "ware", modules = 1, bays = 1, shipSize = "m", fullCycle = false, workforce = true, selfSufficient = false, docking = "high", dense = false }
+  return { goals = { defaultGoal() }, fullCycle = false, workforce = true, selfSufficient = false, docking = "high", dense = false }
 end
 sab.target = defaultTarget()
 -- slider tops: producer modules a ware target adds, build modules of a ship or repair target
@@ -2360,6 +2363,14 @@ sab.perFrame = 1
 function sab.ResetTarget()
   sab.target = defaultTarget()
   sab.panelDirty = true
+end
+
+function sab.AddGoal()
+  table.insert(sab.target.goals, defaultGoal())
+end
+
+function sab.RemoveGoal(i)
+  if #sab.target.goals > 1 then table.remove(sab.target.goals, i) end
 end
 -- the map dialog (07c): the last right-clicked sector spot, the open dialog, the target handed to the next build menu
 sab.lastSpot = nil
@@ -2395,8 +2406,21 @@ local function targetChoices(cat)
     if habitats[r.id] then races[#races + 1] = option(r.id, r.name) end
   end
   sortedByText(wares); sortedByText(builds); sortedByText(races)
-  if not seen[t.ware] then t.ware = wares[1] and wares[1].id end
-  if not (t.buildMacro and cat.byMacro[t.buildMacro]) then t.buildMacro = builds[1] and builds[1].id end
+  -- a goal's ware defaults to the first one no other goal takes
+  local taken = {}
+  for _, g in ipairs(t.goals) do
+    if seen[g.ware] and not taken[g.ware] then taken[g.ware] = true else g.ware = nil end
+  end
+  for _, g in ipairs(t.goals) do
+    if not g.ware then
+      for _, w in ipairs(wares) do
+        if not taken[w.id] then g.ware = w.id; break end
+      end
+      g.ware = g.ware or (wares[1] and wares[1].id)
+      if g.ware then taken[g.ware] = true end
+    end
+    if not (g.buildMacro and cat.byMacro[g.buildMacro]) then g.buildMacro = builds[1] and builds[1].id end
+  end
   if not habitats[t.race] then
     local best = 0
     for race, n in pairs(habitats) do
@@ -2418,22 +2442,36 @@ local function currentOf(ctx, ware)
   return sab.planner.Current(ctx.station, ware)
 end
 
--- t.modules is the wanted total of the ware's modules; the plan adds the difference.
+-- The ware's net output now in modules of its current output: the modules beyond the station's own use.
+local function extraModules(current)
+  if current.modules == 0 or current.production <= 0 then return current.modules end
+  return current.net * current.modules / current.production
+end
+
+-- A ware goal's modules are modules of net output, beyond what the station and the other goals consume; the
+-- plan adds the difference. The spec's goals keep the form's order.
 function sab.TargetSpec(ctx)
   local t = sab.target
   -- a run before the form was ever built (eval, a collapsed panel) still needs the defaults
-  if not (t.ware and t.buildMacro and t.race) then targetChoices(sab.planner.Catalogue(ctx.set, true)) end
-  local ship = t.kind ~= "ware"
-  local add = not ship and math.max(0, (t.modules or 1) - currentOf(ctx, t.ware).modules) or nil
-  return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, kind = ship and "ship" or "ware", repair = t.kind == "repair",
-    ware = t.ware, modules = add, buildMacro = t.buildMacro, shipSize = t.shipSize, count = ship and t.bays or nil,
+  local ready = t.race ~= nil
+  for _, g in ipairs(t.goals) do ready = ready and g.ware ~= nil and g.buildMacro ~= nil end
+  if not ready then targetChoices(sab.planner.Catalogue(ctx.set, true)) end
+  local goals = {}
+  for _, g in ipairs(t.goals) do
+    if g.kind == "ware" then
+      goals[#goals + 1] = { kind = "ware", ware = g.ware, modules = math.max(0, (g.modules or 1) - extraModules(currentOf(ctx, g.ware))) }
+    else
+      goals[#goals + 1] = { kind = "ship", repair = g.kind == "repair", buildMacro = g.buildMacro, shipSize = g.shipSize, count = g.bays }
+    end
+  end
+  return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
     race = t.race, docking = t.docking, dense = t.dense }
 end
 
 function sab.RunTarget()
   local spec = sab.planner and sab.TargetSpec(sab.PanelContext())
-  if not spec or spec.modules == 0 then return end
+  if not spec then return end
   if sab.planner.Run(spec) then sab.panelDirty = true end
 end
 
@@ -2544,8 +2582,8 @@ local function rowKit(ftable, idle, buttonHeight, dirty)
     row[1]:createText(label, { minRowHeight = buttonHeight })
     return row
   end
-  function kit.dropdown(row, options, current, onChange)
-    row[2]:setColSpan(3):createDropDown(options, { startOption = current or "", height = buttonHeight, active = idle and #options > 0 })
+  function kit.dropdown(row, options, current, onChange, span)
+    row[2]:setColSpan(span or 3):createDropDown(options, { startOption = current or "", height = buttonHeight, active = idle and #options > 0 })
     row[2].handlers.onDropDownConfirmed = function(_, id)
       if id ~= current then onChange(id); dirty() end
     end
@@ -2565,45 +2603,70 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
   local choices = targetChoices(cat)
   local kit = rowKit(ftable, idle, buttonHeight, dirty)
   local input, dropdown, checkbox = kit.input, kit.dropdown, kit.checkbox
-  local current = t.kind == "ware" and currentOf(ctx, t.ware)
-  local low, top
-  if current then
-    low, top = math.max(1, current.modules), current.modules + MAX_ADD_MODULES
-    t.modules = math.max(low, math.min(top, t.modules or 1))
-  else
-    t.bays = math.max(1, math.min(MAX_BAYS, t.bays or 1))
+  -- per ware goal: the station's balance and the slider range
+  local currents, lows = {}, {}
+  for i, g in ipairs(t.goals) do
+    if g.kind == "ware" then
+      currents[i] = currentOf(ctx, g.ware)
+      lows[i] = math.max(1, math.floor(extraModules(currents[i]) + 1e-6))
+      g.modules = math.max(lows[i], math.min(lows[i] + MAX_ADD_MODULES, g.modules or 1))
+    else
+      g.bays = math.max(1, math.min(MAX_BAYS, g.bays or 1))
+    end
   end
   local ok, plan = pcall(sab.planner.Plan, sab.TargetSpec(ctx))
 
   local kinds = { option("ware", ReadText(PAGE, 111)), option("ship", ReadText(PAGE, 112)), option("repair", ReadText(PAGE, 113)) }
-  dropdown(input(ReadText(PAGE, 109)), kinds, t.kind, function(id) t.kind = id end)
-  if current then
-    dropdown(input(ReadText(PAGE, 114)), choices.wares, t.ware, function(id) t.ware = id end)
-    input(ReadText(PAGE, 116))
-    local row = ftable:addRow(true, {})
-    row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low,
-      max = top, start = t.modules, step = 1, active = idle })
-    row[1].handlers.onSliderCellChanged = function(_, value) t.modules = value end
-    row[1].handlers.onSliderCellConfirm = dirty
-    local planned = ok and current.net + (plan.produced[t.ware] or 0) - (plan.consumed[t.ware] or 0) or current.net
-    row = input(ReadText(PAGE, 115))
-    row[2]:setColSpan(3):createText(string.format(tostring(ReadText(PAGE, 140)), string.format("%+d", math.floor(current.net + 0.5)),
-      string.format("%+d", math.floor(planned + 0.5))), { halign = "right", minRowHeight = buttonHeight })
-  else
-    dropdown(input(ReadText(PAGE, 117)), choices.builds, t.buildMacro, function(id) t.buildMacro = id end)
-    input(ReadText(1001, 2439))
-    local row = ftable:addRow(true, {})
-    row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1,
-      max = MAX_BAYS, start = t.bays, step = 1, active = idle })
-    row[1].handlers.onSliderCellChanged = function(_, value) t.bays = value end
-    row[1].handlers.onSliderCellConfirm = dirty
-    if t.kind == "ship" then
-      local sizes = { option("s", "S"), option("m", "M"), option("l", "L"), option("xl", "XL") }
-      dropdown(input(ReadText(1001, 9648)), sizes, t.shipSize, function(id) t.shipSize = id end)
-      row = input(ReadText(PAGE, 118))
-      row[2]:setColSpan(3):createText(ok and string.format("%.1f", plan.shipRate or 0) or "", { halign = "right", minRowHeight = buttonHeight })
+  local several = #t.goals > 1
+  for i, g in ipairs(t.goals) do
+    local row = input(several and string.format(tostring(ReadText(PAGE, 144)), i) or ReadText(PAGE, 109))
+    dropdown(row, kinds, g.kind, function(id) g.kind = id end, several and 2 or 3)
+    if several then
+      row[4]:createButton({ height = buttonHeight, width = buttonHeight, active = idle, mouseOverText = ReadText(1001, 6702) }):setText("X", { halign = "center" })
+      row[4].handlers.onClick = function() sab.RemoveGoal(i); dirty() end
+    end
+    local current = currents[i]
+    if current then
+      -- one goal per ware: the others' wares are not offered
+      local wares = {}
+      for _, o in ipairs(choices.wares) do
+        local other = false
+        for j, h in ipairs(t.goals) do
+          if j ~= i and h.kind == "ware" and h.ware == o.id then other = true end
+        end
+        if not other then wares[#wares + 1] = o end
+      end
+      dropdown(input(ReadText(PAGE, 114)), wares, g.ware, function(id) g.ware = id end)
+      input(ReadText(PAGE, 116))
+      local low, top = lows[i], lows[i] + MAX_ADD_MODULES
+      row = ftable:addRow(true, {})
+      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low,
+        max = top, start = g.modules, step = 1, active = idle })
+      row[1].handlers.onSliderCellChanged = function(_, value) g.modules = value end
+      row[1].handlers.onSliderCellConfirm = dirty
+      local planned = ok and current.net + (plan.produced[g.ware] or 0) - (plan.consumed[g.ware] or 0) or current.net
+      row = input(ReadText(PAGE, 115))
+      row[2]:setColSpan(3):createText(string.format(tostring(ReadText(PAGE, 140)), string.format("%+d", math.floor(current.net + 0.5)),
+        string.format("%+d", math.floor(planned + 0.5))), { halign = "right", minRowHeight = buttonHeight })
+    else
+      dropdown(input(ReadText(PAGE, 117)), choices.builds, g.buildMacro, function(id) g.buildMacro = id end)
+      input(ReadText(1001, 2439))
+      row = ftable:addRow(true, {})
+      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1,
+        max = MAX_BAYS, start = g.bays, step = 1, active = idle })
+      row[1].handlers.onSliderCellChanged = function(_, value) g.bays = value end
+      row[1].handlers.onSliderCellConfirm = dirty
+      if g.kind == "ship" then
+        local sizes = { option("s", "S"), option("m", "M"), option("l", "L"), option("xl", "XL") }
+        dropdown(input(ReadText(1001, 9648)), sizes, g.shipSize, function(id) g.shipSize = id end)
+        row = input(ReadText(PAGE, 118))
+        row[2]:setColSpan(3):createText(ok and string.format("%.1f", plan.shipRates[i] or 0) or "", { halign = "right", minRowHeight = buttonHeight })
+      end
     end
   end
+  local addRow = ftable:addRow(true, {})
+  addRow[1]:setColSpan(4):createButton({ height = buttonHeight, active = idle }):setText(ReadText(PAGE, 145), { halign = "center" })
+  addRow[1].handlers.onClick = function() sab.AddGoal(); dirty() end
   checkbox(input(ReadText(PAGE, 119)), t.fullCycle, true, function(v) t.fullCycle = v end)
   checkbox(input(ReadText(PAGE, 120)), t.workforce, true, function(v) t.workforce = v end)
   checkbox(input(ReadText(PAGE, 121)), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
@@ -2783,8 +2846,8 @@ function sab.DisplayPanel()
   row[1].handlers.onSliderCellChanged = function(_, value) sab.perFrame = value end
   row = btable:addRow(true, {})
   if target then
-    -- nothing to add: the module count is at what the station has
-    local adds = plan ~= nil and plan.target.modules ~= 0
+    -- nothing to add: every goal is at what the station has
+    local adds = plan ~= nil and plan.adds
     local function canRun() return adds and sab.run == nil and sab.RouteOk() end
     row[1]:createButton({ height = buttonHeight, active = canRun }):setText(ReadText(PAGE, 103), { halign = "center" })
     row[1].handlers.onClick = sab.RunTarget
