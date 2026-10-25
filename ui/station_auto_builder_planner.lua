@@ -22,6 +22,14 @@ ffi.cdef [[
     const char* wareid;
     uint32_t amount;
   } UIWareAmount;
+  typedef struct {
+    uint32_t current;
+    uint32_t capacity;
+    uint32_t optimal;
+    uint32_t available;
+    uint32_t maxavailable;
+    double timeuntilnextupdate;
+  } WorkForceInfo;
 
   uint32_t GetBlueprints(UIBlueprint* result, uint32_t resultlen, const char* set, const char* category, const char* macroname);
   double GetContainerWareConsumption(UniverseID containerid, const char* wareid, bool ignorestate);
@@ -32,13 +40,21 @@ ffi.cdef [[
   ProductionMethodInfo3 GetProductionMethodInfo2(const char* wareid, const char* productionmethod);
   uint32_t GetProductionMethodResources(UIWareAmount* result, uint32_t resultlen, const char* wareid, const char* productionmethod);
   uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID stationid, bool includeconstructions, bool includewrecks);
+  WorkForceInfo GetWorkForceInfo(UniverseID containerid, const char* raceid);
 ]]
+-- the loadout and build order types are vanilla's (menu_ship_configuration.lua)
+local loadoutApi = pcall(ffi.cdef, [[
+  void GenerateShipLoadout2(UILoadout2* result, UniverseID containerid, UniverseID shipid, const char* macroname, float level);
+  void GenerateShipLoadoutCounts2(UILoadoutCounts2* result, UniverseID containerid, UniverseID shipid, const char* macroname, float level);
+  double GetBuildDuration(UniverseID containerid, UIBuildOrderList order);
+]])
 
 local sab = StationAutoBuilder
 
 local planner = {
   -- sizing rules
   storageHours = 4,           -- storage per ware: hours of its hourly flow
+  shipLoadout = 0.5,          -- equipment of a planned ship: vanilla's Medium loadout preset
   lShare = 0.7,               -- share of the trade volume carried by L/XL ships, the rest by M
   pierDockM3PerHour = 250000, -- L/XL trade volume one pier dock serves per hour
   mDockM3PerHour = 150000,    -- M trade volume one M dock of a dock area serves per hour
@@ -145,6 +161,8 @@ local function entryOf(group, lib, macro)
     pierDocks = bays and #bays or 0 }
   for _, r in ipairs(races) do e.races[r] = true end
   if group == "build" then
+    -- a build takes 1 + efficiency x (1 - workforce share) times its full-workforce duration
+    e.efficiency = data.efficiencyfactor or 0
     -- the ship sizes the module fabricates (none for a maintenance bay); nil when the Extra Data API cannot tell
     local classes = ExtraData and ExtraData.GetMacroDataEx(macro, "builderclasses")
     if classes then
@@ -280,47 +298,152 @@ end
 
 -- *** targets ***
 
--- Per-ship build resources and build hours averaged over the owned ship blueprints of the sizes (s, m, l, xl),
--- those of the race when it owns any (Terran hulls need other wares than Commonwealth ones); each ship by
--- the race's method, else "default", else its first.
-local function shipResources(sizes, race)
-  local macros, ofRace = {}, {}
-  for _, size in ipairs(sizes) do
-    for _, macro in ipairs(blueprints("", "shiptypes_" .. size)) do macros[#macros + 1] = macro end
-  end
-  for _, macro in ipairs(macros) do
-    local races = GetMacroData(macro, "makerraceid")
-    for _, r in ipairs(type(races) == "table" and races or { races }) do
-      if r == race then ofRace[#ofRace + 1] = macro end
+-- The workforce share a container runs at; 1 when it needs none.
+local function workforceFraction(container)
+  if not container then return 0 end
+  local w = C.GetWorkForceInfo(container, "")
+  return w.optimal > 0 and math.min(1, w.current / w.optimal) or 1
+end
+
+-- The efficiency factor of a built build module of the station that fabricates the size; nil when it has none.
+local function bayFor(station, size)
+  local n = C.GetNumStationModules(station, false, false)
+  local buf = ffi.new("UniverseID[?]", n)
+  n = C.GetStationModules(buf, n, station, false, false)
+  for i = 0, tonumber(n) - 1 do
+    local macro = GetComponentData(ConvertStringTo64Bit(tostring(buf[i])), "macro")
+    if macro and IsMacroClass(macro, "buildmodule") then
+      for _, class in ipairs(ExtraData and ExtraData.GetMacroDataEx(macro, "builderclasses") or {}) do
+        if class == "ship_" .. size then return GetLibraryEntry(GetMacroData(macro, "infolibrary"), macro).efficiencyfactor or 0 end
+      end
     end
   end
-  if #ofRace > 0 then macros = ofRace end
-  local total, ships, seconds = {}, 0, 0
-  for _, macro in ipairs(macros) do
-    local ware = GetMacroData(macro, "ware")
-    local methods = ware and GetWareData(ware, "productionmethods")
-    local method
-    for _, m in ipairs(type(methods) == "table" and methods or {}) do
-      if m == race or (m == "default" and method ~= race) or not method then method = m end
-    end
-    if method then
-      local n = C.GetNumProductionMethodResources(ware, method)
-      if n > 0 then
-        local buf = ffi.new("UIWareAmount[?]", n)
-        n = C.GetProductionMethodResources(buf, n, ware, method)
-        for i = 0, tonumber(n) - 1 do
-          local res = ffi.string(buf[i].wareid)
-          total[res] = (total[res] or 0) + buf[i].amount
+  return nil
+end
+
+-- size .. race -> { station, efficiency, fraction } of a known yard the engine reports build durations for
+local yards = {}
+
+-- A yard for the size: the station itself when it has the bay, else a known one of a faction of the race (its
+-- equipment fits the race's hulls), else of any faction; the fullest workforce first.
+local function yardFor(size, station, race)
+  local ef = station and bayFor(station, size)
+  if ef then return { station = station, efficiency = ef, fraction = workforceFraction(station) } end
+  local key = size .. " " .. tostring(race)
+  local y = yards[key]
+  if y and IsValidComponent(y.station) then return y end
+  local best
+  for pass = 1, 2 do
+    for _, f in ipairs(GetLibrary("factions") or {}) do
+      if f.id ~= "player" and ((pass == 1) == (GetFactionData(f.id, "primaryrace") == race)) then
+        for _, id in ipairs(GetContainedStationsByOwner(f.id, nil, true) or {}) do
+          local s = ConvertIDTo64Bit(id)
+          if GetComponentData(s, "canbuildships") then
+            ef = bayFor(s, size)
+            local fraction = ef and workforceFraction(s)
+            if ef and (not best or fraction > best.fraction) then best = { station = s, efficiency = ef, fraction = fraction } end
+            if best and best.fraction > 0.999 then break end
+          end
         end
+      end
+      if best and best.fraction > 0.999 then break end
+    end
+    if best then break end
+  end
+  yards[key] = best
+  return best
+end
+
+-- The method a ware is made by for the race: the race's, else "default", else its first.
+local function raceMethod(ware, race)
+  local methods = ware and GetWareData(ware, "productionmethods")
+  local method
+  for _, m in ipairs(type(methods) == "table" and methods or {}) do
+    if m == race or (m == "default" and method ~= race) or not method then method = m end
+  end
+  return method
+end
+
+-- Adds a ware's production resources to total; false when it has none.
+local function addResources(total, ware, race)
+  local method = raceMethod(ware, race)
+  local n = method and C.GetNumProductionMethodResources(ware, method) or 0
+  if n == 0 then return false end
+  local buf = ffi.new("UIWareAmount[?]", n)
+  n = C.GetProductionMethodResources(buf, n, ware, method)
+  for i = 0, tonumber(n) - 1 do
+    local res = ffi.string(buf[i].wareid)
+    total[res] = (total[res] or 0) + buf[i].amount
+  end
+  return true
+end
+
+-- macro .. yard -> { full-workforce seconds, equipment }: the engine logs each loadout it cannot fill, so each
+-- is asked once
+local equipped = {}
+
+-- The ship with the yard's loadout of the planner's preset: the engine's build seconds at a full workforce and
+-- the equipment macros; nil without the loadout functions.
+local function equippedBuild(macro, yard)
+  if not loadoutApi then return nil end
+  local key = macro .. " " .. tostring(yard.station)
+  local known = equipped[key]
+  if known then return known[1], known[2] end
+  local l2 = Helper.getLoadoutHelper2(C.GenerateShipLoadout2, C.GenerateShipLoadoutCounts2, "UILoadout2", yard.station, 0, macro, planner.shipLoadout)
+  local loadout, keep, equipment = ffi.new("UILoadout"), {}, {}
+  for _, f in ipairs({ { "engines", "numengines" }, { "shields", "numshields" }, { "weapons", "numweapons" }, { "turrets", "numturrets" } }) do
+    local n = l2[f[2]]
+    local list = ffi.new("UILoadoutMacroData[?]", n)
+    keep[#keep + 1] = list
+    for i = 0, n - 1 do
+      local src = l2[f[1]][i]
+      list[i].macro, list[i].upgradetypename, list[i].slot, list[i].optional = src.macro, src.upgradetypename, src.slot, src.optional
+      equipment[#equipment + 1] = ffi.string(src.macro)
+    end
+    loadout[f[1]], loadout[f[2]] = list, n
+  end
+  local order = ffi.new("UIBuildOrderList")
+  order.shipid, order.macroname, order.amount, order.loadout = 0, Helper.ffiNewString(macro), 1, loadout
+  local seconds = tonumber(C.GetBuildDuration(yard.station, order)) / (1 + yard.efficiency * (1 - yard.fraction))
+  equipped[key] = { seconds, equipment }
+  return seconds, equipment
+end
+
+-- Per-ship build resources (hull and equipment) and build hours at a full workforce, averaged over the owned
+-- ship blueprints of the sizes (s, m, l, xl), those of the race when it owns any (Terran hulls need other wares
+-- than Commonwealth ones); the hours from the engine at a yard of the size, else from the hull ware (fromWare).
+local function shipResources(sizes, race, station)
+  local total, ships, seconds, fromWare = {}, 0, 0, false
+  for _, size in ipairs(sizes) do
+    local macros, ofRace = blueprints("", "shiptypes_" .. size), {}
+    for _, macro in ipairs(macros) do
+      local races = GetMacroData(macro, "makerraceid")
+      for _, r in ipairs(type(races) == "table" and races or { races }) do
+        if r == race then ofRace[#ofRace + 1] = macro end
+      end
+    end
+    if #ofRace > 0 then macros = ofRace end
+    local yard = yardFor(size, station, race)
+    for _, macro in ipairs(macros) do
+      local ware = GetMacroData(macro, "ware")
+      if addResources(total, ware, race) then
         ships = ships + 1
-        seconds = seconds + C.GetProductionMethodInfo2(ware, method).productiontime
+        local built, equipment = nil, nil
+        if yard then built, equipment = equippedBuild(macro, yard) end
+        if built then
+          seconds = seconds + built
+          for _, m in ipairs(equipment or {}) do addResources(total, GetMacroData(m, "ware"), race) end
+        else
+          fromWare = true
+          seconds = seconds + C.GetProductionMethodInfo2(ware, raceMethod(ware, race)).productiontime
+        end
       end
     end
   end
   if ships > 0 then
     for w, amount in pairs(total) do total[w] = amount / ships end
   end
-  return total, ships, ships > 0 and seconds / ships / 3600 or 0
+  return total, ships, ships > 0 and seconds / ships / 3600 or 0, fromWare
 end
 
 -- A product's hourly rate under a workforce fraction and sunlight; the engine multiplies the two bonuses
@@ -333,12 +456,8 @@ end
 
 -- The workforce fraction an existing station's producers run at (0 without a station or producers).
 local function liveWorkforceFraction(station)
-  if not station then return 0 end
-  for _, module in ipairs(GetProductionModules(station) or {}) do
-    local data = IsValidComponent(module) and GetProductionModuleData(module)
-    if data and data.efficiency and data.efficiency.work then return data.efficiency.work.workforce or 0 end
-  end
-  return 0
+  if not station or #(GetProductionModules(station) or {}) == 0 then return 0 end
+  return workforceFraction(station)
 end
 
 -- The station's module macros: the open build menu's plan on it (built and planned), else its modules and
@@ -400,10 +519,10 @@ local function moduleEntry(cat, macro)
 end
 
 -- An existing station's modules, planned ones included: producers per ware, the wares its producers and
--- habitats use, workforce need and housing, habitats per race, build modules per macro.
+-- habitats use, workforce need and housing, habitats per race, other modules per maker race, build modules per macro.
 local function stationProfile(station, set)
   local cat = planner.Catalogue(set or "")
-  local p = { makes = {}, uses = {}, habWares = {}, need = 0, capacity = 0, races = {}, builds = {} }
+  local p = { makes = {}, uses = {}, habWares = {}, need = 0, capacity = 0, races = {}, moduleRaces = {}, builds = {} }
   for _, macro in ipairs(stationMacros(station)) do
     local e = moduleEntry(cat, macro)
     if e and e.group == "habitation" then
@@ -412,6 +531,7 @@ local function stationProfile(station, set)
       for w in pairs(e.needs) do p.habWares[w] = true end
     elseif e then
       p.need = p.need + e.workforce
+      for r in pairs(e.races) do p.moduleRaces[r] = (p.moduleRaces[r] or 0) + 1 end
       if e.group == "build" then p.builds[macro] = (p.builds[macro] or 0) + 1 end
       for _, prod in ipairs(e.products or {}) do
         p.makes[prod.ware] = (p.makes[prod.ware] or 0) + 1
@@ -428,9 +548,19 @@ end
 function planner.Derive(station, set)
   local cat = planner.Catalogue(set or "")
   local p = stationProfile(station, set)
-  local race, most = nil, 0
-  for r, n in pairs(p.races) do
-    if n > most or (n == most and r < race) then race, most = r, n end
+  local function mostOf(counts)
+    local best, most = nil, 0
+    for r, n in pairs(counts) do
+      if n > most or (n == most and r < best) then best, most = r, n end
+    end
+    return best
+  end
+  -- without habitats: the race most of its modules are made by, else the sector owner's
+  local race = mostOf(p.races) or mostOf(p.moduleRaces)
+  if not race then
+    local owner = GetComponentData(GetComponentData(station, "sectorid"), "owner")
+    local primary = owner and GetFactionData(owner, "primaryrace")
+    race = primary ~= "" and primary or nil
   end
   local d = { goals = {}, workforce = p.capacity > 0, race = race }
   local builds = {}
@@ -519,7 +649,7 @@ end
 
 -- target = { set, station, goals, fullCycle, workforce, race, selfSufficient, sunlight }, each goal
 --   { kind = "ware", ware, rate (net ware amount per hour) or modules } or { kind = "ship", buildMacro, count
---   (build modules to add) }. A fabrication bay builds the ship sizes its builder classes name (shipSize
+--   (build modules to add), bays (the station's total after the plan, supplied as a whole) }. A fabrication bay builds the ship sizes its builder classes name (shipSize
 --   overrides), a maintenance bay none (repair forces that); plan.shipRates and plan.shipHours per goal index.
 --   A goal ware another goal consumes gets its producers on top of that consumption. A station's shortfalls
 --   (stationLacks) are planned too, with or without a goal.
@@ -554,16 +684,21 @@ function planner.Plan(target)
     if goal.kind == "ship" then
       local e = goal.buildMacro and cat.byMacro[goal.buildMacro]
       local bays = goal.count or 1
-      if bays > 0 then plan.adds = true end
+      -- the supply serves every bay, the station's own included
+      local supplied = math.max(bays, goal.bays or bays)
+      if bays > 0 or (target.fullCycle and supplied > 0) then plan.adds = true end
       local sizes = goal.repair and {} or (goal.shipSize and { goal.shipSize }) or (e and e.builds)
       if e and not sizes then warn("build module kind unknown (Extra Data API): %s planned without ships", e.name) end
       if sizes and #sizes > 0 then
         -- one ship per bay at a time
         local id = table.concat(sizes, " ")
-        bySizes[id] = bySizes[id] or { shipResources(sizes, race) }
-        local perShip, ships, hours = bySizes[id][1], bySizes[id][2], bySizes[id][3]
+        bySizes[id] = bySizes[id] or { shipResources(sizes, race, target.station) }
+        local perShip, ships, hours, fromWare = bySizes[id][1], bySizes[id][2], bySizes[id][3], bySizes[id][4]
         if ships == 0 then warn("no owned %s ship blueprint", id) end
-        local shipRate = hours > 0 and bays / hours or 0
+        if fromWare then warn("no known %s yard: ship build times from the hull wares", id) end
+        -- planned habitats staff the bays, else they run at the station's workforce now
+        if e then hours = hours * (1 + e.efficiency * (1 - (target.workforce and 1 or workforceFraction(target.station)))) end
+        local shipRate = hours > 0 and supplied / hours or 0
         plan.shipRates[i], plan.shipHours[i] = shipRate, hours
         for w, amount in pairs(perShip) do use[w] = (use[w] or 0) + amount * shipRate end
       end
@@ -739,8 +874,8 @@ end
 
 -- The current hourly balance of a ware on an existing station at nominal rates (a waiting module counts),
 -- workforce use included, plus what the open build menu's plan still has to build (planned entries and modules
--- under construction) at the station's live workforce fraction and sunlight; modules: the station's modules
--- making the ware, planned ones included.
+-- under construction): producers at the workforce fraction the whole plan's habitats house and the sunlight,
+-- habitats full; modules: the station's modules making the ware, planned ones included.
 function planner.Current(station, ware)
   local production = tonumber(C.GetContainerWareProduction(station, ware, true)) or 0
   local consumption = (tonumber(C.GetContainerWareConsumption(station, ware, true)) or 0) + (Helper.getWorkforceConsumption(station, ware) or 0)
@@ -756,7 +891,8 @@ function planner.Current(station, ware)
         for _, p in ipairs(entry and entry.products or {}) do
           if p.ware == ware then
             if not fraction then
-              fraction = liveWorkforceFraction(station)
+              local profile = stationProfile(station, menu.set)
+              fraction = math.max(liveWorkforceFraction(station), profile.need > 0 and math.min(1, profile.capacity / profile.need) or 0)
               sunlight = GetComponentData(GetComponentData(station, "sectorid"), "sunlight") or 1
             end
             production = production + rateOf(p, fraction, sunlight)
@@ -764,6 +900,7 @@ function planner.Current(station, ware)
           end
           if p.resources[ware] then consumption = consumption + p.resources[ware] end
         end
+        if entry and entry.needs and entry.needs[ware] then consumption = consumption + entry.needs[ware] end
       end
     end
   else

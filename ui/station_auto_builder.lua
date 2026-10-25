@@ -663,9 +663,7 @@ end
 -- No place: the overlapping candidates go to the engine's collision check, then the plot grows when it
 -- blocked candidates, then a connector grows outward from the edge and the item tries again. Further
 -- connectors for the same item continue straight from the previous one's tip (a spur); the item tries the tip first.
--- Floor layout (a full-cycle plan on an empty plot): production modules fill a lattice of equal cells, floor by
--- floor; piers and dock areas go to the front wing, storage and habitats to the left wing; the right, back and
--- top sides stay free so a later run can extend the floors.
+-- A target plan on an empty plot takes the grid layout (station_auto_builder_grid.lua) instead.
 
 local OUTER = { dockarea = 1000, pier = 2000, buildmodule = 2000, defencemodule = 1000, ventureplatform = 1000 }
 local TRIES_PER_FRAME, CHECKS_PER_FRAME = 8, 400
@@ -674,11 +672,9 @@ local RELAXED_TRIES, MAX_REACH, MAX_SPURS, MAX_PLOT, PLOT_STEP = 200, 6, 3, 2000
 sab.maxPlotKm = MAX_PLOT / 1000
 local AXES = { "x", "y", "z" }
 local STRAIGHT = 0.9
-local LATTICE_GAP, WING_GAP, LATERAL_WEIGHT, ROW_GAP = 100, 500, 0.25, 100
-local SIDES = { front = { 0, 0, -1 }, left = { -1, 0, 0 } }
+local SPUR_GAP = 500
 -- classes with approach zones the engine keeps free (exclusionzones)
 local COLUMN = { "dockarea", "pier" }
-local WING = { pier = "front", dock = "front", storage = "left", habitation = "left", other = "left" }
 local GROUP_CLASSES = { { "production", "production" }, { "processingmodule", "production" }, { "buildmodule", "build" },
   { "storage", "storage" }, { "habitation", "habitation" }, { "dockarea", "dock" }, { "pier", "pier" } }
 
@@ -767,11 +763,6 @@ local function inside(a, b)
   return true
 end
 
--- the two boxes share ground area (the column rule ignores height)
-local function sameColumn(a, b, margin)
-  return a.min[1] - margin < b.max[1] and a.max[1] + margin > b.min[1] and a.min[3] - margin < b.max[3] and a.max[3] + margin > b.min[3]
-end
-
 local function addEntry(run, idx, macro, pose)
   run.n = run.n + 1
   run.sum[1], run.sum[2], run.sum[3] = run.sum[1] + pose.x, run.sum[2] + pose.y, run.sum[3] + pose.z
@@ -817,17 +808,20 @@ end
 
 -- Each face of the plot moved on its own to whole steps from the station's position that cover box (station
 -- coordinates; the station's position stays inside); shrink lets faces move inwards. Capped per axis.
--- Returns the face moves (metres per axis), whether any face moves, and the new faces in steps.
+-- Returns the face moves (metres per axis), whether any face moves, the new faces in steps and the longest axis
+-- the box needs before the cap, in metres.
 local function plotChange(box, shrink, quiet)
   local have = plotExtents()
   local pos, neg, change = { x = 0, y = 0, z = 0 }, { x = 0, y = 0, z = 0 }, false
-  local faces = { pos = {}, neg = {} }
+  local faces, need = { pos = {}, neg = {}, uncapped = {} }, 0
   for i, axis in ipairs(AXES) do
     local hp, hn = math.ceil(have.pos[i] / PLOT_STEP - 0.001), math.ceil(have.neg[i] / PLOT_STEP - 0.001)
     local p = math.max(0, math.ceil(box.max[i] / PLOT_STEP - 0.001))
     local n = math.max(0, math.ceil(-box.min[i] / PLOT_STEP - 0.001))
     if not shrink then p, n = math.max(p, hp), math.max(n, hn) end
     if p + n == 0 then p = 1 end
+    need = math.max(need, (p + n) * PLOT_STEP)
+    faces.uncapped[i] = p + n
     if (p + n) * PLOT_STEP > MAX_PLOT then
       if not quiet then sab.Debug("the layout needs %.1f km on %s, above the plot cap %.0f km", (p + n) * PLOT_STEP / 1000, axis, MAX_PLOT / 1000) end
       while (p + n) * PLOT_STEP > MAX_PLOT do
@@ -838,7 +832,12 @@ local function plotChange(box, shrink, quiet)
     if math.abs(pos[axis]) > 1 or math.abs(neg[axis]) > 1 then change = true end
     faces.pos[i], faces.neg[i] = p, n
   end
-  return pos, neg, change, faces
+  return pos, neg, change, faces, need
+end
+
+-- The whole-km faces the plot grows to for box (station frame), capped; uncapped: steps per axis before the cap.
+function sab.PlotFaces(box)
+  return select(4, plotChange(box, false, true))
 end
 
 -- Vanilla's licence rule: free where the sector owner is nobody, the Xenon or the player.
@@ -879,11 +878,18 @@ end
 function sab.OfferPlot(run)
   local menu, box = sab.menu, run.plotBox
   local sector = ConvertIDTo64Bit(GetComponentData(menu.container, "sectorid"))
+  local pos, neg, change, f, need
+  if box then pos, neg, change, f, need = plotChange(box, false, true) end
+  -- a layout past the plot cap would leave modules outside: nothing is placed
+  if need and need > MAX_PLOT then
+    sab.StopRun(string.format("the layout needs %.0f km, above the plot cap", need / 1000))
+    sab.lastRun = { placed = 0, failed = 0, tooLarge = need / 1000 }
+    return
+  end
   if not box or plotIsFree(sector) then
     run.phase = "begin"
     return
   end
-  local pos, neg, change, f = plotChange(box, false, true)
   local size = { x = (f.pos[1] + f.neg[1]) * PLOT_STEP, y = (f.pos[2] + f.neg[2]) * PLOT_STEP, z = (f.pos[3] + f.neg[3]) * PLOT_STEP }
   -- the predicted plot, not the current one: plotPrice reads the plot as it is
   local buf = ffi.new("bool[1]", 0)
@@ -925,6 +931,27 @@ function sab.AnswerPlot(accept)
   sab.Debug("plot licence paid: %d Cr (offered %d)", price, o.price)
   readPlot(run)
   run.offer, run.phase = nil, "begin"
+  sab.panelDirty = true
+end
+
+-- The licence still due on a plot in a faction sector (a bill run grows it unpaid), nil when none is due.
+function sab.PlotFee()
+  local menu = sab.menu
+  if sab.run or not menu or menu.container == 0 then return nil end
+  local sector = ConvertIDTo64Bit(GetComponentData(menu.container, "sectorid"))
+  if plotIsFree(sector) then return nil end
+  local price = plotPrice(sector)
+  return price > 0 and price or nil
+end
+
+function sab.BuyPlot()
+  local price = sab.PlotFee()
+  if not price or GetPlayerMoney() < price then return end
+  local menu = sab.menu
+  local sector = ConvertIDTo64Bit(GetComponentData(menu.container, "sectorid"))
+  TransferPlayerMoneyTo(price, ConvertStringTo64Bit(tostring(C.GetSectorControlStation(sector))))
+  C.PayBuildPlotSize(menu.container, C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container))
+  sab.Debug("plot licence paid: %d Cr", price)
   sab.panelDirty = true
 end
 
@@ -989,12 +1016,9 @@ local function anchorOf(run)
   return { run.sum[1] / run.n, run.sum[2] / run.n, run.sum[3] / run.n }
 end
 
--- *** floor layout ***
--- A full-cycle plan on an empty plot stands on a skeleton: per floor a serpentine chain of crosses, one per
--- cell, linked by struts; the first cell of a floor is the spine that carries the vertical struts to the next
--- floor; a production module with a bottom plug stands on its cell's cross, the others join the wings.
--- Connection geometry comes from a probe at the start of the run: every connector and lattice module is
--- floated once and its connections read (cached per Lua state).
+-- *** connectors ***
+-- Connection geometry comes from a probe at the start of the run: every connector and, on the grid route,
+-- every module is floated once and its connections read (cached per Lua state).
 
 sab.macroConns = sab.macroConns or {}
 
@@ -1096,408 +1120,32 @@ local function spanWith(lengths, need)
   return best and best.picked, best and best.sum
 end
 
-local function cellKey(ix, iz, iy) return ix .. "," .. iz .. "," .. iy end
-
--- A floor's cells in serpentine order; cell 1 is the spine at 0,0.
-local function floorCells(nx, nz)
-  local cells = {}
-  for iz = 0, nz - 1 do
-    for i = 0, nx - 1 do
-      cells[#cells + 1] = { (iz % 2 == 0) and i or (nx - 1 - i), iz }
-    end
-  end
-  return cells
-end
-
--- The layout of the run's lattice modules: pitches from the largest module and the strut lengths, the most
--- cubic cell count with the fewest crosses, the block centred on the plot.
-local function planLayout(run, plotCentre)
-  local kit = run.kit
-  if not kit.cross or #kit.lengths == 0 then return nil, "no cross or strut blueprint" end
-  local arm = { 0, 0, 0 }
-  for i, dir in ipairs({ { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }) do
-    local a = armOf(kit.cross.conns, dir)
-    if not a then return nil, "the cross lacks an arm on an axis" end
-    arm[i] = dot(a.pos, dir)
-  end
-  local n, ext, above = 0, { 0, 0, 0 }, 0
-  for _, it in ipairs(run.items) do
-    if it.lattice then
-      n = n + 1
-      local s = sab.sizes[it.macro]
-      if s then
-        ext[1], ext[3] = math.max(ext[1], 2 * s.maxX), math.max(ext[3], 2 * s.maxZ)
-        local plug = armOf(sab.macroConns[it.macro], { 0, -1, 0 })
-        it.above = s.cY + s.maxY - (plug and plug.pos[2] or (s.cY - s.maxY))
-        above = math.max(above, it.above)
-      end
-    end
-  end
-  if n == 0 then return nil, "no lattice module" end
-  local span, pitch = {}, {}
-  for i, need in ipairs({ ext[1] + LATTICE_GAP, above + LATTICE_GAP, ext[3] + LATTICE_GAP }) do
-    local picked, sum = spanWith((i == 2 and #kit.vLengths > 0) and kit.vLengths or kit.lengths, need - 2 * arm[i])
-    if not picked then return nil, "no strut combination spans " .. math.floor(need) .. " m" end
-    span[i], pitch[i] = picked, 2 * arm[i] + sum
-  end
-  local best
-  for nz = 1, n + 1 do
-    for nx = 1, n + 1 do
-      local cpf = nx * nz - 1
-      if cpf >= 1 then
-        local ny = math.ceil(n / cpf)
-        local extent, crosses = math.max(nx * pitch[1], ny * pitch[2], nz * pitch[3]), nx * nz * ny
-        if not best or extent < best.extent - 1 or (extent < best.extent + 1 and (crosses < best.crosses or (crosses == best.crosses and ny < best.ny))) then
-          best = { nx = nx, ny = ny, nz = nz, cpf = cpf, extent = extent, crosses = crosses }
-        end
-      end
-    end
-  end
-  local half = { best.nx * pitch[1] / 2, ((best.ny - 1) * pitch[2] + 2 * arm[2] + above) / 2, best.nz * pitch[3] / 2 }
-  return { n = n, nx = best.nx, ny = best.ny, nz = best.nz, cpf = best.cpf, pitch = pitch, span = span, arm = arm, kit = kit, above = above,
-    cross = kit.cross, cells = floorCells(best.nx, best.nz), nodes = {}, partial = {}, next = 1, blockCentre = plotCentre, half = half,
-    origin = { plotCentre[1] - (best.nx - 1) * pitch[1] / 2, plotCentre[2] - half[2] + arm[2], plotCentre[3] - (best.nz - 1) * pitch[3] / 2 } }
-end
-
--- How far out of the block centre a wing module's centre should sit along its side.
-local function wingDepth(layout, item)
-  local side, s = item.side, sab.sizes[item.macro]
-  local axis = (side[1] ~= 0 and 1) or (side[2] ~= 0 and 2) or 3
-  return layout.half[axis] + (s and math.max(s.maxX, s.maxY, s.maxZ) or 0) + WING_GAP
-end
-
-local function wingScore(run, item, c)
-  local b = run.layout.blockCentre
-  local v = { c[1] - b[1], c[2] - b[2], c[3] - b[3] }
-  local depth = dot(v, item.side)
-  return (depth - item.depth) ^ 2 + LATERAL_WEIGHT * (dot(v, v) - depth * depth)
-end
-
 -- Struts from a connection of the base entry along dir, then a cross on their far end: pairs on the entry
--- placed just before. A skeleton link tried before continues from its last placed strut (L.partial), so a
--- rejected cross is retried alone. Nil when the cross has no arm against dir.
-local function link(kit, chain, baseIdx, baseItem, baseConn, dir, lengths, vertical, nodeKey, turn, partial)
+-- placed just before. Nil when the cross has no arm against dir.
+local function link(kit, chain, baseIdx, baseItem, baseConn, dir, lengths, vertical, turn)
   local back = armOf(kit.cross.conns, { -dir[1], -dir[2], -dir[3] })
   if not back then return nil end
   local prevIdx, prevConn, prevItem = baseIdx, baseConn, baseItem
-  local from = 1
-  local part = partial and nodeKey and partial[nodeKey]
-  if part then prevIdx, prevConn, prevItem, from = part.idx, part.far, nil, part.step + 1 end
-  for k = from, #lengths do
+  for k = 1, #lengths do
     local s = strutFor(kit, lengths[k], vertical)
     local it = { macro = s.macro, pair = { entryIdx = prevIdx, predecessorConnection = prevConn, connection = s.near },
-      isConnector = true, skeleton = true, after = prevItem, turn = turn, linkKey = nodeKey, linkStep = k, far = s.far }
+      isConnector = true, after = prevItem, turn = turn, far = s.far }
     chain[#chain + 1] = it
     prevIdx, prevConn, prevItem = "last", s.far, it
   end
   local it = { macro = kit.cross.macro, pair = { entryIdx = prevIdx, predecessorConnection = prevConn, connection = back.name },
-    isConnector = true, skeleton = true, after = prevItem, node = nodeKey, turn = turn }
+    isConnector = true, after = prevItem, turn = turn }
   chain[#chain + 1] = it
   return it
 end
 
--- The chain to cell j of floor iy: the floor's spine (vertical struts from the floor below) and the serpentine
--- crosses up to the cell; returns the cell's cross as base (an entry, or "last" with the chain's item). nil
--- while the floor below has no spine.
-local function chainToCell(run, chain, j, iy, turn)
-  local L = run.layout
-  local spineKey = cellKey(0, 0, iy)
-  local baseIdx, baseItem = L.nodes[spineKey], nil
-  local up = { 0, 1, 0 }
-  if not baseIdx then
-    local below = iy > 0 and L.nodes[cellKey(0, 0, iy - 1)]
-    if not below then return nil end
-    baseItem = link(L.kit, chain, below, nil, armOf(L.cross.conns, up).name, up, L.span[2], true, spineKey, turn, L.partial)
-    baseIdx = "last"
-  end
-  for jj = 2, j do
-    local c, p = L.cells[jj], L.cells[jj - 1]
-    local key = cellKey(c[1], c[2], iy)
-    if L.nodes[key] then
-      baseIdx, baseItem = L.nodes[key], nil
-    else
-      local dir = { c[1] - p[1], 0, c[2] - p[2] }
-      baseItem = link(L.kit, chain, baseIdx, baseItem, armOf(L.cross.conns, dir).name, dir, dir[1] ~= 0 and L.span[1] or L.span[3], false, key, turn, L.partial)
-      baseIdx = "last"
-    end
-  end
-  return baseIdx, baseItem
-end
-
--- The skeleton items a lattice module needs before it; also its cell key and nominal target.
-local function skeletonFor(run, item)
-  local L = run.layout
-  local iy, j = math.floor((item.slot - 1) / L.cpf), (item.slot - 1) % L.cpf + 2
-  local chain = {}
-  if not chainToCell(run, chain, j, iy, item.turn) then return nil end
-  local c, o, p = L.cells[j], L.origin, L.pitch
-  item.cellKey = cellKey(c[1], c[2], iy)
-  item.target = { o[1] + c[1] * p[1], o[2] + iy * p[2] + L.arm[2] + (item.above or 0) / 2, o[3] + c[2] * p[3] }
-  return chain
-end
-
--- *** dock rows ***
--- Piers and dock areas take fixed slots on a straight cross row along x outside the lattice's front face (-z):
--- one cross per pier, hung on the outward arm with its long axis along the row, a dock area on the inward arm
--- of every pier cross but the link's, dock-only crosses at the ends. The row hangs from a floor-0 face cross
--- by struts. Piers the plot width cannot take go to a mirrored row behind the back face, so the left and right
--- sides stay free for floor growth. Slots are planned relative to the lattice origin and placed like cells.
-
-local ROW_SIDES = { { key = "front", side = { 0, 0, -1 } }, { key = "back", side = { 0, 0, 1 } } }
-
-local function rowKey(row, k) return "row:" .. row.key .. ":" .. k end
-
--- The connection a module hangs by: the one with the most body behind it (a pier's end plug).
-local function bodyConnection(macro)
-  local size, best, bestDepth = sab.sizes[macro], nil, -math.huge
-  for _, c in ipairs(sab.macroConns[macro] or {}) do
-    local depth = size and dot({ c.pos[1] - size.cX, c.pos[2] - size.cY, c.pos[3] - size.cZ }, c.dir) or 0
-    if depth > bestDepth then best, bestDepth = c, depth end
-  end
-  return best
-end
-
--- A module hung on a cross arm of length arm pointing dir: the flattest roll, then the one with its top up;
--- box and centre relative to the cross centre.
-local function hangOn(macro, arm, dir)
-  local conn, size = bodyConnection(macro), sab.sizes[macro]
-  if not (conn and size) then return nil end
-  local tip = { dir[1] * arm, dir[2] * arm, dir[3] * arm }
-  local best
-  for _, roll in ipairs(ROLLS) do
-    local pose = sab.PoseForWorld(tip, dir, conn, roll)
-    local box = worldBox(size, { pose.pos.x, pose.pos.y, pose.pos.z }, pose.rows)
-    local height, up = box.max[2] - box.min[2], rotate({ 0, 1, 0 }, pose.rows)[2]
-    if not best or height < best.height - 1 or (height < best.height + 1 and up > best.up + 0.01) then
-      best = { box = box, height = height, up = up, roll = roll, conn = conn.name, dir = dir,
-        centre = { (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2, (box.min[3] + box.max[3]) / 2 } }
-    end
-  end
-  return best
-end
-
--- The rows' slots: piers alternate right and left of the link slot, the front row first, then the back; a
--- dock area rides the inward arm of each pier cross but the link's, the rest get crosses of their own at the
--- ends. Pitches from the hung boxes and the strut lengths, the fit from the plot width (the siting re-tests
--- every box per origin). nil when two rows cannot take every pier and dock area.
-local function planRows(run, L)
-  local kit, arm = L.kit, L.arm[1]
-  local piers, docks = {}, {}
-  for _, it in ipairs(run.items) do
-    if not it.lattice and it.group == "pier" then piers[#piers + 1] = it end
-    if not it.lattice and it.group == "dock" then docks[#docks + 1] = it end
-  end
-  if #piers + #docks == 0 then return nil, "no pier or dock area in the bill" end
-  local ixLink = math.floor((L.nx - 1) / 2)
-  local xLink, plot = L.origin[1] + ixLink * L.pitch[1], run.plot
-  local function fits(lo, hi) return lo >= plot.min[1] + ROW_GAP and hi <= plot.max[1] - ROW_GAP end
-  local hcache = {}
-  local function hung(macro, dir)
-    local key = macro .. (dir[3] > 0 and "+" or "-")
-    if hcache[key] == nil then hcache[key] = hangOn(macro, L.arm[3], dir) or false end
-    return hcache[key] or nil
-  end
-  local rows, pi, di = {}, 1, 1
-  for _, def in ipairs(ROW_SIDES) do
-    if pi > #piers and di > #docks then break end
-    local side = def.side
-    local inward = { -side[1], -side[2], -side[3] }
-    -- the row's distance from the face: room for the inward dock areas, the wing gap at least
-    local gap = WING_GAP
-    for _, list in ipairs({ { piers, side }, { docks, inward } }) do
-      for _, it in ipairs(list[1]) do
-        local h = hung(it.macro, list[2])
-        if not h then return nil, "no connection geometry for " .. it.macro end
-        gap = math.max(gap, dot({ h.box.max[1], h.box.max[2], h.box.max[3] }, inward) + ROW_GAP, dot({ h.box.min[1], h.box.min[2], h.box.min[3] }, inward) + ROW_GAP)
-      end
-    end
-    local linkLengths, linkSum = spanWith(kit.lengths, L.pitch[3] / 2 + gap - 2 * L.arm[3])
-    if not linkLengths then return nil, "no strut combination reaches the row" end
-    local row = { key = def.key, side = side, linkCell = { ixLink, def.key == "front" and 0 or L.nz - 1 }, linkLengths = linkLengths,
-      dz = 2 * L.arm[3] + linkSum, slots = {}, kmin = 0, kmax = 0 }
-    local function seat(item, k, h)
-      item.row = { key = def.key, k = k }
-      item.rowNode, item.rowDir, item.rowConn, item.rowRoll, item.rowCentre = rowKey(row, k), h.dir, h.conn, h.roll, h.centre
-    end
-    -- the x extents of a slot's hung boxes, the cross body at least
-    local function extents(pH, dH)
-      local lo, hi = -arm, arm
-      for _, h in ipairs({ pH, dH }) do
-        if h then lo, hi = math.min(lo, h.box.min[1]), math.max(hi, h.box.max[1]) end
-      end
-      return lo, hi
-    end
-    -- the slot at k beside k - dir with a pier and/or a dock area; false when it would leave the plot
-    local function addSlot(k, dir, pier, dock)
-      local prev = row.slots[k - dir]
-      local pH, dH = pier and hung(pier.macro, side) or nil, dock and hung(dock.macro, inward) or nil
-      local pLo, pHi = extents(prev.pierH, prev.dockH)
-      local lo, hi = extents(pH, dH)
-      local need = (dir > 0 and (pHi - lo) or (hi - pLo)) + ROW_GAP - 2 * arm
-      local lengths, sum = spanWith(kit.lengths, math.max(need, 1))
-      if not lengths then return false end
-      local x = prev.x + dir * (2 * arm + sum)
-      if not fits(x + lo, x + hi) then return false end
-      row.slots[k] = { k = k, x = x, dx = x - xLink, lengths = lengths, pier = pier, pierH = pH, dock = dock, dockH = dH }
-      if dir > 0 then row.kmax = k else row.kmin = k end
-      if pier then seat(pier, k, pH) end
-      if dock then seat(dock, k, dH) end
-      return true
-    end
-    -- slot 0 carries the link, and a pier when one remains
-    local pier0 = piers[pi]
-    local pH0 = pier0 and hung(pier0.macro, side) or nil
-    local lo, hi = extents(pH0, nil)
-    if not fits(xLink + lo, xLink + hi) then return nil, "the link slot leaves the plot" end
-    row.slots[0] = { k = 0, x = xLink, dx = 0, link = true, pier = pier0, pierH = pH0 }
-    if pier0 then
-      seat(pier0, 0, pH0)
-      pi = pi + 1
-    end
-    -- a slot per pier, a dock area beside it while any remain; then crosses for the dock areas left
-    local dir = 1
-    for _, kind in ipairs({ "pier", "dock" }) do
-      local full = false
-      while not full and ((kind == "pier" and pi <= #piers) or (kind == "dock" and di <= #docks)) do
-        local pier = kind == "pier" and piers[pi] or nil
-        local dock = docks[di]
-        local ok = addSlot(dir > 0 and row.kmax + 1 or row.kmin - 1, dir, pier, dock)
-        if not ok then
-          dir = -dir
-          ok = addSlot(dir > 0 and row.kmax + 1 or row.kmin - 1, dir, pier, dock)
-        end
-        if ok then
-          if pier then pi = pi + 1 end
-          if dock then di = di + 1 end
-          dir = -dir
-        else
-          full = true
-        end
-      end
-    end
-    rows[def.key] = row
-  end
-  if pi <= #piers or di <= #docks then
-    return nil, string.format("two rows take %d of %d piers and %d of %d dock areas in this plot", pi - 1, #piers, di - 1, #docks)
-  end
-  return rows
-end
-
--- World position of a row's cross at dx from the link for an origin.
-local function rowCross(L, row, origin, dx)
-  local faceZ = origin[3] + row.linkCell[2] * L.pitch[3]
-  return { origin[1] + row.linkCell[1] * L.pitch[1] + dx, origin[2], faceZ + row.side[3] * row.dz }
-end
-
--- Every row cross position and hung module centre for an origin (siting probes).
-local function rowPoints(L, origin)
-  local pts = {}
-  for _, row in pairs(L.rows or {}) do
-    for _, slot in pairs(row.slots) do
-      local c = rowCross(L, row, origin, slot.dx)
-      pts[#pts + 1] = c
-      for _, h in ipairs({ slot.pierH, slot.dockH }) do
-        if h then pts[#pts + 1] = { c[1] + h.centre[1], c[2] + h.centre[2], c[3] + h.centre[3] } end
-      end
-    end
-  end
-  return pts
-end
-
--- The volumes the rows will fill for an origin: a corridor per row and its link, every hung module (a column).
-local function rowBoxesFor(L, origin)
-  local boxes, a = {}, L.arm
-  for _, row in pairs(L.rows or {}) do
-    local lo, hi
-    for _, slot in pairs(row.slots) do
-      local c = rowCross(L, row, origin, slot.dx)
-      lo, hi = math.min(lo or c[1], c[1]), math.max(hi or c[1], c[1])
-      for _, h in ipairs({ slot.pierH, slot.dockH }) do
-        if h then
-          boxes[#boxes + 1] = { min = { c[1] + h.box.min[1], c[2] + h.box.min[2], c[3] + h.box.min[3] },
-            max = { c[1] + h.box.max[1], c[2] + h.box.max[2], c[3] + h.box.max[3] }, column = true }
-        end
-      end
-    end
-    local c0 = rowCross(L, row, origin, 0)
-    local faceZ = origin[3] + row.linkCell[2] * L.pitch[3]
-    boxes[#boxes + 1] = { min = { lo - a[1], c0[2] - a[2], c0[3] - a[3] }, max = { hi + a[1], c0[2] + a[2], c0[3] + a[3] } }
-    boxes[#boxes + 1] = { min = { c0[1] - a[1], c0[2] - a[2], math.min(faceZ, c0[3]) }, max = { c0[1] + a[1], c0[2] + a[2], math.max(faceZ, c0[3]) } }
-  end
-  return boxes
-end
-
--- The skeleton items a row item needs before it: the chain to the face cell, the link to slot 0, the row
--- chain to its slot; also its target. nil while the face cell cannot be reached.
-local function rowSkeletonFor(run, item)
-  local L = run.layout
-  local row = L.rows[item.row.key]
-  local chain = {}
-  local baseIdx, baseItem = L.nodes[cellKey(row.linkCell[1], row.linkCell[2], 0)], nil
-  if not baseIdx then
-    local j
-    for jj, c in ipairs(L.cells) do
-      if c[1] == row.linkCell[1] and c[2] == row.linkCell[2] then j = jj break end
-    end
-    if not j then return nil end
-    baseIdx, baseItem = chainToCell(run, chain, j, 0, item.turn)
-    if not baseIdx then return nil end
-  end
-  local function rowCrossItem(k, fromIdx, fromItem, armDir, lengths)
-    local it = link(L.kit, chain, fromIdx, fromItem, armOf(L.cross.conns, armDir).name, armDir, lengths, false, rowKey(row, k), item.turn, L.partial)
-    if it then it.rowSlot = { key = row.key, k = k } end
-    return it
-  end
-  if L.rowNodes[rowKey(row, 0)] then
-    baseIdx, baseItem = L.rowNodes[rowKey(row, 0)], nil
-  else
-    baseItem = rowCrossItem(0, baseIdx, baseItem, row.side, row.linkLengths)
-    if not baseItem then return nil end
-    baseIdx = "last"
-  end
-  local k = item.row.k
-  local step = k > 0 and 1 or -1
-  local along = { step, 0, 0 }
-  for kk = step, k, step do
-    local key = rowKey(row, kk)
-    if L.rowNodes[key] then
-      baseIdx, baseItem = L.rowNodes[key], nil
-    else
-      baseItem = rowCrossItem(kk, baseIdx, baseItem, along, row.slots[kk].lengths)
-      if not baseItem then return nil end
-      baseIdx = "last"
-    end
-  end
-  local c = rowCross(L, row, L.origin, row.slots[k].dx)
-  item.target = { c[1] + item.rowCentre[1], c[2] + item.rowCentre[2], c[3] + item.rowCentre[3] }
-  return chain
-end
-
--- The arms of a placed row cross kept from other items: toward the neighbour slots, the hung pier and dock area.
-local function reserveRowArms(run, L, slot, entryIdx)
-  local row = L.rows[slot.key]
-  local s = row.slots[slot.k]
-  local dirs = {}
-  if row.slots[slot.k + 1] then dirs[#dirs + 1] = { 1, 0, 0 } end
-  if row.slots[slot.k - 1] then dirs[#dirs + 1] = { -1, 0, 0 } end
-  if s.pierH then dirs[#dirs + 1] = s.pierH.dir end
-  if s.dockH then dirs[#dirs + 1] = s.dockH.dir end
-  for _, f in ipairs(run.conns) do
-    if f.entryIdx == entryIdx then
-      for _, d in ipairs(dirs) do
-        if dot(f.dir, d) > 0.9 then f.reserved = true end
-      end
-    end
-  end
-end
-
--- A straight spur for an item that found no place: struts and a cross out of the best free connection facing
--- the item's side (the farthest outward one without a floor layout), long enough for the module to sit beyond
--- the block; the item then tries the spur tip first. Also the answer to a pier on a crowded station.
+-- A straight spur for an item that found no place: struts and a cross out of the farthest outward free
+-- connection, long enough for the module to sit beyond the station; the item then tries the spur tip first.
+-- Also the answer to a pier on a crowded station.
 -- The Lua pre-check of a spur: every strut and the cross posed along the chain inside the plot, clear of the
--- placed boxes (the anchor's entry excepted) and of the lattice cells.
+-- placed boxes (the anchor's entry excepted).
 local function chainClear(run, chain, f)
-  local pos, dir, L = f.pos, f.dir, run.layout
+  local pos, dir = f.pos, f.dir
   for _, it in ipairs(chain) do
     local near, far
     for _, c in ipairs(sab.macroConns[it.macro] or {}) do
@@ -1513,12 +1161,6 @@ local function chainClear(run, chain, f)
       for idx, b in pairs(run.boxes) do
         if idx ~= f.entryIdx and overlaps(box, b, -5) then return false end
       end
-      for _, cb in ipairs(L and L.cellBoxes or {}) do
-        if overlaps(box, cb, 0) then return false end
-      end
-      for _, rb in ipairs(L and L.rowBoxes or {}) do
-        if overlaps(box, rb, 0) or (rb.column and sameColumn(box, rb, 0)) then return false end
-      end
       if inZone(run, box) then return false end
     end
     if far then
@@ -1530,35 +1172,25 @@ local function chainClear(run, chain, f)
 end
 
 local function spurFor(run, item)
-  local L, kit, side = run.layout, run.kit, run.layout and item.side or nil
-  local anchor = not side and anchorOf(run) or nil
+  local kit, anchor = run.kit, anchorOf(run)
   local cands = {}
   for _, f in ipairs(run.conns) do
-    if not f.used and not f.reserved and not f.spurFailed then
-      if side then
-        if dot(f.dir, side) > 0.9 then
-          cands[#cands + 1] = { f = f, dir = side, depth = dot({ f.pos[1] - L.blockCentre[1], f.pos[2] - L.blockCentre[2], f.pos[3] - L.blockCentre[3] }, side) }
-        end
-      else
-        local v = { f.pos[1] - anchor[1], f.pos[2] - anchor[2], f.pos[3] - anchor[3] }
-        local depth = math.sqrt(dot(v, v))
-        if depth > 0 and dot(f.dir, v) / depth > 0.7 then cands[#cands + 1] = { f = f, dir = f.dir, depth = depth } end
-      end
+    if not f.used and not f.spurFailed then
+      local v = { f.pos[1] - anchor[1], f.pos[2] - anchor[2], f.pos[3] - anchor[3] }
+      local depth = math.sqrt(dot(v, v))
+      if depth > 0 and dot(f.dir, v) / depth > 0.7 then cands[#cands + 1] = { f = f, dir = f.dir, depth = depth } end
     end
   end
   if #cands == 0 then return nil, "no free connection facing out" end
   table.sort(cands, function(a, b) return a.depth > b.depth end)
   local s = sab.sizes[item.macro]
   local extent = s and 2 * math.max(s.maxX, s.maxY, s.maxZ) or 1000
-  local axis = side and ((side[1] ~= 0 and 1) or (side[2] ~= 0 and 2) or 3) or nil
   for k = 1, math.min(#cands, 12) do
     local c = cands[k]
-    local need = extent / 2 + WING_GAP - 2 * kit.arm
-    if axis then need = math.max(need, L.half[axis] + WING_GAP - c.depth - 2 * kit.arm) end
-    local lengths = spanWith(kit.lengths, need)
+    local lengths = spanWith(kit.lengths, extent / 2 + SPUR_GAP - 2 * kit.arm)
     if lengths then
       local chain = {}
-      local tip = link(kit, chain, c.f.entryIdx, nil, c.f.name, c.dir, lengths, math.abs(c.dir[2]) > 0.9, nil, item.turn, nil)
+      local tip = link(kit, chain, c.f.entryIdx, nil, c.f.name, c.dir, lengths, math.abs(c.dir[2]) > 0.9, item.turn)
       if tip and chainClear(run, chain, c.f) then
         tip.reach, tip.owner, tip.spurDir = true, item, c.dir
         chain[1].spurAnchor = c.f
@@ -1569,88 +1201,19 @@ local function spurFor(run, item)
   return nil, string.format("no clear spur among %d connections", #cands)
 end
 
--- Given when the item's turn comes: a wing item's depth, a lattice module's slot, cell and skeleton; true
--- when skeleton items were put before it.
-local function aimItem(run, item)
-  local L = run.layout
-  if not L then return false end
-  if item.side and not item.depth then item.depth = wingDepth(L, item) end
-  if item.row then
-    local chain = rowSkeletonFor(run, item)
-    if chain and #chain > 0 then
-      for i = #chain, 1, -1 do table.insert(run.items, run.next, chain[i]) end
-      sab.Debug("%s: %s row slot %d needs %d skeleton items first", item.macro, item.row.key, item.row.k, #chain)
-      return true
-    end
-    return false
-  end
-  if not item.lattice then return false end
-  if not item.slot then item.slot = L.next end
-  local chain = skeletonFor(run, item)
-  if chain and #chain > 0 then
-    for i = #chain, 1, -1 do table.insert(run.items, run.next, chain[i]) end
-    sab.Debug("%s: slot %d (cell %s) needs %d skeleton items first", item.macro, item.slot, item.cellKey, #chain)
-    return true
-  end
-  return false
-end
-
--- The arms the skeleton still needs on a new cross, kept from the wing items: the one toward the next cell
--- of the serpentine, the top arm (a cell's module, the spine's vertical link while floors remain).
-local function reserveArms(run, L, nodeKey, entryIdx)
-  local ix, iz, iy = nodeKey:match("^(%-?%d+),(%-?%d+),(%-?%d+)$")
-  ix, iz, iy = tonumber(ix), tonumber(iz), tonumber(iy)
-  local dirs = {}
-  for j, c in ipairs(L.cells) do
-    if c[1] == ix and c[2] == iz then
-      local nxt = L.cells[j + 1]
-      if nxt then dirs[#dirs + 1] = { nxt[1] - ix, 0, nxt[2] - iz } end
-      if j > 1 or iy < L.ny - 1 then dirs[#dirs + 1] = { 0, 1, 0 } end
-      break
-    end
-  end
-  -- a face cross that carries a dock row's link keeps its outward arm
-  for _, row in pairs(L.rows or {}) do
-    if iy == 0 and ix == row.linkCell[1] and iz == row.linkCell[2] then dirs[#dirs + 1] = row.side end
-  end
-  for _, f in ipairs(run.conns) do
-    if f.entryIdx == entryIdx then
-      for _, d in ipairs(dirs) do
-        if dot(f.dir, d) > 0.9 then f.reserved = true end
-      end
-    end
-  end
-end
-
--- After a placement: the entry for chained items, the spur tip of a reach connector, a skeleton node, the next slot.
+-- After a placement: the entry for chained items, the spur tip of a reach connector.
 local function notePlaced(run, item, addedIdx, cand)
   item.placedIdx = addedIdx
   if item.reach and (cand or item.spurDir) then run.spur = { owner = item.owner, tipIdx = addedIdx, dir = cand and cand.f.dir or item.spurDir } end
-  local L = run.layout
-  if L then
-    if item.node then
-      L.partial[item.node] = nil
-      if item.rowSlot then
-        L.rowNodes[item.node] = addedIdx
-        reserveRowArms(run, L, item.rowSlot, addedIdx)
-      else
-        L.nodes[item.node] = addedIdx
-        reserveArms(run, L, item.node, addedIdx)
-      end
-    end
-    if item.linkKey then L.partial[item.linkKey] = { idx = addedIdx, far = item.far, step = item.linkStep } end
-    if item.slot then L.next = math.max(L.next, item.slot + 1) end
-  end
 end
 
--- After the probe: the connector kit for spurs; with floors the lattice modules and wing sides and the
--- layout, the cross floating for the siting step. Without a layout the plain packer runs with the first item
+-- After the probe: the connector kit for spurs, then the grid packer, or the plain packer with the first item
 -- dropped free at the plot centre.
 local function finishLayout(run)
   local menu = sab.menu
   run.kit = connectorKit(run.items[1] and raceOf(run.items[1].macro) or nil)
   if not run.kit.cross then run.kit = nil end
-  if not run.floors then
+  if not run.gridRoute then
     run.phase = "begin"
     return
   end
@@ -1658,145 +1221,11 @@ local function finishLayout(run)
     local centre = C.GetBuildPlotCenterOffset(menu.container)
     local first = run.items[1]
     first.pack, first.free, first.pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
-    sab.Debug("floor layout off: no cross blueprint")
+    sab.Debug("grid off: no cross blueprint")
     run.phase = "begin"
     return
   end
-  if run.floors == "grid" and sab.grid then
-    sab.grid.Start(run)
-    return
-  end
-  for _, it in ipairs(run.items) do
-    if (it.group == "production" or it.group == "build") and armOf(sab.macroConns[it.macro], { 0, -1, 0 }) then it.lattice = true end
-  end
-  local centre = C.GetBuildPlotCenterOffset(menu.container)
-  local layout, why = planLayout(run, { centre.x, centre.y, centre.z })
-  if not layout then
-    for _, it in ipairs(run.items) do it.lattice = nil end
-    local first = run.items[1]
-    first.pack, first.free, first.pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
-    sab.Debug("floor layout off: %s", why)
-    run.phase = "begin"
-    return
-  end
-  run.layout = layout
-  local function spanText(lengths) return #lengths > 0 and table.concat(lengths, "+") or "none" end
-  sab.Debug("floor layout: %d modules on %d x %d cells x %d floors (one spine cell per floor), pitch %.0f x %.0f x %.0f m, cross %s, struts x %s, y %s, z %s",
-    layout.n, layout.nx, layout.nz, layout.ny, layout.pitch[1], layout.pitch[2], layout.pitch[3], layout.cross.macro,
-    spanText(layout.span[1]), spanText(layout.span[2]), spanText(layout.span[3]))
-  local rows, rwhy = planRows(run, layout)
-  if rows then
-    layout.rows, layout.rowNodes = rows, {}
-    for _, def in ipairs(ROW_SIDES) do
-      local row = rows[def.key]
-      if row then
-        local crosses, np, nd = 0, 0, 0
-        for _, s in pairs(row.slots) do
-          crosses = crosses + 1
-          if s.pier then np = np + 1 end
-          if s.dock then nd = nd + 1 end
-        end
-        sab.Debug("dock row %s: %d piers, %d dock areas on %d crosses (slots %d..%d), %.0f m out of cell %d,%d by struts %s",
-          def.key, np, nd, crosses, row.kmin, row.kmax, row.dz, row.linkCell[1], row.linkCell[2], spanText(row.linkLengths))
-      end
-    end
-  else
-    sab.Debug("dock rows off: %s", rwhy)
-  end
-  for _, it in ipairs(run.items) do
-    if not it.lattice and not it.row then it.side = SIDES[WING[it.group] or "left"] end
-  end
-  C.AddMacroToConstructionMap(menu.holomap, layout.cross.macro, true)
-  menu.floatingNewModule = layout.cross.macro
-  run.phase = "site"
-end
-
--- Every cross position of the block from an origin, plus the middle and top of the module above each.
-local function nodePoints(L, origin)
-  local pts = {}
-  for iy = 0, L.ny - 1 do
-    for _, c in ipairs(L.cells) do
-      local x, y, z = origin[1] + c[1] * L.pitch[1], origin[2] + iy * L.pitch[2], origin[3] + c[2] * L.pitch[3]
-      pts[#pts + 1] = { x, y, z }
-      pts[#pts + 1] = { x, y + L.arm[2] + L.above / 2, z }
-      pts[#pts + 1] = { x, y + L.arm[2] + L.above, z }
-    end
-  end
-  return pts
-end
-
--- Siting: the floating cross is written to every node point of candidate origins (the centred one, then
--- whole-cell shifts, nearest first) and the engine's collision flag read; the first origin with every point
--- free wins, else the one with the most. Objects in the sector block part of a plot without any Lua view of them.
-local function siteLayout(run)
-  local menu, L = sab.menu, run.layout
-  local editor = sab.Editor()
-  local best, tried = nil, 0
-  if editor then
-    local I = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }
-    local shifts = {}
-    for _, sy in ipairs({ 0, 1, -1 }) do
-      for dx = -2, 2 do
-        for dz = -2, 2 do shifts[#shifts + 1] = { dx, sy, dz, math.abs(dx) + math.abs(dz) + 2 * math.abs(sy) } end
-      end
-    end
-    table.sort(shifts, function(a, b) return a[4] < b[4] end)
-    local o0, margin = L.origin, math.max(L.pitch[1], L.pitch[2], L.pitch[3]) / 2
-    for _, s in ipairs(shifts) do
-      local origin = { o0[1] + s[1] * L.pitch[1], o0[2] + s[2] * L.pitch[2], o0[3] + s[3] * L.pitch[3] }
-      local pts = nodePoints(L, origin)
-      local inPlot, valid = true, 0
-      for _, p in ipairs(pts) do
-        if not inside({ min = { p[1] - margin, p[2] - margin, p[3] - margin }, max = { p[1] + margin, p[2] + margin, p[3] + margin } }, run.plot) then
-          inPlot = false
-          break
-        end
-      end
-      for _, b in ipairs(inPlot and rowBoxesFor(L, origin) or {}) do
-        if not inside(b, run.plot) then
-          inPlot = false
-          break
-        end
-      end
-      for _, p in ipairs(inPlot and rowPoints(L, origin) or {}) do pts[#pts + 1] = p end
-      if inPlot then
-        tried = tried + 1
-        for _, p in ipairs(pts) do
-          sab.WriteFloating(editor, { x = p[1], y = p[2], z = p[3] }, I)
-          if sab.Snap(editor).valid then valid = valid + 1 end
-        end
-        if not best or valid > best.valid then best = { origin = origin, valid = valid, total = #pts, shift = s } end
-        if valid == #pts then break end
-      end
-    end
-  end
-  C.RemoveFloatingSequenceFromConstructionPlan(menu.holomap)
-  menu.floatingNewModule = nil
-  if best then
-    L.origin = best.origin
-    L.blockCentre = { best.origin[1] + (L.nx - 1) * L.pitch[1] / 2, best.origin[2] + L.half[2] - L.arm[2], best.origin[3] + (L.nz - 1) * L.pitch[3] / 2 }
-    sab.Debug("floor layout sited: shift %d %d %d cells, %d of %d probe points free, %d origins tried", best.shift[1], best.shift[2], best.shift[3], best.valid, best.total, tried)
-  else
-    sab.Debug("floor layout not sited (%s), centred on the plot", editor and "no origin fits the plot" or "no editor")
-  end
-  local o, s = L.origin, sab.sizes[L.cross.macro]
-  -- the volumes the lattice will fill: the spine column (full height) and every cell with its module
-  L.cellBoxes = {}
-  for iy = 0, L.ny - 1 do
-    for j, c in ipairs(L.cells) do
-      local x, y, z = o[1] + c[1] * L.pitch[1], o[2] + iy * L.pitch[2], o[3] + c[2] * L.pitch[3]
-      if j > 1 then
-        L.cellBoxes[#L.cellBoxes + 1] = { min = { x - L.pitch[1] / 2, y - L.arm[2], z - L.pitch[3] / 2 }, max = { x + L.pitch[1] / 2, y + L.arm[2] + L.above, z + L.pitch[3] / 2 } }
-      elseif iy == 0 then
-        L.cellBoxes[#L.cellBoxes + 1] = { min = { x - L.arm[1], y - L.arm[2], z - L.arm[3] }, max = { x + L.arm[1], o[2] + (L.ny - 1) * L.pitch[2] + L.arm[2], z + L.arm[3] } }
-      end
-    end
-  end
-  L.rowBoxes = rowBoxesFor(L, o)
-  table.insert(run.items, 1, { macro = L.cross.macro, free = true, isConnector = true, skeleton = true, node = cellKey(0, 0, 0),
-    turn = run.items[1].turn, pos = { x = o[1] - (s and s.cX or 0), y = o[2] - (s and s.cY or 0), z = o[3] - (s and s.cZ or 0) } })
-  sab.Debug("floor layout origin %.0f %.0f %.0f", o[1], o[2], o[3])
-  run.phase = "begin"
+  sab.grid.Start(run)
 end
 
 -- One macro floated per frame, its connections read the frame after; the layout when the list is done.
@@ -1819,32 +1248,26 @@ local function probeStep(run)
   end
 end
 
--- One sorted list per item: every free connection x every module connection x four rolls; outside the floor
--- layout an outer or reach item takes outward connections only. Bonuses order the list: a reach connector
--- continues straight from the spur tip, a lattice module takes its cell's cross, an item retried after a
--- connector takes the tip (its straight connection first), a wing item the connections facing its side.
+-- One sorted list per item: every free connection x every module connection x four rolls; an outer or reach
+-- item takes outward connections only. Bonuses order the list: a reach connector continues straight from the
+-- spur tip, an item retried after a connector takes the tip (its straight connection first).
 local function buildCandidates(run, item, editor)
   local anchor = anchorOf(run)
   local mconns = sab.Connections(sab.FloatingMacro(editor))
   local size = sab.sizes[item.macro]
-  local spur, L = run.spur, run.layout
+  local spur = run.spur
   local chain = item.reach and spur and spur.owner == item.owner and spur.tipIdx or nil
   local tip = (not item.reach) and spur and spur.owner == item and spur.tipIdx or nil
   local prefer = item.connectors and run.lastPlacedIdx
-  local cell = item.cellKey and not item.connectors and L and L.nodes[item.cellKey] or nil
-  if cell then
-    local pose = sab.EntryPose(editor, cell)
-    if pose then item.target = { pose.x, pose.y + L.arm[2] + (item.above or 0) / 2, pose.z } end
-  end
-  local rowNode = item.rowNode and not item.connectors and L and L.rowNodes and L.rowNodes[item.rowNode] or nil
-  if rowNode then
-    local pose = sab.EntryPose(editor, rowNode)
-    if pose then item.target = { pose.x + item.rowCentre[1], pose.y + item.rowCentre[2], pose.z + item.rowCentre[3] } end
-  end
-  local outwardOnly = not item.side and not item.row and (item.margin or item.reach)
-  local list = {}
+  local outwardOnly = item.margin or item.reach
+  local list, free = {}, 0
   for _, f in ipairs(run.conns) do
-    local accept = not f.used and (not f.reserved or (cell ~= nil and f.entryIdx == cell) or (rowNode ~= nil and f.entryIdx == rowNode))
+    if not f.used then free = free + 1 end
+  end
+  -- a module with no connection to spare on the last free one would leave the items after it nowhere to go
+  item.closes = not item.isConnector and free + #mconns - 2 <= 0 and run.next < #run.items
+  for _, f in ipairs(run.conns) do
+    local accept = not f.used
     if accept and outwardOnly then accept = dot(f.dir, { f.pos[1] - anchor[1], f.pos[2] - anchor[2], f.pos[3] - anchor[3] }) > 0 end
     if accept then
       for _, m in ipairs(mconns) do
@@ -1857,27 +1280,15 @@ local function buildCandidates(run, item, editor)
               local cc = rotate({ size.cX, size.cY, size.cZ }, pose.rows)
               c = { c[1] + cc[1], c[2] + cc[2], c[3] + cc[3] }
             end
-            local score
-            if item.side then
-              score = wingScore(run, item, c)
-            elseif item.target then
-              score = dist2(c, item.target)
-            else
-              score = dist2(c, anchor)
-              if item.reach then score = -score end
-            end
+            local score = dist2(c, anchor)
+            if item.reach then score = -score end
             if chain and f.entryIdx == chain and dot(f.dir, spur.dir) > STRAIGHT then
               score = score - 4e15
-            elseif cell and f.entryIdx == cell then
-              score = score - 3e15 - ((f.dir[2] > 0.9 and m.dir[2] < -0.9) and 1e15 or 0)
-            elseif rowNode and f.entryIdx == rowNode then
-              score = score - 3e15 - ((dot(f.dir, item.rowDir) > 0.9 and m.name == item.rowConn) and 1e15 or 0) - (roll == item.rowRoll and 1e14 or 0)
             elseif tip and f.entryIdx == tip then
               score = score - 2e15 - (dot(f.dir, spur.dir) > STRAIGHT and 1e15 or 0)
             elseif prefer and f.entryIdx == prefer then
               score = score - 1e15
             end
-            if item.side and dot(f.dir, item.side) > 0.5 then score = score - 5e14 end
             list[#list + 1] = { f = f, m = m, key = key, pose = pose, score = score, roll = roll }
           end
         end
@@ -1886,13 +1297,9 @@ local function buildCandidates(run, item, editor)
   end
   table.sort(list, function(a, b) return a.score < b.score end)
   item.candidates, item.cursor, item.skips = list, 1, nil
-  local aim = item.side and string.format(", wing depth %.0f", item.depth or 0)
-      or (item.row and item.target and string.format(", %s row slot %d at %.0f %.0f %.0f", item.row.key, item.row.k, item.target[1], item.target[2], item.target[3]))
-      or (item.target and string.format(", slot %d at %.0f %.0f %.0f", item.slot or 0, item.target[1], item.target[2], item.target[3]) or "")
-  local first = (chain and string.format(", straight on from entry %d", chain)) or (cell and string.format(", cell cross %d first", cell))
-      or (rowNode and string.format(", row cross %d first", rowNode))
+  local first = (chain and string.format(", straight on from entry %d", chain))
       or (tip and string.format(", spur tip %d first", tip)) or (prefer and string.format(", entry %d first", prefer)) or (item.reach and ", reaching outward" or "")
-  sab.Debug("%s: %d candidates, %d module connections, anchor %.0f %.0f %.0f%s%s", item.macro, #list, #mconns, anchor[1], anchor[2], anchor[3], aim, first)
+  sab.Debug("%s: %d candidates, %d module connections, anchor %.0f %.0f %.0f%s", item.macro, #list, #mconns, anchor[1], anchor[2], anchor[3], first)
 end
 
 -- The Lua pre-check: inside the plot, clear of every placed box but the one it attaches to. An outer module
@@ -1908,25 +1315,6 @@ local function boxOk(run, item, cand)
     if not item.plotNeed or grow < item.plotNeed.grow then item.plotNeed = { grow = grow, box = box } end
     return false, "plot"
   end
-  -- the lattice's future volumes stay free; a pier or dock area keeps its whole column clear of them, as the
-  -- engine refuses anything above one (its approach volume)
-  local L = run.layout
-  local column = item.column or item.margin
-  if L and L.cellBoxes and not item.lattice and not item.skeleton then
-    for _, cb in ipairs(L.cellBoxes) do
-      if column then
-        if sameColumn(box, cb, 0) then return false, "block" end
-      elseif overlaps(box, cb, 0) then
-        return false, "block"
-      end
-    end
-  end
-  -- the dock rows' planned volumes and columns stay free for their own items
-  if L and L.rowBoxes and not item.row then
-    for _, rb in ipairs(L.rowBoxes) do
-      if overlaps(box, rb, 0) or ((column or rb.column) and sameColumn(box, rb, 0)) then return false, "block" end
-    end
-  end
   -- the approach zones of the piers and dock areas: none entered, a new one's own zones clear of every body
   if inZone(run, box) then return false, "block" end
   if item.column then
@@ -1937,7 +1325,7 @@ local function boxOk(run, item, cand)
     end
   end
   local front
-  if item.margin and not item.row then
+  if item.margin then
     front = { min = { box.min[1], box.min[2], box.min[3] }, max = { box.max[1], box.max[2], box.max[3] } }
     for i = 1, 3 do
       if cand.f.dir[i] > 0.5 then
@@ -1957,7 +1345,7 @@ local function boxOk(run, item, cand)
 end
 
 local function skip(item, reason)
-  item.skips = item.skips or { plot = 0, block = 0, overlap = 0, front = 0, incompatible = 0, elsewhere = 0, rejected = 0, refused = 0 }
+  item.skips = item.skips or { plot = 0, block = 0, overlap = 0, front = 0, closes = 0, incompatible = 0, elsewhere = 0, rejected = 0, refused = 0 }
   item.skips[reason] = item.skips[reason] + 1
 end
 
@@ -1982,6 +1370,7 @@ local function tryCandidates(run, item, editor)
     item.cursor = item.cursor + 1
     checks = checks + 1
     local ok, reason = boxOk(run, item, cand)
+    if item.closes then ok, reason = false, "closes" end
     if cand.tested then
       ok = false
     elseif not ok then
@@ -2069,8 +1458,8 @@ local function packStep(run, item)
   end
   local s, total = item.skips or {}, #item.candidates
   local function skipsText()
-    return string.format("%d candidates: plot %d, block %d, overlap %d, front %d, incompatible %d, elsewhere %d, rejected %d, refused %d", total,
-      s.plot or 0, s.block or 0, s.overlap or 0, s.front or 0, s.incompatible or 0, s.elsewhere or 0, s.rejected or 0, s.refused or 0)
+    return string.format("%d candidates: plot %d, block %d, overlap %d, front %d, closes %d, incompatible %d, elsewhere %d, rejected %d, refused %d", total,
+      s.plot or 0, s.block or 0, s.overlap or 0, s.front or 0, s.closes or 0, s.incompatible or 0, s.elsewhere or 0, s.rejected or 0, s.refused or 0)
   end
   if not item.relaxed and ((s.overlap or 0) > 0 or (s.front or 0) > 0) then
     item.relaxed, item.cursor, item.relaxedTries = true, 1, 0
@@ -2086,7 +1475,7 @@ local function packStep(run, item)
     run.phase = "begin"
     return
   end
-  if run.kit and not item.isConnector and not item.lattice and (item.spurs or 0) < MAX_SPURS then
+  if run.kit and not item.isConnector and (item.spurs or 0) < MAX_SPURS then
     local chain, why = spurFor(run, item)
     if chain then
       item.spurs = (item.spurs or 0) + 1
@@ -2101,8 +1490,7 @@ local function packStep(run, item)
   if connector and not item.isConnector and (item.connectors or 0) < MAX_REACH then
     item.connectors = (item.connectors or 0) + 1
     if item.connectors == 1 then run.spur = nil end
-    table.insert(run.items, run.next, { macro = connector.macro, pack = true, isConnector = true, reach = true, turn = item.turn,
-      owner = item, side = item.side, depth = item.depth, target = item.target })
+    table.insert(run.items, run.next, { macro = connector.macro, pack = true, isConnector = true, reach = true, turn = item.turn, owner = item })
     sab.Debug("%s: no place among %s; growing %s outward first (%d of %d)", item.macro, skipsText(), connector.macro, item.connectors, MAX_REACH)
     run.phase = "begin"
     return
@@ -2151,7 +1539,7 @@ end
 -- A bill { { macro, count } } becomes pack items: inner modules first, largest first, then the outer ones.
 -- A bill whose entries carry a turn (planner.Turns) keeps its order: it is the build order.
 -- A connector in the bill sets the type the packer grows outward with instead of being an item.
--- opts.floors on an empty plan: the floor layout (production in a lattice, the rest in wings).
+-- opts.grid on an empty plan: the grid layout.
 function sab.StartBill(bill, opts)
   local menu = sab.menu
   if not (menu and menu.shown and menu.holomap ~= 0) then
@@ -2183,18 +1571,18 @@ function sab.StartBill(bill, opts)
     if macro then connector = { macro = macro } end
   end
   local empty = items[1] and tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) == 0
-  local floors = empty and opts and ((opts.grid and "grid") or opts.floors) or nil
-  if empty and not floors then
+  local gridRoute = empty and opts and opts.grid or false
+  if empty and not gridRoute then
     local centre = C.GetBuildPlotCenterOffset(menu.container)
     items[1].pack, items[1].free, items[1].pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
   end
-  return sab.StartRun(items, connector, turns > 0 and turns or nil, floors, opts)
+  return sab.StartRun(items, connector, turns > 0 and turns or nil, gridRoute, opts)
 end
 
--- floors: probe the connection geometry first, then build on the floor layout (StartBill, empty plan only).
+-- gridRoute: probe every module's connection geometry too, then pack on the grid (StartBill, empty plan only).
 -- opts.stopOnFail: the run stops at its first failed placement. opts.packOnly: a grid run stops once packed (layout
 -- experiments). opts.subdivide: grid occupancy cells per cell side (nil: grid.subdivide).
-function sab.StartRun(items, connector, turns, floors, opts)
+function sab.StartRun(items, connector, turns, gridRoute, opts)
   if sab.run then
     sab.Error("a run is already active")
     return false
@@ -2213,8 +1601,8 @@ function sab.StartRun(items, connector, turns, floors, opts)
     stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, subdivide = opts and opts.subdivide }
   readPlanState(run, editor)
   run.fromEmpty = run.n == 0
-  -- the connection geometry probe: every connector (spurs), with floors the lattice modules too
-  run.probeList, run.phase, run.floors = {}, "probe", floors
+  -- the connection geometry probe: every connector (spurs), on the grid route every module too
+  run.probeList, run.phase, run.gridRoute = {}, "probe", gridRoute
   local seen = {}
   local function want(m)
     if m and not seen[m] and not sab.macroConns[m] then
@@ -2225,16 +1613,14 @@ function sab.StartRun(items, connector, turns, floors, opts)
   for _, m in ipairs(menu.modules and menu.modules.moduletypes_other or {}) do
     if IsMacroClass(m, "connectionmodule") then want(m) end
   end
-  if floors then
-    for _, it in ipairs(items) do
-      if floors == "grid" or it.group == "production" or it.group == "build" or it.column then want(it.macro) end
-    end
+  if gridRoute then
+    for _, it in ipairs(items) do want(it.macro) end
   end
   run.probeTotal = #run.probeList
   sab.run = run
   sab.panelDirty = true
   sab.Debug("run started: %d items, %d entries, %d connections, connector %s, probing %d macros%s", #items, run.n, #run.conns,
-    connector and connector.macro or "none", #run.probeList, floors == "grid" and ", grid" or floors and ", floor layout" or "")
+    connector and connector.macro or "none", #run.probeList, gridRoute and ", grid" or "")
   return true
 end
 
@@ -2297,10 +1683,6 @@ function sab.Tick(chained)
     probeStep(run)
     return
   end
-  if run.phase == "site" then
-    siteLayout(run)
-    return
-  end
   if run.phase == "pack" then
     sab.grid.Step(run)
     return
@@ -2311,10 +1693,6 @@ function sab.Tick(chained)
     if not item then
       sab.StopRun("finished")
       return
-    end
-    if not item.aimed then
-      item.aimed = true
-      if aimItem(run, item) then return end
     end
     beginPlacement(run, item)
     if item.pack or item.dragged then return end
@@ -2530,7 +1908,8 @@ function sab.TargetSpec(ctx)
     if g.kind == "ware" then
       goals[#goals + 1] = { kind = "ware", ware = g.ware, modules = math.max(0, (g.modules or 1) - extraModules(currentOf(ctx, g.ware))) }
     else
-      goals[#goals + 1] = { kind = "ship", buildMacro = g.buildMacro, count = math.max(0, (g.bays or 1) - baysOf(ctx, g.buildMacro)) }
+      local have = baysOf(ctx, g.buildMacro)
+      goals[#goals + 1] = { kind = "ship", buildMacro = g.buildMacro, count = math.max(0, (g.bays or 1) - have), bays = math.max(g.bays or 1, have) }
     end
   end
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals,
@@ -2598,6 +1977,7 @@ local function progressText()
   if not sab.RouteOk() then return ReadText(PAGE, 108) end
   local last = sab.lastRun
   if last and last.declined then return ReadText(PAGE, 143) end
+  if last and last.tooLarge then return string.format(tostring(ReadText(PAGE, 147)), last.tooLarge, MAX_PLOT / 1000) end
   if last then return string.format(tostring(ReadText(PAGE, 107)), last.placed, last.failed) end
   return ""
 end
@@ -2619,7 +1999,7 @@ local function progressDetail()
   -- grid and pair items snap to a planned connection: no candidate list to count
   local name = GetMacroData(item.macro, "name")
   local text = item.candidates and string.format(tostring(ReadText(PAGE, 131)), name, item.cursor - 1, #item.candidates) or tostring(name)
-  if item.turn and run.turns and run.floors ~= "grid" then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
+  if item.turn and run.turns and not run.gridRoute then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
   return text
 end
 
@@ -2671,6 +2051,19 @@ local function formTable(frame, tabOrder, y, buttonHeight, maxHeight)
   ftable:setColWidth(3, Helper.scaleX(50), false)
   ftable:setColWidth(4, Helper.scaleY(buttonHeight), false)
   return ftable
+end
+
+-- The licence due on the plot with its Buy button, as vanilla's plot panel shows it; returns the next y.
+local function feeTable(frame, tabOrder, y, buttonHeight)
+  local fee = sab.PlotFee()
+  if not fee then return y end
+  local ftable = frame:addTable(2, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = y })
+  local row = ftable:addRow(true, {})
+  row[1]:createText(ReadText(1001, 9242) .. ReadText(1001, 120) .. " " .. ConvertMoneyString(fee, false, true, 0, true) .. " " .. ReadText(1001, 101),
+    { halign = "left", minRowHeight = buttonHeight })
+  row[2]:createButton({ height = buttonHeight, active = function() return GetPlayerMoney() >= fee end }):setText(ReadText(1001, 9233), { halign = "center" })
+  row[2].handlers.onClick = sab.BuyPlot
+  return ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize
 end
 
 -- The scroll positions of a form's goal and plan tables, read before its frame is rebuilt.
@@ -2829,7 +2222,7 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   if plan.adds then
     row = etable:addRow(true, {})
     row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 124)), plan.workforce, plan.workforceCapacity,
-      math.floor(plan.flow.import), math.floor(plan.flow.export)), {})
+      math.floor(plan.workforceFraction * 100 + 0.5), math.floor(plan.flow.import), math.floor(plan.flow.export)), {})
   end
   for _, warning in ipairs(plan.warnings) do
     row = etable:addRow(true, {})
@@ -2912,6 +2305,7 @@ function sab.DisplayPanel()
       local status = head:addRow(true, {})
       status[1]:setColSpan(3):createText(progressText, { halign = "left", minRowHeight = buttonHeight })
     end
+    if idle then feeTable(frame, 2, head.properties.y + head:getVisibleHeight() + Helper.borderSize, buttonHeight) end
     frame:display()
     return
   end
@@ -2957,6 +2351,10 @@ function sab.DisplayPanel()
     end
   end
 
+  if idle then
+    contentY = feeTable(frame, tabOrder, contentY, buttonHeight)
+    tabOrder = tabOrder + 1
+  end
   local canOptimize = idle and sab.CanOptimizePlot()
   local btable = frame:addTable(4, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = contentY })
   local row
@@ -3125,7 +2523,7 @@ function sab.ConfirmDialog()
   sab.target.station, sab.target.planRead = station, true
   sab.Debug("plot reserved: station %s, %d m, loadout %s, method '%s', build storage %s", tostring(station), size,
     tostring(d.loadout), method, tostring(buildstorage))
-  sab.dialog, sab.dialogFrame = nil, nil
+  sab.CloseDialog()
   AddUITriggeredEvent(menu.name, "initiateconstruction_station", station)
   Helper.closeMenuAndOpenNewMenu(menu, MENU_NAME, { 0, 0, station })
   menu.cleanup()

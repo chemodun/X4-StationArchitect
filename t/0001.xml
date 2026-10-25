@@ -30,7 +30,7 @@
       <t id="121">Self-sufficient workforce</t>
       <t id="122">Planned modules</t>
       <t id="123">%s /h</t>
-      <t id="124">Workforce %s of %s, trade %s m³/h in, %s m³/h out</t>
+      <t id="124">Workforce %s of %s, modules at %s%% of it, trade %s m³/h in, %s m³/h out</t>
       <t id="125">No plan: %s</t>
       <t id="126">Expand the panel</t>
       <t id="127">Collapse the panel</t>
@@ -51,6 +51,7 @@
       <t id="144">Release at the lowest value to remove this target</t>
       <t id="145">Add a target</t>
       <t id="146">Covers the station's shortfalls: %s</t>
+      <t id="147">The layout needs %s km, above the %s km plot limit: nothing placed</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>

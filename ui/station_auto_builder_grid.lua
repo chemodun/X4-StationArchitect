@@ -962,7 +962,7 @@ local function emit(g, run)
     local par, it = X.parent, nil
     if par.kind == "root" then
       local p, s = world(X.node), sab.sizes[kit.cross.macro]
-      it = { macro = kit.cross.macro, free = true, isConnector = true, skeleton = true,
+      it = { macro = kit.cross.macro, free = true, isConnector = true,
         pos = { x = p[1] - (s and s.cX or 0), y = p[2] - (s and s.cY or 0), z = p[3] - (s and s.cZ or 0) } }
     else
       local base, conn, di
@@ -975,12 +975,12 @@ local function emit(g, run)
       for _, len in ipairs(par.struts or {}) do
         local s = geo.strutFor(kit, len, DIRS[di][2] ~= 0)
         local st = { macro = s.macro, pair = { entryIdx = prev, predecessorConnection = prevConn, connection = s.near },
-          isConnector = true, skeleton = true, after = prev }
+          isConnector = true, after = prev }
         items[#items + 1] = st
         prev, prevConn = st, s.far
       end
       it = { macro = kit.cross.macro, pair = { entryIdx = prev, predecessorConnection = prevConn, connection = armName(OPPOSITE[di]) },
-        isConnector = true, skeleton = true, after = prev }
+        isConnector = true, after = prev }
     end
     items[#items + 1] = it
     crossItem[X] = it
@@ -995,7 +995,7 @@ local function emit(g, run)
     else
       base, conn = emitModule(M.attach.module), M.attach.port.name
     end
-    it.pack, it.lattice, it.side = nil, nil, nil
+    it.pack = nil
     it.pair = { entryIdx = base, predecessorConnection = conn, connection = M.pose.conn }
     it.roll, it.after, it.emitted = M.pose.roll, base, true
     for _, st in ipairs(items) do if st.turn == nil then st.turn = it.turn end end
@@ -1175,7 +1175,22 @@ local function pack(run)
   local H = g.top + 1
   local centre = C.GetBuildPlotCenterOffset(sab.menu.container)
   g.origin = { centre.x - (g.sx - 1) * g.u / 2, centre.y - (H - 1) * g.u / 2, centre.z - (g.sz - 1) * g.u / 2 }
-  run.plotBox = layoutBox(docks(g, run))
+  local box = layoutBox(docks(g, run))
+  -- per axis, a shift under half a km that puts the layout's low face on a whole km when that saves a plot km
+  if box then
+    local shift = {}
+    for i = 1, 3 do shift[i] = -1000 * math.floor(-box.min[i] / 1000 + 0.5) - box.min[i] end
+    local alt = shifted(box, shift)
+    local f0, f1 = sab.PlotFaces(box), sab.PlotFaces(alt)
+    for i = 1, 3 do
+      if f1.uncapped[i] < f0.uncapped[i] then
+        g.origin[i] = g.origin[i] + shift[i]
+        box.min[i], box.max[i] = alt.min[i], alt.max[i]
+        sab.Debug("grid: shifted %.0f m on axis %d to save a plot km", shift[i], i)
+      end
+    end
+  end
+  run.plotBox = box
   sab.Debug("grid: kept footprint %d x %d, occupancy 1/%d, cost %g: %d modules, %d failed, %d connectors, %.1f x %.1f x %.1f km, %d frames for %d packs",
     g.sx, g.sz, g.R, g.cost, #g.modules, #g.failed, g.connectors, g.used[1] * g.u / 1000, g.used[2] * g.u / 1000, g.used[3] * g.u / 1000, frames, packs)
   run.grid = g
