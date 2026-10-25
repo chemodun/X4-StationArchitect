@@ -792,7 +792,8 @@ end
 
 -- *** turns ***
 -- The bill in build order, so the station works from its first final module on: turn t adds one final
--- module (a producer of the target ware, or the build module) behind the storage, dock, pier and habitat
+-- module (a producer of the target ware, or the build module; without one a producer of a shortfall ware, or
+-- a habitat for a workforce shortfall) behind the storage, dock, pier and habitat
 -- units the need of t turns exceeds (largest units first, one big unit serves several turns) and the
 -- upstream producers t final modules need, deepest first.
 
@@ -816,6 +817,7 @@ end
 function planner.Turns(plan)
   local cat = planner.Catalogue(plan.set)
   local counts = plan.counts
+  if not next(counts) then return {} end
   local goalWares, goalBuilds, ships = {}, {}, false
   for _, goal in ipairs(goalsOf(plan.target)) do
     if goal.kind == "ship" then
@@ -840,6 +842,30 @@ function planner.Turns(plan)
     elseif e.group ~= "habitation" and e.group ~= "storage" and e.group ~= "dock" and e.group ~= "pier" then
       others[#others + 1] = e
     end
+  end
+  -- no goal module planned: the producers of shortfall wares no other planned module takes are the finals
+  local lacks = plan.lacks or { wares = {}, workforce = 0 }
+  if #finals == 0 then
+    local takers = {}
+    for _, e in ipairs(upstream) do
+      for _, p in ipairs(e.products or {}) do
+        for w in pairs(p.resources) do
+          takers[w] = takers[w] or {}
+          takers[w][e.macro] = true
+        end
+      end
+    end
+    local rest = {}
+    for _, e in ipairs(upstream) do
+      local final = false
+      for _, p in ipairs(e.products or {}) do
+        local taken = false
+        for m in pairs(takers[p.ware] or {}) do if m ~= e.macro then taken = true end end
+        if lacks.wares[p.ware] and not taken then final = true end
+      end
+      if final then finals[#finals + 1] = e else rest[#rest + 1] = e end
+    end
+    upstream = rest
   end
   table.sort(finals, function(a, b) return a.name < b.name end)
   table.sort(others, function(a, b) return a.name < b.name end)
@@ -916,6 +942,8 @@ function planner.Turns(plan)
     end
   end
 
+  -- no final at all: one turn per habitat the missing workforce needs
+  local nTurns = math.max(1, nFinal > 0 and nFinal or (lacks.workforce > 0 and #habitats or 1))
   local flow = plan.flow.import + plan.flow.export
   local turns, cum = {}, {}
   local placedWorkforce, placedHabitat, placedDocks, placedAreas, placedStorage = 0, 0, 0, 0, {}
@@ -936,8 +964,8 @@ function planner.Turns(plan)
     end
     return placed
   end
-  for t = 1, math.max(1, nFinal) do
-    local turn, share = {}, t / math.max(1, nFinal)
+  for t = 1, nTurns do
+    local turn, share = {}, t / nTurns
     local producers = {}
     for _, e in ipairs(upstream) do
       while (cum[e.macro] or 0) < ceil(counts[e.macro] * share) do
@@ -971,7 +999,11 @@ function planner.Turns(plan)
     end
     for _, e in ipairs(producers) do turn[#turn + 1] = e.macro end
     emitStorage(false)
-    placedHabitat = emitWhile(turn, habitats, placedHabitat, placedWorkforce)
+    if nFinal > 0 then
+      placedHabitat = emitWhile(turn, habitats, placedHabitat, placedWorkforce + lacks.workforce * share)
+    else
+      placedHabitat = emitWhile(turn, habitats, placedHabitat, t, 1)
+    end
     if f and buildLast then turn[#turn + 1] = f.macro end
     turns[t] = turn
   end
