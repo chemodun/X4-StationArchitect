@@ -22,10 +22,6 @@ ffi.cdef [[
     float z;
   } Coord3D;
   typedef struct {
-    const char* id;
-    const char* name;
-  } ProductionMethodInfo;
-  typedef struct {
     size_t idx;
     const char* macroid;
     UniverseID componentid;
@@ -52,16 +48,13 @@ ffi.cdef [[
   int64_t GetBuildPlotPayment(UniverseID stationid, bool* positionchanged);
   UIPosRot GetObjectPositionInSector(UniverseID objectid);
   UniverseID GetSectorControlStation(UniverseID sectorid);
-  const char* GetContainerBuildMethod(UniverseID containerid);
-  uint32_t GetNumPlayerBuildMethods(void);
-  uint32_t GetPlayerBuildMethods(ProductionMethodInfo* result, uint32_t resultlen);
   bool IsComponentClass(UniverseID componentid, const char* classname);
   bool ExtendBuildPlot(UniverseID stationid, Coord3D poschange, Coord3D negchange, bool allowreduction);
   void UpdateConstructionMapBuildPlot(UniverseID holomapid);
   void PayBuildPlotSize(UniverseID stationid, Coord3D plotsize, Coord3D plotcenter);
   UniverseID ReserveBuildPlot(UniverseID sectorid, const char* factionid, const char* set, UIPosRot location, float x, float y, float z);
-  void SetContainerBuildMethod(UniverseID containerid, const char* buildmethodid);
   void SetStationModuleLoadoutLevel(UniverseID stationid, float value);
+  bool StopPanMap(UniverseID holomapid);
 ]]
 
 local MENU_NAME = "StationConfigurationMenu"
@@ -545,8 +538,10 @@ end
 function sab.Snap(editor)
   if not C.HasBuildMapFloatingSelection(sab.menu.holomap) then return { snapped = false, valid = false } end
   -- the snap search runs only while the editor drags a module
+  local wasDragging = editor[engine.dragging]
   editor[engine.dragging] = 1
   engine.update(editor, 0, zeroRay)
+  editor[engine.dragging] = wasDragging
   local r = { snapped = pp(editor + LAYOUT.snapEntry)[0] ~= nil, valid = editor[LAYOUT.valid] ~= 0 }
   if r.snapped then
     r.entryIdx = tonumber(u64(editor + LAYOUT.snapEntryIdx))
@@ -1505,21 +1500,23 @@ local function packStep(run, item)
   advance(run)
 end
 
--- A connection module blueprint of the race, a cross when there is one; any race when race is nil.
+-- The connection module blueprint of the race with the most snap connections (a cross where there is one);
+-- any race when race is nil.
 local function connectorOfRace(race)
-  local first
+  local best, bestCount
   for _, m in ipairs(sab.menu.modules and sab.menu.modules.moduletypes_other or {}) do
     if IsMacroClass(m, "connectionmodule") then
       local mr = GetMacroData(m, "makerraceid")
       for _, r in ipairs(type(mr) == "table" and mr or { mr }) do
         if race == nil or r == race then
-          if string.find(m, "cross", 1, true) then return m end
-          first = first or m
+          local count = #sab.Connections(m)
+          if not best or count > bestCount or (count == bestCount and m < best) then best, bestCount = m, count end
+          break
         end
       end
     end
   end
-  return first
+  return best
 end
 
 -- The connector for a bill without one: the macro's maker race, else a race already in the plan, else any.
@@ -1638,6 +1635,8 @@ function sab.StopRun(reason)
     C.RemoveFloatingSequenceFromConstructionPlan(menu.holomap)
     menu.floatingNewModule = nil
   end
+  -- the drag a dragged float started ends here, as vanilla's mouse-up ends it
+  C.StopPanMap(menu.holomap)
   sab.run = nil
   sab.Debug("run %s: %d placed, %d failed", reason or "finished", run.placed, run.failed)
   -- a plan this run started from nothing gets a plot fitted to it on each side
@@ -2448,18 +2447,6 @@ end
 local DIALOG_LAYER = 3 -- the map draws on 2, 4, 5 and 6
 local LOADOUTS = { { 0, 7990 }, { 0.1, 7910 }, { 0.5, 7911 }, { 1.0, 7912 }, { -1, 7968 } }
 
--- "global" stands for the empty container method (a dropdown needs a non-empty id)
-local function buildMethodOptions()
-  local options = { option("global", ReadText(1001, 8367)) }
-  local n = C.GetNumPlayerBuildMethods()
-  if n > 0 then
-    local buf = ffi.new("ProductionMethodInfo[?]", n)
-    n = C.GetPlayerBuildMethods(buf, n)
-    for i = 0, n - 1 do options[#options + 1] = option(ffi.string(buf[i].id), ffi.string(buf[i].name)) end
-  end
-  return options
-end
-
 local function dialogContext(d)
   return { set = "factory", sunlight = GetComponentData(d.sector, "sunlight") }
 end
@@ -2470,7 +2457,7 @@ function sab.OpenPlotDialog()
     sab.Debug("plot dialog: no planner, map or spot")
     return
   end
-  sab.dialog = { sector = spot.sector, x = spot.x, y = spot.y, z = spot.z, loadout = 1.0, method = "global" }
+  sab.dialog = { sector = spot.sector, x = spot.x, y = spot.y, z = spot.z, loadout = 1.0 }
   sab.target = defaultTarget()
   sab.dialogDirty = true
 end
@@ -2507,7 +2494,6 @@ function sab.DisplayDialog()
       local loadouts = {}
       for _, l in ipairs(LOADOUTS) do loadouts[#loadouts + 1] = option(l[1], ReadText(1001, l[2])) end
       kit.dropdown(kit.input(ReadText(1001, 7967)), loadouts, d.loadout, function(id) d.loadout = tonumber(id) end)
-      kit.dropdown(kit.input(ReadText(1001, 11298)), buildMethodOptions(), d.method, function(id) d.method = id end)
     end, "dialog")
 
   local btable = frame:addTable(2, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = nextY })
@@ -2524,7 +2510,7 @@ function sab.DisplayDialog()
   frame:display()
 end
 
--- OK: reserve the plot at the spot, pay it where vanilla would, set the station-wide options, open the build menu.
+-- OK: reserve the plot at the spot, pay it where vanilla would, set the module loadout level, open the build menu.
 function sab.ConfirmDialog()
   local menu, d = sab.mapMenu, sab.dialog
   if not d then return end
@@ -2550,14 +2536,10 @@ function sab.ConfirmDialog()
     C.PayBuildPlotSize(station, { x = size, y = size, z = size }, { x = d.x, y = d.y, z = d.z })
   end
   C.SetStationModuleLoadoutLevel(station, d.loadout)
-  local method = d.method == "global" and "" or d.method
-  local buildstorage = ConvertIDTo64Bit(GetComponentData(station, "buildstorage")) or 0
-  if buildstorage ~= 0 then C.SetContainerBuildMethod(buildstorage, method) end
-  sab.pendingTarget = { station = station, spec = spec, method = buildstorage == 0 and method or nil, since = getElapsedTime() }
+  sab.pendingTarget = { station = station, spec = spec, since = getElapsedTime() }
   -- the build menu keeps the dialog's goals for the new station
   sab.target.station, sab.target.planRead = station, true
-  sab.Debug("plot reserved: station %s, %d m, loadout %s, method '%s', build storage %s", tostring(station), size,
-    tostring(d.loadout), method, tostring(buildstorage))
+  sab.Debug("plot reserved: station %s, %d m, loadout %s", tostring(station), size, tostring(d.loadout))
   sab.CloseDialog()
   AddUITriggeredEvent(menu.name, "initiateconstruction_station", station)
   Helper.closeMenuAndOpenNewMenu(menu, MENU_NAME, { 0, 0, station })
@@ -2581,7 +2563,6 @@ function sab.StartPending()
     return
   end
   sab.pendingTarget = nil
-  if p.method and menu.buildstorage ~= 0 then C.SetContainerBuildMethod(menu.buildstorage, p.method) end
   ---@diagnostic disable-next-line: inject-field
   p.spec.station, p.spec.set = menu.container, menu.set
   sab.expanded, sab.tab = true, "target"

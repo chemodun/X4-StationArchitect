@@ -32,6 +32,8 @@ ffi.cdef [[
   } WorkForceInfo;
 
   uint32_t GetBlueprints(UIBlueprint* result, uint32_t resultlen, const char* set, const char* category, const char* macroname);
+  const char* GetContainerBuildMethod(UniverseID containerid);
+  const char* GetPlayerBuildMethod(void);
   double GetContainerWareConsumption(UniverseID containerid, const char* wareid, bool ignorestate);
   double GetContainerWareProduction(UniverseID containerid, const char* wareid, bool ignorestate);
   uint32_t GetNumBlueprints(const char* set, const char* category, const char* macroname);
@@ -354,19 +356,26 @@ local function yardFor(size, station, race)
   return best
 end
 
--- The method a ware is made by for the race: the race's, else "default", else its first.
-local function raceMethod(ware, race)
+-- The build method a station's yard applies: its own setting, else the player's global one.
+local function stationBuildMethod(station)
+  local setting = station and station ~= 0 and ffi.string(C.GetContainerBuildMethod(station)) or ""
+  if setting == "" then setting = ffi.string(C.GetPlayerBuildMethod()) end
+  return setting
+end
+
+-- The method a yard builds a ware by: its build method when the ware has it, else "default", else the first.
+local function buildMethod(ware, setting)
   local methods = ware and GetWareData(ware, "productionmethods")
   local method
   for _, m in ipairs(type(methods) == "table" and methods or {}) do
-    if m == race or (m == "default" and method ~= race) or not method then method = m end
+    if m == setting or (m == "default" and method ~= setting) or not method then method = m end
   end
   return method
 end
 
--- Adds a ware's production resources to total; false when it has none.
-local function addResources(total, ware, race)
-  local method = raceMethod(ware, race)
+-- Adds a ware's build resources to total; false when it has none.
+local function addResources(total, ware, setting)
+  local method = buildMethod(ware, setting)
   local n = method and C.GetNumProductionMethodResources(ware, method) or 0
   if n == 0 then return false end
   local buf = ffi.new("UIWareAmount[?]", n)
@@ -411,10 +420,11 @@ end
 
 -- Per-ship build resources (hull and equipment) and build hours at a full workforce, averaged over the owned
 -- ship blueprints of the sizes (s, m, l, xl), those of the race when it owns any (Terran hulls need other wares
--- than Commonwealth ones), every owned one without a race; each hull by its race's method and at a yard of its
--- race; the hours from the engine at that yard, else from the hull ware (fromWare).
+-- than Commonwealth ones), every owned one without a race; hull and equipment by the station's build method; the
+-- hours from the engine at a yard of the hull's race, else from the hull ware (fromWare).
 local function shipResources(sizes, race, station)
   local total, ships, seconds, fromWare = {}, 0, 0, false
+  local setting = stationBuildMethod(station)
   for _, size in ipairs(sizes) do
     local macros, ofRace, hullRace = blueprints("", "shiptypes_" .. size), {}, {}
     for _, macro in ipairs(macros) do
@@ -428,17 +438,17 @@ local function shipResources(sizes, race, station)
     if #ofRace > 0 then macros = ofRace end
     for _, macro in ipairs(macros) do
       local ware, r = GetMacroData(macro, "ware"), hullRace[macro]
-      if addResources(total, ware, r) then
+      if addResources(total, ware, setting) then
         ships = ships + 1
         local yard = yardFor(size, station, r)
         local built, equipment = nil, nil
         if yard then built, equipment = equippedBuild(macro, yard) end
         if built then
           seconds = seconds + built
-          for _, m in ipairs(equipment or {}) do addResources(total, GetMacroData(m, "ware"), r) end
+          for _, m in ipairs(equipment or {}) do addResources(total, GetMacroData(m, "ware"), setting) end
         else
           fromWare = true
-          seconds = seconds + C.GetProductionMethodInfo2(ware, raceMethod(ware, r)).productiontime
+          seconds = seconds + C.GetProductionMethodInfo2(ware, buildMethod(ware, setting)).productiontime
         end
       end
     end
