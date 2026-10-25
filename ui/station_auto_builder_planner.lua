@@ -44,8 +44,7 @@ local planner = {
   mDockM3PerHour = 150000,    -- M trade volume one M dock of a dock area serves per hour
   basePierDocks = 3,          -- a station without docks gets at least this, as vanilla's smallest prefabs
   baseDockAreas = 1,
-  docking = { high = 1, mid = 2, low = 4 }, -- target.docking: the volume per dock scales by this
-  bigPier = 3,                -- piers with more docks: one per station at most, at the bottom
+  bigPier = 3,               -- piers with more docks: one per station at most, at the bottom
   -- set -> catalogue of owned module blueprints
   catalogue = {},
   -- ware -> { name, transport, volume }
@@ -68,9 +67,8 @@ local function ceil(x) return math.ceil(x - 1e-6) end
 
 -- pier docks and dock areas for a trade flow, at least the plan's base
 local function dockNeed(plan, flow)
-  local scale = planner.docking[plan.target.docking or "high"] or 1
-  local pierDocks = ceil(flow * planner.lShare / (planner.pierDockM3PerHour / scale))
-  local areas = ceil(flow * (1 - planner.lShare) / (plan.areaDocksM * planner.mDockM3PerHour / scale))
+  local pierDocks = ceil(flow * planner.lShare / planner.pierDockM3PerHour)
+  local areas = ceil(flow * (1 - planner.lShare) / (plan.areaDocksM * planner.mDockM3PerHour))
   return math.max(plan.basePierDocks, pierDocks), math.max(plan.baseDockAreas, areas)
 end
 
@@ -383,6 +381,119 @@ local function stationDocks(station)
   return pierDocks, areas
 end
 
+-- a station module's catalogue group and library by its class
+local CLASS_GROUPS = { { "production", "production" }, { "processingmodule", "processing" }, { "habitation", "habitation" }, { "buildmodule", "build" } }
+-- macro -> entry of a module whose blueprint is not owned, false for other classes
+local foreign = {}
+
+local function moduleEntry(cat, macro)
+  local e = cat.byMacro[macro] or foreign[macro]
+  if e ~= nil then return e or nil end
+  for _, c in ipairs(CLASS_GROUPS) do
+    if IsMacroClass(macro, c[1]) then
+      e = entryOf(c[2], LIBS[c[2]], macro)
+      break
+    end
+  end
+  foreign[macro] = e or false
+  return e
+end
+
+-- An existing station's modules, planned ones included: producers per ware, the wares its producers and
+-- habitats use, workforce need and housing, habitats per race, build modules per macro.
+local function stationProfile(station, set)
+  local cat = planner.Catalogue(set or "")
+  local p = { makes = {}, uses = {}, habWares = {}, need = 0, capacity = 0, races = {}, builds = {} }
+  for _, macro in ipairs(stationMacros(station)) do
+    local e = moduleEntry(cat, macro)
+    if e and e.group == "habitation" then
+      p.capacity = p.capacity + e.capacity
+      p.races[e.race] = (p.races[e.race] or 0) + 1
+      for w in pairs(e.needs) do p.habWares[w] = true end
+    elseif e then
+      p.need = p.need + e.workforce
+      if e.group == "build" then p.builds[macro] = (p.builds[macro] or 0) + 1 end
+      for _, prod in ipairs(e.products or {}) do
+        p.makes[prod.ware] = (p.makes[prod.ware] or 0) + 1
+        for w in pairs(prod.resources) do p.uses[w] = true end
+      end
+    end
+  end
+  return p
+end
+
+-- The target an existing station looks built for: its build modules as ship goals, else its end products (made,
+-- used by none of its producers, a whole module of net output at least) as ware goals, each at what the station
+-- has. Full cycle: it makes every resource it could (one at least); self-sufficient: its habitats' wares too.
+function planner.Derive(station, set)
+  local cat = planner.Catalogue(set or "")
+  local p = stationProfile(station, set)
+  local race, most = nil, 0
+  for r, n in pairs(p.races) do
+    if n > most or (n == most and r < race) then race, most = r, n end
+  end
+  local d = { goals = {}, workforce = p.capacity > 0, race = race }
+  local builds = {}
+  for macro in pairs(p.builds) do builds[#builds + 1] = macro end
+  table.sort(builds)
+  for _, macro in ipairs(builds) do d.goals[#d.goals + 1] = { kind = "ship", buildMacro = macro, bays = p.builds[macro] } end
+  if #builds == 0 then
+    local wares = {}
+    for w in pairs(p.makes) do
+      if not p.uses[w] then wares[#wares + 1] = w end
+    end
+    table.sort(wares)
+    for _, w in ipairs(wares) do
+      local c = planner.Current(station, w)
+      local extra = c.production > 0 and c.net * c.modules / c.production or 0
+      if extra >= 1 - 1e-6 then d.goals[#d.goals + 1] = { kind = "ware", ware = w, modules = math.floor(extra + 1e-6) } end
+    end
+  end
+  local function covered(list)
+    local any = false
+    for w in pairs(list) do
+      if p.makes[w] then
+        any = true
+      elseif producerFor(cat, w, race or "generic") then
+        return false
+      end
+    end
+    return any
+  end
+  d.fullCycle = covered(p.uses)
+  d.selfSufficient = d.fullCycle and d.workforce and covered(p.habWares)
+  return d
+end
+
+-- An existing station's shortfalls the target makes its own: wares it makes, under full cycle its resources and,
+-- self-sufficient, its habitats' wares (nominal rates; goal wares count in their goal; wares no owned module
+-- makes stay imported); with workforce the housing its producers lack.
+local function stationLacks(target)
+  local lack = { wares = {}, workforce = 0, any = false }
+  if not target.station then return lack end
+  local cat = planner.Catalogue(target.set or "")
+  local p = stationProfile(target.station, target.set)
+  local wares = {}
+  for w in pairs(p.makes) do wares[w] = true end
+  if target.fullCycle then
+    for w in pairs(p.uses) do wares[w] = true end
+    if target.selfSufficient then
+      for w in pairs(p.habWares) do wares[w] = true end
+    end
+  end
+  for _, g in ipairs(target.goals or {}) do
+    if g.ware then wares[g.ware] = nil end
+  end
+  for w in pairs(wares) do
+    local net = producerFor(cat, w, target.race or "generic") and planner.Current(target.station, w).net or 0
+    if net < -0.5 then
+      lack.wares[w], lack.any = -net, true
+    end
+  end
+  if target.workforce and p.need > p.capacity then lack.workforce, lack.any = p.need - p.capacity, true end
+  return lack
+end
+
 -- *** the plan ***
 
 -- The target's goals; a target without a goals list is one goal itself.
@@ -390,11 +501,12 @@ local function goalsOf(target)
   return target.goals or { target }
 end
 
--- target = { set, station, goals, fullCycle, workforce, race, selfSufficient, sunlight, docking }, each goal
+-- target = { set, station, goals, fullCycle, workforce, race, selfSufficient, sunlight }, each goal
 --   { kind = "ware", ware, rate (net ware amount per hour) or modules } or { kind = "ship", buildMacro, count
 --   (build modules to add) }. A fabrication bay builds the ship sizes its builder classes name (shipSize
 --   overrides), a maintenance bay none (repair forces that); plan.shipRates and plan.shipHours per goal index.
---   A goal ware another goal consumes gets its producers on top of that consumption.
+--   A goal ware another goal consumes gets its producers on top of that consumption. A station's shortfalls
+--   (stationLacks) are planned too, with or without a goal.
 --   The result carries counts per macro, the ware balance, the workforce and the warnings; Bill() turns it
 --   into StartBill's list.
 function planner.Plan(target)
@@ -440,7 +552,7 @@ function planner.Plan(target)
         for w, amount in pairs(perShip) do use[w] = (use[w] or 0) + amount * shipRate end
       end
       if e then
-        counts[e.macro] = (counts[e.macro] or 0) + bays
+        if bays > 0 then counts[e.macro] = (counts[e.macro] or 0) + bays end
         fixedWorkforce = fixedWorkforce + e.workforce * bays
       else
         warn("no owned build module %s", tostring(goal.buildMacro))
@@ -456,7 +568,10 @@ function planner.Plan(target)
       end
     end
   end
-  -- no goal or every goal met: nothing to plan, not even the base docks
+  local lack = stationLacks(target)
+  plan.lacks = lack
+  if lack.any then plan.adds = true end
+  -- no goal, every goal met and no shortfall: nothing to plan, not even the base docks
   if not plan.adds then return plan end
   local base = {}
 
@@ -478,8 +593,9 @@ function planner.Plan(target)
     for macro, n in pairs(prodCounts) do workforce = workforce + cat.byMacro[macro].workforce * n end
     habCounts = {}
     if target.workforce then
-      ladder(candidates(cat.habitation, race), workforce, habCounts)
+      ladder(candidates(cat.habitation, race), workforce + lack.workforce, habCounts)
       for macro, n in pairs(habCounts) do capacity = capacity + cat.byMacro[macro].capacity * n end
+      capacity = math.max(0, capacity - lack.workforce)
     end
     local fraction = target.workforce and (workforce > 0 and math.min(1, capacity / workforce) or 0) or liveFraction
     -- a module count goal: that many of the ware's producer at this round's fraction
@@ -491,6 +607,7 @@ function planner.Plan(target)
     end
     -- the balance of the current counts
     for w, r in pairs(use) do consumed[w] = r end
+    for w, r in pairs(lack.wares) do consumed[w] = (consumed[w] or 0) + r end
     for macro, n in pairs(prodCounts) do
       for _, p in ipairs(cat.byMacro[macro].products) do
         produced[p.ware] = (produced[p.ware] or 0) + rateOf(p, fraction, sunlight) * n
@@ -507,7 +624,7 @@ function planner.Plan(target)
     local demand = {}
     for w, r in pairs(base) do demand[w] = r end
     for w, r in pairs(consumed) do
-      local own = base[w] ~= nil or (target.fullCycle and (target.selfSufficient or not habWares[w]))
+      local own = base[w] ~= nil or lack.wares[w] ~= nil or (target.fullCycle and (target.selfSufficient or not habWares[w]))
       if own then demand[w] = (demand[w] or 0) + math.max(0, r - surplusOf(w)) end
     end
     local next = {}
@@ -599,12 +716,13 @@ local function makes(cat, macro, ware)
 end
 
 
--- The current hourly balance of a ware on an existing station, workforce use included, plus what the open
--- build menu's plan still has to build (planned entries and modules under construction) at the station's
--- live workforce fraction and sunlight; modules: the station's modules making the ware, planned ones included.
+-- The current hourly balance of a ware on an existing station at nominal rates (a waiting module counts),
+-- workforce use included, plus what the open build menu's plan still has to build (planned entries and modules
+-- under construction) at the station's live workforce fraction and sunlight; modules: the station's modules
+-- making the ware, planned ones included.
 function planner.Current(station, ware)
-  local production = tonumber(C.GetContainerWareProduction(station, ware, false)) or 0
-  local consumption = (tonumber(C.GetContainerWareConsumption(station, ware, false)) or 0) + (Helper.getWorkforceConsumption(station, ware) or 0)
+  local production = tonumber(C.GetContainerWareProduction(station, ware, true)) or 0
+  local consumption = (tonumber(C.GetContainerWareConsumption(station, ware, true)) or 0) + (Helper.getWorkforceConsumption(station, ware) or 0)
   local pending, modules = 0, 0
   local menu = sab.menu
   if menu and menu.shown and menu.holomap ~= 0 and menu.container == station then

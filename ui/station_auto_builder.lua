@@ -2347,10 +2347,9 @@ sab.tab = "target"
 -- the panel opens as its title bar only
 sab.expanded = false
 -- goals: the added targets; new: the editor of the next one. Its ware and build module and the race are
--- filled from the catalogue on the first panel build (targetChoices)
+-- filled from the catalogue on the first panel build (targetChoices). station: the station it was derived for.
 local function defaultTarget()
-  return { goals = {}, new = { kind = "ware" }, fullCycle = false, workforce = true, selfSufficient = false,
-    docking = "high", dense = false }
+  return { goals = {}, new = { kind = "ware" }, fullCycle = false, workforce = true, selfSufficient = false, dense = false }
 end
 sab.target = defaultTarget()
 -- the goal list shows at most this many rows before it scrolls
@@ -2471,10 +2470,29 @@ local function baysOf(ctx, macro)
   return sab.planner.ModuleCount(ctx.station, macro)
 end
 
+-- The form's target: derived from the panel's station when the panel first shows on it, again once the build
+-- menu has loaded the station's plan; the empty one on a spot or after Reset without a station.
+local function formTarget(ctx)
+  local t = sab.target
+  local planRead = ctx.station ~= nil and sab.menu.holomap ~= 0
+  if t.station == ctx.station and (t.planRead or not planRead) then return t end
+  t = defaultTarget()
+  t.station, t.planRead = ctx.station, planRead
+  if ctx.station then
+    local d = sab.planner.Derive(ctx.station, ctx.set)
+    t.goals, t.fullCycle, t.workforce, t.selfSufficient, t.race = d.goals, d.fullCycle, d.workforce, d.selfSufficient, d.race
+    if d.goals[1] then t.new.kind = d.goals[1].kind end
+    sab.Debug("target derived for %s: %d goals, full cycle %s, workforce %s, self-sufficient %s, race %s", tostring(ctx.station), #d.goals,
+      tostring(d.fullCycle), tostring(d.workforce), tostring(d.selfSufficient), tostring(d.race))
+  end
+  sab.target = t
+  return t
+end
+
 -- A ware goal's modules are modules of net output, beyond what the station and the other goals consume; a
 -- ship goal's bays count the station's own. The plan adds the difference; the spec keeps the form's order.
 function sab.TargetSpec(ctx)
-  local t = sab.target
+  local t = formTarget(ctx)
   -- a run before the form was ever built (eval, a collapsed panel) still needs the race
   if not t.race then targetChoices(sab.planner.Catalogue(ctx.set, true)) end
   local goals = {}
@@ -2487,7 +2505,7 @@ function sab.TargetSpec(ctx)
   end
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
-    race = t.race, docking = t.docking, dense = t.dense }
+    race = t.race, dense = t.dense }
 end
 
 function sab.RunTarget()
@@ -2653,12 +2671,12 @@ local function goalText(g, i, ok, plan, cat, ctx)
 end
 
 -- The target form from y down in three tables: the added goals (one slider row each, its text the goal, its
--- value the count, 0 removes it; scrolls past MAX_GOAL_ROWS), the editor of the next goal with the shared
+-- value the count from the station's own up, released there it is removed; scrolls past MAX_GOAL_ROWS), the editor of the next goal with the shared
 -- settings and `extraRows(kit)` (never scrolls), the planned bill and balance (scrolls down to `bottom`).
 -- key names the form for its scroll positions. Returns the plan (nil when the planner fails), the next tab
 -- order and the y below the tables.
 local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, ctx, dirty, extraRows, key)
-  local t = sab.target
+  local t = formTarget(ctx)
   local cat = sab.planner.Catalogue(ctx.set, true)
   local choices = targetChoices(cat)
   local ok, plan = pcall(sab.planner.Plan, sab.TargetSpec(ctx))
@@ -2673,17 +2691,19 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
     tabOrder = tabOrder + 1
     for i, g in ipairs(t.goals) do
       local ware = g.kind == "ware"
-      local top = ware and math.floor(extraModules(currentOf(ctx, g.ware)) + 1e-6) + MAX_ADD_MODULES or baysOf(ctx, g.buildMacro) + MAX_BAYS
-      if ware then g.modules = math.min(top, g.modules or 1) else g.bays = math.min(top, g.bays or 1) end
+      -- never below what the station has, built or planned
+      local low = ware and math.max(0, math.floor(extraModules(currentOf(ctx, g.ware)) + 1e-6)) or baysOf(ctx, g.buildMacro)
+      local top = low + (ware and MAX_ADD_MODULES or MAX_BAYS)
+      if ware then g.modules = math.max(low, math.min(top, g.modules or 1)) else g.bays = math.max(low, math.min(top, g.bays or 1)) end
       local row = gtable:addRow(true, {})
-      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 0, minSelect = 0, max = top,
+      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low, max = top,
         start = ware and g.modules or g.bays, step = 1, hideMaxValue = true, active = idle, mouseOverText = ReadText(PAGE, 144) })
           :setText(goalText(g, i, ok, plan, cat, ctx))
       row[1].handlers.onSliderCellChanged = function(_, value)
         if ware then g.modules = value else g.bays = value end
       end
       row[1].handlers.onSliderCellConfirm = function()
-        if (ware and g.modules or g.bays) == 0 then
+        if (ware and g.modules or g.bays) <= low then
           for j, h in ipairs(t.goals) do
             if h == g then table.remove(t.goals, j); break end
           end
@@ -2720,7 +2740,7 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   row[1]:setColSpan(4):createButton({ height = buttonHeight, active = idle and addable and true or false }):setText(ReadText(PAGE, 145), { halign = "center" })
   row[1].handlers.onClick = function()
     -- a new goal starts one module above what the station has: ware modules of net output, or build modules
-    sab.AddGoal(n.kind == "ware" and math.floor(extraModules(currentOf(ctx, n.ware)) + 1e-6) + 1 or baysOf(ctx, n.buildMacro) + 1)
+    sab.AddGoal(n.kind == "ware" and math.max(0, math.floor(extraModules(currentOf(ctx, n.ware)) + 1e-6)) + 1 or baysOf(ctx, n.buildMacro) + 1)
     sab.goalsToEnd = key
     dirty()
   end
@@ -2728,8 +2748,6 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   checkbox(input(ReadText(PAGE, 120)), t.workforce, true, function(v) t.workforce = v end)
   checkbox(input(ReadText(PAGE, 121)), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
   dropdown(input(ReadText(1001, 2428)), choices.races, t.race, function(id) t.race = id end)
-  local dockings = { option("high", ReadText(1001, 7738)), option("mid", ReadText(1001, 7737)), option("low", ReadText(1001, 7736)) }
-  dropdown(input(ReadText(PAGE, 133)), dockings, t.docking or "high", function(id) t.docking = id end)
   -- the grid packs an empty plan only
   local fresh = not ctx.station or (sab.menu.holomap ~= 0 and tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) == 0)
   checkbox(input(ReadText(PAGE, 134)), t.dense, fresh, function(v) t.dense = v end)
@@ -2752,6 +2770,14 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
     row = ptable:addRow(true, {})
     row[1]:createText(tostring(b.count) .. " x", { halign = "right" })
     row[2]:setColSpan(3):createText(cat.byMacro[b.macro].name, {})
+  end
+  if plan.lacks and plan.lacks.any then
+    local names = {}
+    for w in pairs(plan.lacks.wares) do names[#names + 1] = sab.planner.Ware(w).name end
+    table.sort(names)
+    if plan.lacks.workforce > 0 then names[#names + 1] = tostring(ReadText(PAGE, 120)) end
+    row = ptable:addRow(true, {})
+    row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 146)), table.concat(names, ", ")), { wordwrap = true })
   end
   local wares = {}
   for w in pairs(plan.consumed) do
@@ -2975,6 +3001,7 @@ function sab.OpenPlotDialog()
     return
   end
   sab.dialog = { sector = spot.sector, x = spot.x, y = spot.y, z = spot.z, loadout = 1.0, method = "global" }
+  sab.target = defaultTarget()
   sab.dialogDirty = true
 end
 
@@ -3057,6 +3084,8 @@ function sab.ConfirmDialog()
   local buildstorage = ConvertIDTo64Bit(GetComponentData(station, "buildstorage")) or 0
   if buildstorage ~= 0 then C.SetContainerBuildMethod(buildstorage, method) end
   sab.pendingTarget = { station = station, spec = spec, method = buildstorage == 0 and method or nil, since = getElapsedTime() }
+  -- the build menu keeps the dialog's goals for the new station
+  sab.target.station, sab.target.planRead = station, true
   sab.Debug("plot reserved: station %s, %d m, loadout %s, method '%s', build storage %s", tostring(station), size,
     tostring(d.loadout), method, tostring(buildstorage))
   sab.dialog, sab.dialogFrame = nil, nil
@@ -3223,6 +3252,7 @@ local function hookMenu()
   menu.cleanup = function(...)
     sab.run, sab.lastRun, sab.panelDirty, sab.panelTables, sab.panelFrame = nil, nil, nil, nil, nil
     sab.expanded = false
+    sab.target = defaultTarget()
     return cleanup(...)
   end
   local onCloseElement = menu.onCloseElement

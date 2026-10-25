@@ -39,7 +39,6 @@
       <t id="130">New station in %s</t>
       <t id="131">%s, candidate %s of %s</t>
       <t id="132">Turn %s of %s</t>
-      <t id="133">Docking coverage</t>
       <t id="134">Denser packing (slower planning)</t>
       <t id="135">Modules in the plan: %s of %s, failed %s</t>
       <t id="136">Packing layout %s of %s: module %s of %s</t>
@@ -49,8 +48,9 @@
       <t id="140">%s / %s /h</t>
       <t id="142">Plot licence for %s x %s x %s km: %s</t>
       <t id="143">Plot licence declined, nothing placed</t>
-      <t id="144">Release at 0 to remove this target</t>
+      <t id="144">Release at the lowest value to remove this target</t>
       <t id="145">Add a target</t>
+      <t id="146">Covers the station's shortfalls: %s</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>
