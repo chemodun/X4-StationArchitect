@@ -442,11 +442,12 @@ local function rowsAxisAngle(k, c, s)
   return rows
 end
 
--- Rows of the rotation that turns unit vector a onto unit vector b (any axis for a = -b).
+-- Rows of the rotation that turns unit vector a onto unit vector b. Near a = -b the axis comes from a alone,
+-- so engine float noise in b cannot pick it (that flips the roll by 180 deg).
 local function rowsFromTo(a, b)
   local k, c = cross(a, b), dot(a, b)
   local s = math.sqrt(dot(k, k))
-  if s < 1e-6 then
+  if s < 1e-6 or c < -0.999 then
     if c > 0 then return { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } } end
     k = cross(a, math.abs(a[1]) < 0.9 and { 1, 0, 0 } or { 0, 1, 0 })
     s, c = 0, -1
@@ -678,7 +679,7 @@ local SIDES = { front = { 0, 0, -1 }, left = { -1, 0, 0 } }
 -- the engine keeps the whole column above these free (the ships' approach), seen in Lua only as a rejection
 local COLUMN = { "dockarea", "pier" }
 local WING = { pier = "front", dock = "front", storage = "left", habitation = "left", other = "left" }
-local GROUP_CLASSES = { { "production", "production" }, { "processing", "production" }, { "buildmodule", "build" },
+local GROUP_CLASSES = { { "production", "production" }, { "processingmodule", "production" }, { "buildmodule", "build" },
   { "storage", "storage" }, { "habitation", "habitation" }, { "dockarea", "dock" }, { "pier", "pier" } }
 
 local function groupOf(macro)
@@ -2203,7 +2204,7 @@ function sab.StartRun(items, connector, turns, floors, opts)
   sab.run = run
   sab.panelDirty = true
   sab.Debug("run started: %d items, %d entries, %d connections, connector %s, probing %d macros%s", #items, run.n, #run.conns,
-    connector and connector.macro or "none", #run.probeList, floors and ", floor layout" or "")
+    connector and connector.macro or "none", #run.probeList, floors == "grid" and ", grid" or floors and ", floor layout" or "")
   return true
 end
 
