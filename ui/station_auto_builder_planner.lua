@@ -146,6 +146,17 @@ local function entryOf(group, lib, macro)
     workforce = data.maxworkforce or 0, docksS = data.docks_s or 0, docksM = data.docks_m or 0,
     pierDocks = bays and #bays or 0 }
   for _, r in ipairs(races) do e.races[r] = true end
+  if group == "build" then
+    -- the ship sizes the module fabricates (none for a maintenance bay); nil when the Extra Data API cannot tell
+    local classes = ExtraData and ExtraData.GetMacroDataEx(macro, "builderclasses")
+    if classes then
+      e.builds = {}
+      for _, class in ipairs(classes) do
+        local size = class:match("^ship_(%a+)$")
+        if size then e.builds[#e.builds + 1] = size end
+      end
+    end
+  end
   if data.products then
     local cycle = 0
     for _, p in ipairs(data.products) do cycle = cycle + p.cycle end
@@ -271,11 +282,14 @@ end
 
 -- *** targets ***
 
--- Per-ship build resources and build hours averaged over the owned ship blueprints of a size (s, m, l, xl),
+-- Per-ship build resources and build hours averaged over the owned ship blueprints of the sizes (s, m, l, xl),
 -- those of the race when it owns any (Terran hulls need other wares than Commonwealth ones); each ship by
 -- the race's method, else "default", else its first.
-local function shipResources(size, race)
-  local macros, ofRace = blueprints("", "shiptypes_" .. size), {}
+local function shipResources(sizes, race)
+  local macros, ofRace = {}, {}
+  for _, size in ipairs(sizes) do
+    for _, macro in ipairs(blueprints("", "shiptypes_" .. size)) do macros[#macros + 1] = macro end
+  end
   for _, macro in ipairs(macros) do
     local races = GetMacroData(macro, "makerraceid")
     for _, r in ipairs(type(races) == "table" and races or { races }) do
@@ -345,6 +359,16 @@ local function stationMacros(station)
   return macros
 end
 
+-- How many modules of a macro the station has, planned ones included; 0 without a station.
+function planner.ModuleCount(station, macro)
+  if not station then return 0 end
+  local n = 0
+  for _, m in ipairs(stationMacros(station)) do
+    if m == macro then n = n + 1 end
+  end
+  return n
+end
+
 -- The station's pier docks and trade dock areas.
 local function stationDocks(station)
   local pierDocks, areas = 0, 0
@@ -367,10 +391,10 @@ local function goalsOf(target)
 end
 
 -- target = { set, station, goals, fullCycle, workforce, race, selfSufficient, sunlight, docking }, each goal
---   { kind = "ware", ware, rate (net ware amount per hour) or modules } or { kind = "ship", buildMacro (the
---   chosen wharf, shipyard or maintenance bay; the game exposes no size or kind for them), shipSize, repair
---   (no ship resource chain), count (build modules; plan.shipRates[goal index] follows from them) }. A goal
---   ware another goal consumes gets its producers on top of that consumption.
+--   { kind = "ware", ware, rate (net ware amount per hour) or modules } or { kind = "ship", buildMacro, count
+--   (build modules to add) }. A fabrication bay builds the ship sizes its builder classes name (shipSize
+--   overrides), a maintenance bay none (repair forces that); plan.shipRates and plan.shipHours per goal index.
+--   A goal ware another goal consumes gets its producers on top of that consumption.
 --   The result carries counts per macro, the ware balance, the workforce and the warnings; Bill() turns it
 --   into StartBill's list.
 function planner.Plan(target)
@@ -384,7 +408,7 @@ function planner.Plan(target)
   sunlight = sunlight or 1
   local plan = { target = target, set = set, sunlight = sunlight, counts = {}, warnings = {}, produced = {},
     consumed = {}, workforce = 0, workforceCapacity = 0, workforceFraction = 0, storage = {}, flow = { import = 0, export = 0 },
-    shipRates = {}, adds = false }
+    shipRates = {}, shipHours = {}, adds = false }
   local counts = plan.counts
   local function warn(fmt, ...) plan.warnings[#plan.warnings + 1] = string.format(fmt, ...) end
   if not (ExtraData and ExtraData.Available()) then
@@ -397,20 +421,22 @@ function planner.Plan(target)
   -- the station itself takes (ship building)
   local baseRate, moduleGoals, use, habWares, fixedWorkforce = {}, {}, {}, {}, 0
   ---@type table<string, any[]>
-  local bySize = {}
+  local bySizes = {}
   for i, goal in ipairs(goalsOf(target)) do
     if goal.kind == "ship" then
       local e = goal.buildMacro and cat.byMacro[goal.buildMacro]
       local bays = goal.count or 1
       if bays > 0 then plan.adds = true end
-      if not goal.repair then
+      local sizes = goal.repair and {} or (goal.shipSize and { goal.shipSize }) or (e and e.builds)
+      if e and not sizes then warn("build module kind unknown (Extra Data API): %s planned without ships", e.name) end
+      if sizes and #sizes > 0 then
         -- one ship per bay at a time
-        local size = goal.shipSize or "m"
-        bySize[size] = bySize[size] or { shipResources(size, race) }
-        local perShip, ships, hours = bySize[size][1], bySize[size][2], bySize[size][3]
-        if ships == 0 then warn("no owned %s ship blueprint", tostring(size)) end
+        local id = table.concat(sizes, " ")
+        bySizes[id] = bySizes[id] or { shipResources(sizes, race) }
+        local perShip, ships, hours = bySizes[id][1], bySizes[id][2], bySizes[id][3]
+        if ships == 0 then warn("no owned %s ship blueprint", id) end
         local shipRate = hours > 0 and bays / hours or 0
-        plan.shipRates[i] = shipRate
+        plan.shipRates[i], plan.shipHours[i] = shipRate, hours
         for w, amount in pairs(perShip) do use[w] = (use[w] or 0) + amount * shipRate end
       end
       if e then
@@ -430,6 +456,8 @@ function planner.Plan(target)
       end
     end
   end
+  -- no goal or every goal met: nothing to plan, not even the base docks
+  if not plan.adds then return plan end
   local base = {}
 
   -- an existing station's surplus (built, building and planned modules alike) covers new consumption first;

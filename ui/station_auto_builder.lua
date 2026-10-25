@@ -2345,15 +2345,18 @@ sab.panelDirty = nil
 sab.tab = "target"
 -- the panel opens as its title bar only
 sab.expanded = false
--- ware, build module and race are filled from the catalogue on the first panel build (targetChoices)
-local function defaultGoal()
-  return { kind = "ware", modules = 1, bays = 1, shipSize = "m" }
-end
+-- goals: the added targets; new: the editor of the next one. Its ware and build module and the race are
+-- filled from the catalogue on the first panel build (targetChoices)
 local function defaultTarget()
-  return { goals = { defaultGoal() }, fullCycle = false, workforce = true, selfSufficient = false, docking = "high", dense = false }
+  return { goals = {}, new = { kind = "ware" }, fullCycle = false, workforce = true, selfSufficient = false,
+    docking = "high", dense = false }
 end
 sab.target = defaultTarget()
--- slider tops: producer modules a ware target adds, build modules of a ship or repair target
+-- the goal list shows at most this many rows before it scrolls
+local MAX_GOAL_ROWS = 5
+-- top rows of the scrolling target tables per form, kept over rebuilds
+sab.topRows = {}
+-- slider tops above what the station has: producer modules of a ware target, build modules of a ship target
 local MAX_ADD_MODULES = 100
 local MAX_BAYS = 10
 -- placements per frame; 1 keeps the dragged float, more drop undragged floats in the same frame
@@ -2365,12 +2368,23 @@ function sab.ResetTarget()
   sab.panelDirty = true
 end
 
-function sab.AddGoal()
-  table.insert(sab.target.goals, defaultGoal())
+-- the goal the editor would add equals an added one (same ware, or same build module)
+local function goalTaken(n)
+  for _, g in ipairs(sab.target.goals) do
+    if g.kind == n.kind and (n.kind == "ware" and g.ware == n.ware or n.kind == "ship" and g.buildMacro == n.buildMacro) then
+      return true
+    end
+  end
+  return false
 end
 
-function sab.RemoveGoal(i)
-  if #sab.target.goals > 1 then table.remove(sab.target.goals, i) end
+-- count: the wanted modules of net output (ware) or build modules (ship), one above what the station has
+function sab.AddGoal(count)
+  local n = sab.target.new
+  if goalTaken(n) then return end
+  local ware = n.kind == "ware"
+  table.insert(sab.target.goals, { kind = n.kind, ware = ware and n.ware or nil, buildMacro = not ware and n.buildMacro or nil,
+    modules = ware and (count or 1) or nil, bays = not ware and (count or 1) or nil })
 end
 -- the map dialog (07c): the last right-clicked sector spot, the open dialog, the target handed to the next build menu
 sab.lastSpot = nil
@@ -2399,35 +2413,38 @@ local function targetChoices(cat)
     end
   end
   local builds = {}
-  for _, e in ipairs(cat.build) do builds[#builds + 1] = option(e.macro, e.name) end
+  for _, e in ipairs(cat.build) do
+    if not goalTaken({ kind = "ship", buildMacro = e.macro }) then builds[#builds + 1] = option(e.macro, e.name) end
+  end
   local habitats, races = {}, {}
   for _, e in ipairs(cat.habitation) do habitats[e.race] = (habitats[e.race] or 0) + 1 end
   for _, r in ipairs(GetLibrary("races")) do
     if habitats[r.id] then races[#races + 1] = option(r.id, r.name) end
   end
   sortedByText(wares); sortedByText(builds); sortedByText(races)
-  -- a goal's ware defaults to the first one no other goal takes
+  -- the editor offers the wares no added goal takes
   local taken = {}
   for _, g in ipairs(t.goals) do
-    if seen[g.ware] and not taken[g.ware] then taken[g.ware] = true else g.ware = nil end
+    if g.kind == "ware" and g.ware then taken[g.ware] = true end
   end
-  for _, g in ipairs(t.goals) do
-    if not g.ware then
-      for _, w in ipairs(wares) do
-        if not taken[w.id] then g.ware = w.id; break end
-      end
-      g.ware = g.ware or (wares[1] and wares[1].id)
-      if g.ware then taken[g.ware] = true end
-    end
-    if not (g.buildMacro and cat.byMacro[g.buildMacro]) then g.buildMacro = builds[1] and builds[1].id end
+  local free = {}
+  for _, w in ipairs(wares) do
+    if not taken[w.id] then free[#free + 1] = w end
   end
+  local new = t.new
+  if not (seen[new.ware] and not taken[new.ware]) then new.ware = free[1] and free[1].id end
+  if not (new.buildMacro and cat.byMacro[new.buildMacro] and not goalTaken({ kind = "ship", buildMacro = new.buildMacro })) then
+    new.buildMacro = builds[1] and builds[1].id
+  end
+  -- one kind of target per station: the first added goal fixes it
+  if t.goals[1] then new.kind = t.goals[1].kind end
   if not habitats[t.race] then
     local best = 0
     for race, n in pairs(habitats) do
       if n > best then t.race, best = race, n end
     end
   end
-  return { wares = wares, builds = builds, races = races }
+  return { wares = free, builds = builds, races = races }
 end
 
 -- Where a target is planned: the build menu's station, or a sector spot before the station exists.
@@ -2448,20 +2465,23 @@ local function extraModules(current)
   return current.net * current.modules / current.production
 end
 
--- A ware goal's modules are modules of net output, beyond what the station and the other goals consume; the
--- plan adds the difference. The spec's goals keep the form's order.
+-- The build modules of a macro the station has, planned ones included.
+local function baysOf(ctx, macro)
+  return sab.planner.ModuleCount(ctx.station, macro)
+end
+
+-- A ware goal's modules are modules of net output, beyond what the station and the other goals consume; a
+-- ship goal's bays count the station's own. The plan adds the difference; the spec keeps the form's order.
 function sab.TargetSpec(ctx)
   local t = sab.target
-  -- a run before the form was ever built (eval, a collapsed panel) still needs the defaults
-  local ready = t.race ~= nil
-  for _, g in ipairs(t.goals) do ready = ready and g.ware ~= nil and g.buildMacro ~= nil end
-  if not ready then targetChoices(sab.planner.Catalogue(ctx.set, true)) end
+  -- a run before the form was ever built (eval, a collapsed panel) still needs the race
+  if not t.race then targetChoices(sab.planner.Catalogue(ctx.set, true)) end
   local goals = {}
   for _, g in ipairs(t.goals) do
     if g.kind == "ware" then
       goals[#goals + 1] = { kind = "ware", ware = g.ware, modules = math.max(0, (g.modules or 1) - extraModules(currentOf(ctx, g.ware))) }
     else
-      goals[#goals + 1] = { kind = "ship", repair = g.kind == "repair", buildMacro = g.buildMacro, shipSize = g.shipSize, count = g.bays }
+      goals[#goals + 1] = { kind = "ship", buildMacro = g.buildMacro, count = math.max(0, (g.bays or 1) - baysOf(ctx, g.buildMacro)) }
     end
   end
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals,
@@ -2582,8 +2602,8 @@ local function rowKit(ftable, idle, buttonHeight, dirty)
     row[1]:createText(label, { minRowHeight = buttonHeight })
     return row
   end
-  function kit.dropdown(row, options, current, onChange, span)
-    row[2]:setColSpan(span or 3):createDropDown(options, { startOption = current or "", height = buttonHeight, active = idle and #options > 0 })
+  function kit.dropdown(row, options, current, onChange, active)
+    row[2]:setColSpan(3):createDropDown(options, { startOption = current or "", height = buttonHeight, active = idle and #options > 0 and active ~= false })
     row[2].handlers.onDropDownConfirmed = function(_, id)
       if id ~= current then onChange(id); dirty() end
     end
@@ -2595,78 +2615,114 @@ local function rowKit(ftable, idle, buttonHeight, dirty)
   return kit
 end
 
--- The target form: the inputs, `extraRows(kit)` if given, then the planned bill and balance as a preview;
--- the plan is recomputed on every rebuild and returned (nil when the planner fails).
-local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
+-- A 4-column form table: label, wide input, a narrow column, a checkbox column; scrolls above maxHeight.
+local function formTable(frame, tabOrder, y, buttonHeight, maxHeight)
+  local ftable = frame:addTable(4, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = y, maxVisibleHeight = maxHeight })
+  ftable:setColWidthPercent(1, 30)
+  ftable:setColWidth(3, Helper.scaleX(50), false)
+  ftable:setColWidth(4, Helper.scaleY(buttonHeight), false)
+  return ftable
+end
+
+-- The scroll positions of a form's goal and plan tables, read before its frame is rebuilt.
+local function saveTopRows(key)
+  local tables = sab.formTables and sab.formTables[key]
+  if not tables then return end
+  local tops = {}
+  for name, ftable in pairs(tables) do
+    if ftable.id then tops[name] = GetTopRow(ftable.id) end
+  end
+  sab.topRows[key] = tops
+end
+
+-- The goal's slider text: the ware with its net now and planned, a fabrication bay with its ships per hour
+-- now and planned, a maintenance bay by its name.
+local function goalText(g, i, ok, plan, cat, ctx)
+  if g.kind == "ware" then
+    local current = currentOf(ctx, g.ware)
+    local planned = ok and current.net + (plan.produced[g.ware] or 0) - (plan.consumed[g.ware] or 0) or current.net
+    return sab.planner.Ware(g.ware).name .. ": " .. string.format(tostring(ReadText(PAGE, 140)), string.format("%+d", math.floor(current.net + 0.5)),
+      string.format("%+d", math.floor(planned + 0.5)))
+  end
+  local name = cat.byMacro[g.buildMacro] and cat.byMacro[g.buildMacro].name or tostring(g.buildMacro)
+  local hours = ok and plan.shipHours[i]
+  if not (hours and hours > 0) then return name end
+  local now = baysOf(ctx, g.buildMacro) / hours
+  return name .. ": " .. string.format(tostring(ReadText(PAGE, 140)), string.format("%.1f", now), string.format("%.1f", now + plan.shipRates[i]))
+end
+
+-- The target form from y down in three tables: the added goals (one slider row each, its text the goal, its
+-- value the count, 0 removes it; scrolls past MAX_GOAL_ROWS), the editor of the next goal with the shared
+-- settings and `extraRows(kit)` (never scrolls), the planned bill and balance (scrolls down to `bottom`).
+-- key names the form for its scroll positions. Returns the plan (nil when the planner fails), the next tab
+-- order and the y below the tables.
+local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, ctx, dirty, extraRows, key)
   local t = sab.target
   local cat = sab.planner.Catalogue(ctx.set, true)
   local choices = targetChoices(cat)
+  local ok, plan = pcall(sab.planner.Plan, sab.TargetSpec(ctx))
+  local tops = sab.topRows[key] or {}
+  local tables = {}
+  sab.formTables = sab.formTables or {}
+  sab.formTables[key] = tables
+
+  if #t.goals > 0 then
+    local rowHeight = Helper.scaleY(buttonHeight) + Helper.borderSize
+    local gtable = formTable(frame, tabOrder, y, buttonHeight, MAX_GOAL_ROWS * rowHeight)
+    tabOrder = tabOrder + 1
+    for i, g in ipairs(t.goals) do
+      local ware = g.kind == "ware"
+      local top = ware and math.floor(extraModules(currentOf(ctx, g.ware)) + 1e-6) + MAX_ADD_MODULES or baysOf(ctx, g.buildMacro) + MAX_BAYS
+      if ware then g.modules = math.min(top, g.modules or 1) else g.bays = math.min(top, g.bays or 1) end
+      local row = gtable:addRow(true, {})
+      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 0, minSelect = 0, max = top,
+        start = ware and g.modules or g.bays, step = 1, hideMaxValue = true, active = idle, mouseOverText = ReadText(PAGE, 144) })
+          :setText(goalText(g, i, ok, plan, cat, ctx))
+      row[1].handlers.onSliderCellChanged = function(_, value)
+        if ware then g.modules = value else g.bays = value end
+      end
+      row[1].handlers.onSliderCellConfirm = function()
+        if (ware and g.modules or g.bays) == 0 then
+          for j, h in ipairs(t.goals) do
+            if h == g then table.remove(t.goals, j); break end
+          end
+        end
+        dirty()
+      end
+    end
+    -- a goal just added shows at the bottom
+    if sab.goalsToEnd == key then
+      sab.goalsToEnd = nil
+      gtable:setTopRow(math.max(1, #t.goals - MAX_GOAL_ROWS + 1))
+    elseif tops.goals then
+      gtable:setTopRow(tops.goals)
+    end
+    tables.goals = gtable
+    y = gtable.properties.y + gtable:getVisibleHeight() + Helper.borderSize
+  end
+
+  local ftable = formTable(frame, tabOrder, y, buttonHeight)
+  tabOrder = tabOrder + 1
   local kit = rowKit(ftable, idle, buttonHeight, dirty)
   local input, dropdown, checkbox = kit.input, kit.dropdown, kit.checkbox
-  -- per ware goal: the station's balance and the slider range
-  local currents, lows = {}, {}
-  for i, g in ipairs(t.goals) do
-    if g.kind == "ware" then
-      currents[i] = currentOf(ctx, g.ware)
-      lows[i] = math.max(1, math.floor(extraModules(currents[i]) + 1e-6))
-      g.modules = math.max(lows[i], math.min(lows[i] + MAX_ADD_MODULES, g.modules or 1))
-    else
-      g.bays = math.max(1, math.min(MAX_BAYS, g.bays or 1))
-    end
+  local n = t.new
+  local kinds = { option("ware", ReadText(PAGE, 111)), option("ship", ReadText(PAGE, 112)) }
+  -- the first added goal fixes the kind
+  dropdown(input(ReadText(PAGE, 109)), kinds, n.kind, function(id) n.kind = id end, t.goals[1] == nil)
+  if n.kind == "ware" then
+    dropdown(input(ReadText(PAGE, 114)), choices.wares, n.ware, function(id) n.ware = id end)
+  else
+    dropdown(input(ReadText(PAGE, 117)), choices.builds, n.buildMacro, function(id) n.buildMacro = id end)
   end
-  local ok, plan = pcall(sab.planner.Plan, sab.TargetSpec(ctx))
-
-  local kinds = { option("ware", ReadText(PAGE, 111)), option("ship", ReadText(PAGE, 112)), option("repair", ReadText(PAGE, 113)) }
-  local several = #t.goals > 1
-  for i, g in ipairs(t.goals) do
-    local row = input(several and string.format(tostring(ReadText(PAGE, 144)), i) or ReadText(PAGE, 109))
-    dropdown(row, kinds, g.kind, function(id) g.kind = id end, several and 2 or 3)
-    if several then
-      row[4]:createButton({ height = buttonHeight, width = buttonHeight, active = idle, mouseOverText = ReadText(1001, 6702) }):setText("X", { halign = "center" })
-      row[4].handlers.onClick = function() sab.RemoveGoal(i); dirty() end
-    end
-    local current = currents[i]
-    if current then
-      -- one goal per ware: the others' wares are not offered
-      local wares = {}
-      for _, o in ipairs(choices.wares) do
-        local other = false
-        for j, h in ipairs(t.goals) do
-          if j ~= i and h.kind == "ware" and h.ware == o.id then other = true end
-        end
-        if not other then wares[#wares + 1] = o end
-      end
-      dropdown(input(ReadText(PAGE, 114)), wares, g.ware, function(id) g.ware = id end)
-      input(ReadText(PAGE, 116))
-      local low, top = lows[i], lows[i] + MAX_ADD_MODULES
-      row = ftable:addRow(true, {})
-      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low,
-        max = top, start = g.modules, step = 1, active = idle })
-      row[1].handlers.onSliderCellChanged = function(_, value) g.modules = value end
-      row[1].handlers.onSliderCellConfirm = dirty
-      local planned = ok and current.net + (plan.produced[g.ware] or 0) - (plan.consumed[g.ware] or 0) or current.net
-      row = input(ReadText(PAGE, 115))
-      row[2]:setColSpan(3):createText(string.format(tostring(ReadText(PAGE, 140)), string.format("%+d", math.floor(current.net + 0.5)),
-        string.format("%+d", math.floor(planned + 0.5))), { halign = "right", minRowHeight = buttonHeight })
-    else
-      dropdown(input(ReadText(PAGE, 117)), choices.builds, g.buildMacro, function(id) g.buildMacro = id end)
-      input(ReadText(1001, 2439))
-      row = ftable:addRow(true, {})
-      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1,
-        max = MAX_BAYS, start = g.bays, step = 1, active = idle })
-      row[1].handlers.onSliderCellChanged = function(_, value) g.bays = value end
-      row[1].handlers.onSliderCellConfirm = dirty
-      if g.kind == "ship" then
-        local sizes = { option("s", "S"), option("m", "M"), option("l", "L"), option("xl", "XL") }
-        dropdown(input(ReadText(1001, 9648)), sizes, g.shipSize, function(id) g.shipSize = id end)
-        row = input(ReadText(PAGE, 118))
-        row[2]:setColSpan(3):createText(ok and string.format("%.1f", plan.shipRates[i] or 0) or "", { halign = "right", minRowHeight = buttonHeight })
-      end
-    end
+  local addable = (n.kind == "ware" and n.ware or n.kind == "ship" and n.buildMacro) and not goalTaken(n)
+  local row = ftable:addRow(true, {})
+  row[1]:setColSpan(4):createButton({ height = buttonHeight, active = idle and addable and true or false }):setText(ReadText(PAGE, 145), { halign = "center" })
+  row[1].handlers.onClick = function()
+    -- a new goal starts one module above what the station has: ware modules of net output, or build modules
+    sab.AddGoal(n.kind == "ware" and math.floor(extraModules(currentOf(ctx, n.ware)) + 1e-6) + 1 or baysOf(ctx, n.buildMacro) + 1)
+    sab.goalsToEnd = key
+    dirty()
   end
-  local addRow = ftable:addRow(true, {})
-  addRow[1]:setColSpan(4):createButton({ height = buttonHeight, active = idle }):setText(ReadText(PAGE, 145), { halign = "center" })
-  addRow[1].handlers.onClick = function() sab.AddGoal(); dirty() end
   checkbox(input(ReadText(PAGE, 119)), t.fullCycle, true, function(v) t.fullCycle = v end)
   checkbox(input(ReadText(PAGE, 120)), t.workforce, true, function(v) t.workforce = v end)
   checkbox(input(ReadText(PAGE, 121)), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
@@ -2677,16 +2733,22 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
   local fresh = not ctx.station or (sab.menu.holomap ~= 0 and tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) == 0)
   checkbox(input(ReadText(PAGE, 134)), t.dense, fresh, function(v) t.dense = v end)
   if extraRows then extraRows(kit) end
+  y = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize
 
-  local header = ftable:addRow(false, {})
+  -- at least three rows of the plan stay in view
+  local minHeight = 3 * (Helper.scaleY(Helper.standardTextHeight) + Helper.borderSize)
+  local ptable = formTable(frame, tabOrder, y, buttonHeight, math.max(minHeight, bottom - y))
+  tabOrder = tabOrder + 1
+  tables.planned = ptable
+  local header = ptable:addRow(false, { fixed = true })
   header[1]:setColSpan(4):createText(ReadText(PAGE, 122), Helper.subHeaderTextProperties)
   if not ok then
-    local row = ftable:addRow(true, {})
+    row = ptable:addRow(true, {})
     row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 125)), tostring(plan)), { color = Color["text_warning"] })
-    return nil
+    return nil, tabOrder, ptable.properties.y + ptable:getVisibleHeight() + Helper.borderSize
   end
   for _, b in ipairs(sab.planner.Bill(plan)) do
-    local row = ftable:addRow(true, {})
+    row = ptable:addRow(true, {})
     row[1]:createText(tostring(b.count) .. " x", { halign = "right" })
     row[2]:setColSpan(3):createText(cat.byMacro[b.macro].name, {})
   end
@@ -2696,18 +2758,21 @@ local function addTargetRows(ftable, idle, buttonHeight, ctx, dirty, extraRows)
   end
   table.sort(wares, function(a, b) return sab.planner.Ware(a).name < sab.planner.Ware(b).name end)
   for _, w in ipairs(wares) do
-    local row = ftable:addRow(true, {})
+    row = ptable:addRow(true, {})
     row[1]:setColSpan(2):createText(sab.planner.Ware(w).name, {})
     row[3]:setColSpan(2):createText(string.format(tostring(ReadText(PAGE, 123)), string.format("%+d", (plan.produced[w] or 0) - plan.consumed[w])), { halign = "right" })
   end
-  local row = ftable:addRow(true, {})
-  row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 124)), plan.workforce, plan.workforceCapacity,
-    math.floor(plan.flow.import), math.floor(plan.flow.export)), {})
+  if plan.adds then
+    row = ptable:addRow(true, {})
+    row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 124)), plan.workforce, plan.workforceCapacity,
+      math.floor(plan.flow.import), math.floor(plan.flow.export)), {})
+  end
   for _, warning in ipairs(plan.warnings) do
-    row = ftable:addRow(true, {})
+    row = ptable:addRow(true, {})
     row[1]:setColSpan(4):createText(warning, { color = Color["text_warning"] })
   end
-  return plan
+  if tops.planned then ptable:setTopRow(tops.planned) end
+  return plan, tabOrder, ptable.properties.y + ptable:getVisibleHeight() + Helper.borderSize
 end
 
 -- The Bill tab: the manual rows.
@@ -2750,6 +2815,7 @@ end
 function sab.DisplayPanel()
   local menu = sab.menu
   if not (menu.shown and menu.titleData and menu.titleData.width) then return end
+  saveTopRows("panel")
   Helper.clearDataForRefresh(menu, PANEL_LAYER)
   local idle = sab.run == nil
   local buttonHeight = Helper.standardButtonHeight
@@ -2812,24 +2878,23 @@ function sab.DisplayPanel()
   end
   local contentY = head.properties.y + head:getVisibleHeight() + Helper.borderSize
 
-  local canAdd, plan = false, nil
+  local canAdd, plan, tabOrder = false, nil, 2
   if idle then
-    -- the button table below needs two rows of the view
-    local ftable = frame:addTable(4, { tabOrder = 2, highlightMode = "off", reserveScrollBar = false, y = contentY,
-      maxVisibleHeight = Helper.viewHeight - y - contentY - Helper.frameBorder - Helper.scaleY(3 * buttonHeight) })
-    ftable:setColWidthPercent(1, 30)
-    ftable:setColWidth(3, Helper.scaleX(50), false)
-    ftable:setColWidth(4, Helper.scaleY(buttonHeight), false)
+    -- the button table below needs three rows of the view
+    local bottom = Helper.viewHeight - y - Helper.frameBorder - Helper.scaleY(3 * buttonHeight)
     if target then
-      plan = addTargetRows(ftable, idle, buttonHeight, sab.PanelContext(), function() sab.panelDirty = true end)
+      plan, tabOrder, contentY = addTargetTables(frame, tabOrder, contentY, bottom, idle, buttonHeight, sab.PanelContext(),
+        function() sab.panelDirty = true end, nil, "panel")
     else
+      local ftable = formTable(frame, tabOrder, contentY, buttonHeight, bottom - contentY)
+      tabOrder = tabOrder + 1
       canAdd = addBillRows(ftable, idle, buttonHeight)
+      contentY = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize
     end
-    contentY = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize
   end
 
   local canOptimize = idle and sab.CanOptimizePlot()
-  local btable = frame:addTable(4, { tabOrder = 3, highlightMode = "off", reserveScrollBar = false, y = contentY })
+  local btable = frame:addTable(4, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = contentY })
   local row
   local offer = sab.run and sab.run.phase == "confirm" and sab.run.offer
   if offer then
@@ -2920,6 +2985,7 @@ end
 function sab.DisplayDialog()
   local menu, d = sab.mapMenu, sab.dialog
   if not (d and menu.shown) then return end
+  saveTopRows("dialog")
   Helper.clearDataForRefresh(menu, DIALOG_LAYER)
   local buttonHeight = Helper.standardButtonHeight
   local width = math.floor(Helper.viewWidth * 0.3)
@@ -2932,31 +2998,28 @@ function sab.DisplayDialog()
   sab.dialogFrame = frame
   local function dirty() sab.dialogDirty = true end
 
-  local ftable = frame:addTable(4, { tabOrder = 1, highlightMode = "off", reserveScrollBar = false,
-    maxVisibleHeight = Helper.viewHeight - y - Helper.frameBorder - Helper.scaleY(2 * buttonHeight) })
-  ftable:setColWidthPercent(1, 30)
-  ftable:setColWidth(3, Helper.scaleX(50), false)
-  ftable:setColWidth(4, Helper.scaleY(buttonHeight), false)
-  local title = ftable:addRow(false, { fixed = true, bgColor = Color["row_title_background"] })
-  title[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 130)), tostring(GetComponentData(d.sector, "name"))), Helper.headerRowCenteredProperties)
+  local ttable = frame:addTable(1, { tabOrder = 1, highlightMode = "off", reserveScrollBar = false })
+  local title = ttable:addRow(false, { bgColor = Color["row_title_background"] })
+  title[1]:createText(string.format(tostring(ReadText(PAGE, 130)), tostring(GetComponentData(d.sector, "name"))), Helper.headerRowCenteredProperties)
 
-  local plan = addTargetRows(ftable, true, buttonHeight, dialogContext(d), dirty, function(kit)
-    local loadouts = {}
-    for _, l in ipairs(LOADOUTS) do loadouts[#loadouts + 1] = option(l[1], ReadText(1001, l[2])) end
-    kit.dropdown(kit.input(ReadText(1001, 7967)), loadouts, d.loadout, function(id) d.loadout = tonumber(id) end)
-    kit.dropdown(kit.input(ReadText(1001, 11298)), buildMethodOptions(), d.method, function(id) d.method = id end)
-  end)
+  -- the error and button rows below need three rows of the view
+  local bottom = Helper.viewHeight - y - Helper.frameBorder - Helper.scaleY(3 * buttonHeight)
+  local plan, tabOrder, nextY = addTargetTables(frame, 2, ttable.properties.y + ttable:getVisibleHeight() + Helper.borderSize, bottom, true,
+    buttonHeight, dialogContext(d), dirty, function(kit)
+      local loadouts = {}
+      for _, l in ipairs(LOADOUTS) do loadouts[#loadouts + 1] = option(l[1], ReadText(1001, l[2])) end
+      kit.dropdown(kit.input(ReadText(1001, 7967)), loadouts, d.loadout, function(id) d.loadout = tonumber(id) end)
+      kit.dropdown(kit.input(ReadText(1001, 11298)), buildMethodOptions(), d.method, function(id) d.method = id end)
+    end, "dialog")
 
+  local btable = frame:addTable(2, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = nextY })
   local row
   if d.error then
-    row = ftable:addRow(true, {})
-    row[1]:setColSpan(4):createText(d.error, { color = Color["text_warning"] })
+    row = btable:addRow(true, {})
+    row[1]:setColSpan(2):createText(d.error, { color = Color["text_warning"] })
   end
-
-  local btable = frame:addTable(2, { tabOrder = 2, highlightMode = "off", reserveScrollBar = false,
-    y = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize })
   row = btable:addRow(true, {})
-  row[1]:createButton({ height = buttonHeight, active = plan ~= nil }):setText(ReadText(1001, 14), { halign = "center" })
+  row[1]:createButton({ height = buttonHeight, active = plan ~= nil and plan.adds }):setText(ReadText(1001, 14), { halign = "center" })
   row[1].handlers.onClick = sab.ConfirmDialog
   row[2]:createButton({ height = buttonHeight }):setText(ReadText(1001, 64), { halign = "center" })
   row[2].handlers.onClick = sab.CloseDialog

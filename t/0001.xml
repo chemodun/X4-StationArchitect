@@ -19,8 +19,7 @@
       <t id="109">Target</t>
       <t id="110">Bill</t>
       <t id="111">Produce a ware</t>
-      <t id="112">Build ships</t>
-      <t id="113">Maintain ships</t>
+      <t id="112">Build or maintain ships</t>
       <t id="114">Ware</t>
       <t id="115">Net, now / planned</t>
       <t id="116">Production modules</t>
@@ -50,7 +49,7 @@
       <t id="140">%s / %s /h</t>
       <t id="142">Plot licence for %s x %s x %s km: %s</t>
       <t id="143">Plot licence declined, nothing placed</t>
-      <t id="144">Target %s</t>
+      <t id="144">Release at 0 to remove this target</t>
       <t id="145">Add a target</t>
 
       <!-- Section: Station Auto Builder (90000) -->
