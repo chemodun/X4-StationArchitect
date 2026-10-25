@@ -54,8 +54,9 @@
       <t id="147">The layout needs %s km, above the %s km plot limit: nothing placed</t>
       <t id="148">Storage, hours of flow</t>
       <t id="149">Workforce race</t>
-      <t id="150">Module race</t>
+      <t id="150">Modules race</t>
       <t id="151">Any</t>
+      <t id="152">Selected targets: %s</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Station Auto Builder</t>

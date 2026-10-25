@@ -2105,9 +2105,10 @@ local function goalText(g, i, ok, plan, cat, ctx)
   return name .. ": " .. string.format(tostring(ReadText(PAGE, 140)), string.format("%.1f", now), string.format("%.1f", now + plan.shipRates[i]))
 end
 
--- The target form from y down in three tables: the added goals (one slider row each, its text the goal, its
--- value the count from the station's own up, released there it is removed; scrolls past MAX_GOAL_ROWS), the editor of the next goal with the shared
--- settings and `extraRows(kit)` (never scrolls), the planned bill and balance (scrolls down to `bottom`).
+-- The target form from y down: the editor of the next goal with its Add button, the added goals under their
+-- header (one slider row each, its text the goal, its value the count from the station's own up, released there
+-- it is removed; scrolls past MAX_GOAL_ROWS), the shared settings and `extraRows(kit)` (never scroll), the
+-- planned bill and balance (scroll down to `bottom`).
 -- key names the form for its scroll positions. Returns the plan (nil when the planner fails), the next tab
 -- order and the y below the tables.
 local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, ctx, dirty, extraRows, key)
@@ -2120,47 +2121,10 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   sab.formTables = sab.formTables or {}
   sab.formTables[key] = tables
 
-  if #t.goals > 0 then
-    local rowHeight = Helper.scaleY(buttonHeight) + Helper.borderSize
-    local gtable = formTable(frame, tabOrder, y, buttonHeight, MAX_GOAL_ROWS * rowHeight)
-    tabOrder = tabOrder + 1
-    for i, g in ipairs(t.goals) do
-      local ware = g.kind == "ware"
-      -- never below what the station has, built or planned
-      local low = ware and math.max(0, math.floor(extraModules(currentOf(ctx, g.ware)) + 1e-6)) or baysOf(ctx, g.buildMacro)
-      local top = low + (ware and MAX_ADD_MODULES or MAX_BAYS)
-      if ware then g.modules = math.max(low, math.min(top, g.modules or 1)) else g.bays = math.max(low, math.min(top, g.bays or 1)) end
-      local row = gtable:addRow(true, {})
-      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low, max = top,
-        start = ware and g.modules or g.bays, step = 1, hideMaxValue = true, active = idle, mouseOverText = ReadText(PAGE, 144) })
-          :setText(goalText(g, i, ok, plan, cat, ctx))
-      row[1].handlers.onSliderCellChanged = function(_, value)
-        if ware then g.modules = value else g.bays = value end
-      end
-      row[1].handlers.onSliderCellConfirm = function()
-        if (ware and g.modules or g.bays) <= low then
-          for j, h in ipairs(t.goals) do
-            if h == g then table.remove(t.goals, j); break end
-          end
-        end
-        dirty()
-      end
-    end
-    -- a goal just added shows at the bottom
-    if sab.goalsToEnd == key then
-      sab.goalsToEnd = nil
-      gtable:setTopRow(math.max(1, #t.goals - MAX_GOAL_ROWS + 1))
-    elseif tops.goals then
-      gtable:setTopRow(tops.goals)
-    end
-    tables.goals = gtable
-    y = gtable.properties.y + gtable:getVisibleHeight() + Helper.borderSize
-  end
-
   local ftable = formTable(frame, tabOrder, y, buttonHeight)
   tabOrder = tabOrder + 1
   local kit = rowKit(ftable, idle, buttonHeight, dirty)
-  local input, dropdown, checkbox = kit.input, kit.dropdown, kit.checkbox
+  local input, dropdown = kit.input, kit.dropdown
   local n = t.new
   local kinds = { option("ware", ReadText(PAGE, 111)), option("ship", ReadText(PAGE, 112)) }
   -- the first added goal fixes the kind
@@ -2179,22 +2143,69 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
     sab.goalsToEnd = key
     dirty()
   end
+  y = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize
+
+  if #t.goals > 0 then
+    local rowHeight = Helper.scaleY(buttonHeight) + Helper.borderSize
+    local headerHeight = Helper.scaleY(Helper.subHeaderHeight) + Helper.borderSize
+    local gtable = formTable(frame, tabOrder, y, buttonHeight, headerHeight + MAX_GOAL_ROWS * rowHeight)
+    tabOrder = tabOrder + 1
+    local header = gtable:addRow(false, { fixed = true })
+    header[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 152)), #t.goals), Helper.subHeaderTextProperties)
+    for i, g in ipairs(t.goals) do
+      local ware = g.kind == "ware"
+      -- never below what the station has, built or planned
+      local low = ware and math.max(0, math.floor(extraModules(currentOf(ctx, g.ware)) + 1e-6)) or baysOf(ctx, g.buildMacro)
+      local top = low + (ware and MAX_ADD_MODULES or MAX_BAYS)
+      if ware then g.modules = math.max(low, math.min(top, g.modules or 1)) else g.bays = math.max(low, math.min(top, g.bays or 1)) end
+      row = gtable:addRow(true, {})
+      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low, max = top,
+        start = ware and g.modules or g.bays, step = 1, hideMaxValue = true, active = idle, mouseOverText = ReadText(PAGE, 144) })
+          :setText(goalText(g, i, ok, plan, cat, ctx))
+      row[1].handlers.onSliderCellChanged = function(_, value)
+        if ware then g.modules = value else g.bays = value end
+      end
+      row[1].handlers.onSliderCellConfirm = function()
+        if (ware and g.modules or g.bays) <= low then
+          for j, h in ipairs(t.goals) do
+            if h == g then table.remove(t.goals, j); break end
+          end
+        end
+        dirty()
+      end
+    end
+    -- a goal just added shows at the bottom (row 1 is the fixed header)
+    if sab.goalsToEnd == key then
+      sab.goalsToEnd = nil
+      gtable:setTopRow(math.max(2, #t.goals - MAX_GOAL_ROWS + 2))
+    elseif tops.goals then
+      gtable:setTopRow(tops.goals)
+    end
+    tables.goals = gtable
+    y = gtable.properties.y + gtable:getVisibleHeight() + Helper.borderSize
+  end
+
+  local stable = formTable(frame, tabOrder, y, buttonHeight)
+  tabOrder = tabOrder + 1
+  kit = rowKit(stable, idle, buttonHeight, dirty)
+  input, dropdown = kit.input, kit.dropdown
+  local checkbox = kit.checkbox
+  dropdown(input(ReadText(PAGE, 150)), choices.moduleRaces, t.moduleRace, function(id) t.moduleRace = id end)
   checkbox(input(ReadText(PAGE, 119)), t.fullCycle, true, function(v) t.fullCycle = v end)
   checkbox(input(ReadText(PAGE, 120)), t.workforce, true, function(v) t.workforce = v end)
   checkbox(input(ReadText(PAGE, 121)), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
   dropdown(input(ReadText(PAGE, 149)), choices.races, t.race, function(id) t.race = id end)
-  dropdown(input(ReadText(PAGE, 150)), choices.moduleRaces, t.moduleRace, function(id) t.moduleRace = id end)
   -- the grid packs an empty plan only
   local fresh = not ctx.station or (sab.menu.holomap ~= 0 and tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) == 0)
   checkbox(input(ReadText(PAGE, 134)), t.dense, fresh, function(v) t.dense = v end)
-  row = ftable:addRow(true, {})
+  row = stable:addRow(true, {})
   row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1, max = MAX_STORAGE_HOURS,
     start = t.storageHours or sab.planner.storageHours, step = 1, active = idle }):setText(ReadText(PAGE, 148))
   ---@diagnostic disable-next-line: inject-field
   row[1].handlers.onSliderCellChanged = function(_, value) t.storageHours = value end
   row[1].handlers.onSliderCellConfirm = dirty
   if extraRows then extraRows(kit) end
-  y = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize
+  y = stable.properties.y + stable:getVisibleHeight() + Helper.borderSize
 
   -- the planned modules and their effect share the rest, each scrolling on its own with three rows at least
   local minHeight = 3 * (Helper.scaleY(Helper.standardTextHeight) + Helper.borderSize)
