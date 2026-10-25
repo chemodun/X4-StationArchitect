@@ -1757,7 +1757,7 @@ sab.expanded = false
 -- goals: the added targets; new: the editor of the next one. Its ware and build module and the race are
 -- filled from the catalogue on the first panel build (targetChoices). station: the station it was derived for.
 local function defaultTarget()
-  return { goals = {}, new = { kind = "ware" }, fullCycle = false, workforce = true, selfSufficient = false, dense = false }
+  return { goals = {}, new = { kind = "ware" }, fullCycle = false, workforce = true, selfSufficient = false, dense = false, moduleRace = "any" }
 end
 sab.target = defaultTarget()
 -- the goal list shows at most this many rows before it scrolls
@@ -1826,12 +1826,19 @@ local function targetChoices(cat)
   for _, e in ipairs(cat.build) do
     if not goalTaken({ kind = "ship", buildMacro = e.macro }) then builds[#builds + 1] = option(e.macro, e.name) end
   end
-  local habitats, races = {}, {}
+  local habitats, races, makers, moduleRaces = {}, {}, {}, {}
   for _, e in ipairs(cat.habitation) do habitats[e.race] = (habitats[e.race] or 0) + 1 end
+  for _, group in ipairs({ "production", "processing", "storage", "dock" }) do
+    for _, e in ipairs(cat[group]) do
+      for r in pairs(e.races) do makers[r] = true end
+    end
+  end
   for _, r in ipairs(GetLibrary("races")) do
     if habitats[r.id] then races[#races + 1] = option(r.id, r.name) end
+    if makers[r.id] then moduleRaces[#moduleRaces + 1] = option(r.id, r.name) end
   end
-  sortedByText(wares); sortedByText(builds); sortedByText(races)
+  sortedByText(wares); sortedByText(builds); sortedByText(races); sortedByText(moduleRaces)
+  table.insert(moduleRaces, 1, option("any", ReadText(PAGE, 151)))
   -- the editor offers the wares no added goal takes
   local taken = {}
   for _, g in ipairs(t.goals) do
@@ -1848,13 +1855,16 @@ local function targetChoices(cat)
   end
   -- one kind of target per station: the first added goal fixes it
   if t.goals[1] then new.kind = t.goals[1].kind end
+  -- the workforce race: argon first, else the race with the most owned habitats
   if not habitats[t.race] then
-    local best = 0
+    local best, most = nil, 0
     for race, n in pairs(habitats) do
-      if n > best then t.race, best = race, n end
+      if n > most then best, most = race, n end
     end
+    t.race = habitats.argon and "argon" or best
   end
-  return { wares = free, builds = builds, races = races }
+  if not makers[t.moduleRace] then t.moduleRace = "any" end
+  return { wares = free, builds = builds, races = races, moduleRaces = moduleRaces }
 end
 
 -- Where a target is planned: the build menu's station, or a sector spot before the station exists.
@@ -1916,7 +1926,7 @@ function sab.TargetSpec(ctx)
   end
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
-    race = t.race, dense = t.dense, storageHours = t.storageHours }
+    race = t.race, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, dense = t.dense, storageHours = t.storageHours }
 end
 
 function sab.RunTarget()
@@ -2172,7 +2182,8 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   checkbox(input(ReadText(PAGE, 119)), t.fullCycle, true, function(v) t.fullCycle = v end)
   checkbox(input(ReadText(PAGE, 120)), t.workforce, true, function(v) t.workforce = v end)
   checkbox(input(ReadText(PAGE, 121)), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
-  dropdown(input(ReadText(1001, 2428)), choices.races, t.race, function(id) t.race = id end)
+  dropdown(input(ReadText(PAGE, 149)), choices.races, t.race, function(id) t.race = id end)
+  dropdown(input(ReadText(PAGE, 150)), choices.moduleRaces, t.moduleRace, function(id) t.moduleRace = id end)
   -- the grid packs an empty plan only
   local fresh = not ctx.station or (sab.menu.holomap ~= 0 and tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) == 0)
   checkbox(input(ReadText(PAGE, 134)), t.dense, fresh, function(v) t.dense = v end)

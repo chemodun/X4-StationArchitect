@@ -232,9 +232,9 @@ end
 
 -- *** picking modules ***
 
--- 0 the wanted race, 1 generic, 2 another race
+-- 0 the wanted race, 1 generic, 2 another race; every module 0 without a wanted race
 local function tier(e, race)
-  if e.races[race] then return 0 end
+  if race == nil or e.races[race] then return 0 end
   if e.race == "generic" then return 1 end
   return 2
 end
@@ -411,31 +411,34 @@ end
 
 -- Per-ship build resources (hull and equipment) and build hours at a full workforce, averaged over the owned
 -- ship blueprints of the sizes (s, m, l, xl), those of the race when it owns any (Terran hulls need other wares
--- than Commonwealth ones); the hours from the engine at a yard of the size, else from the hull ware (fromWare).
+-- than Commonwealth ones), every owned one without a race; each hull by its race's method and at a yard of its
+-- race; the hours from the engine at that yard, else from the hull ware (fromWare).
 local function shipResources(sizes, race, station)
   local total, ships, seconds, fromWare = {}, 0, 0, false
   for _, size in ipairs(sizes) do
-    local macros, ofRace = blueprints("", "shiptypes_" .. size), {}
+    local macros, ofRace, hullRace = blueprints("", "shiptypes_" .. size), {}, {}
     for _, macro in ipairs(macros) do
       local races = GetMacroData(macro, "makerraceid")
-      for _, r in ipairs(type(races) == "table" and races or { races }) do
-        if r == race then ofRace[#ofRace + 1] = macro end
+      races = type(races) == "table" and races or { races }
+      hullRace[macro] = races[1]
+      for _, r in ipairs(races) do
+        if r == race then ofRace[#ofRace + 1], hullRace[macro] = macro, race end
       end
     end
     if #ofRace > 0 then macros = ofRace end
-    local yard = yardFor(size, station, race)
     for _, macro in ipairs(macros) do
-      local ware = GetMacroData(macro, "ware")
-      if addResources(total, ware, race) then
+      local ware, r = GetMacroData(macro, "ware"), hullRace[macro]
+      if addResources(total, ware, r) then
         ships = ships + 1
+        local yard = yardFor(size, station, r)
         local built, equipment = nil, nil
         if yard then built, equipment = equippedBuild(macro, yard) end
         if built then
           seconds = seconds + built
-          for _, m in ipairs(equipment or {}) do addResources(total, GetMacroData(m, "ware"), race) end
+          for _, m in ipairs(equipment or {}) do addResources(total, GetMacroData(m, "ware"), r) end
         else
           fromWare = true
-          seconds = seconds + C.GetProductionMethodInfo2(ware, raceMethod(ware, race)).productiontime
+          seconds = seconds + C.GetProductionMethodInfo2(ware, raceMethod(ware, r)).productiontime
         end
       end
     end
@@ -519,10 +522,10 @@ local function moduleEntry(cat, macro)
 end
 
 -- An existing station's modules, planned ones included: producers per ware, the wares its producers and
--- habitats use, workforce need and housing, habitats per race, other modules per maker race, build modules per macro.
+-- habitats use, workforce need and housing, habitats per race, build modules per macro.
 local function stationProfile(station, set)
   local cat = planner.Catalogue(set or "")
-  local p = { makes = {}, uses = {}, habWares = {}, need = 0, capacity = 0, races = {}, moduleRaces = {}, builds = {} }
+  local p = { makes = {}, uses = {}, habWares = {}, need = 0, capacity = 0, races = {}, builds = {} }
   for _, macro in ipairs(stationMacros(station)) do
     local e = moduleEntry(cat, macro)
     if e and e.group == "habitation" then
@@ -531,7 +534,6 @@ local function stationProfile(station, set)
       for w in pairs(e.needs) do p.habWares[w] = true end
     elseif e then
       p.need = p.need + e.workforce
-      for r in pairs(e.races) do p.moduleRaces[r] = (p.moduleRaces[r] or 0) + 1 end
       if e.group == "build" then p.builds[macro] = (p.builds[macro] or 0) + 1 end
       for _, prod in ipairs(e.products or {}) do
         p.makes[prod.ware] = (p.makes[prod.ware] or 0) + 1
@@ -545,22 +547,13 @@ end
 -- The target an existing station looks built for: its build modules as ship goals, else its end products (made,
 -- used by none of its producers, a whole module of net output at least) as ware goals, each at what the station
 -- has. Full cycle: it makes every resource it could (one at least); self-sufficient: its habitats' wares too.
+-- The workforce race is its habitats' (nil without any); the module race stays any.
 function planner.Derive(station, set)
   local cat = planner.Catalogue(set or "")
   local p = stationProfile(station, set)
-  local function mostOf(counts)
-    local best, most = nil, 0
-    for r, n in pairs(counts) do
-      if n > most or (n == most and r < best) then best, most = r, n end
-    end
-    return best
-  end
-  -- without habitats: the race most of its modules are made by, else the sector owner's
-  local race = mostOf(p.races) or mostOf(p.moduleRaces)
-  if not race then
-    local owner = GetComponentData(GetComponentData(station, "sectorid"), "owner")
-    local primary = owner and GetFactionData(owner, "primaryrace")
-    race = primary ~= "" and primary or nil
+  local race, most = nil, 0
+  for r, n in pairs(p.races) do
+    if n > most or (n == most and r < race) then race, most = r, n end
   end
   local d = { goals = {}, workforce = p.capacity > 0, race = race }
   local builds = {}
@@ -584,7 +577,7 @@ function planner.Derive(station, set)
     for w in pairs(list) do
       if p.makes[w] then
         any = true
-      elseif producerFor(cat, w, race or "generic") then
+      elseif producerFor(cat, w, nil) then
         return false
       end
     end
@@ -615,7 +608,7 @@ local function stationLacks(target)
     if g.ware then wares[g.ware] = nil end
   end
   for w in pairs(wares) do
-    local net = producerFor(cat, w, target.race or "generic") and planner.Current(target.station, w).net or 0
+    local net = producerFor(cat, w, nil) and planner.Current(target.station, w).net or 0
     if net < -0.5 then
       lack.wares[w], lack.any = -net, true
     end
@@ -647,10 +640,13 @@ local function goalsOf(target)
   return target.goals or { target }
 end
 
--- target = { set, station, goals, fullCycle, workforce, race, selfSufficient, sunlight, storageHours }, each goal
---   { kind = "ware", ware, rate (net ware amount per hour) or modules } or { kind = "ship", buildMacro, count
---   (build modules to add), bays (the station's total after the plan, supplied as a whole) }. A fabrication bay builds the ship sizes its builder classes name (shipSize
---   overrides), a maintenance bay none (repair forces that); plan.shipRates and plan.shipHours per goal index.
+-- target = { set, station, goals, fullCycle, workforce, race, moduleRace, selfSufficient, sunlight, storageHours },
+--   each goal { kind = "ware", ware, rate (net ware amount per hour) or modules } or { kind = "ship", buildMacro,
+--   count (build modules to add), bays (the station's total after the plan, supplied as a whole) }. race: the
+--   workforce's (habitats and the producers of what they eat), argon when nil; moduleRace: preferred for every
+--   other module and the ship hulls, any when nil. A fabrication bay builds the ship sizes its builder classes
+--   name (shipSize overrides), a maintenance bay none (repair forces that); plan.shipRates and plan.shipHours
+--   per goal index.
 --   A goal ware another goal consumes gets its producers on top of that consumption. A station's shortfalls
 --   (stationLacks) are planned too, with or without a goal.
 --   The result carries counts per macro, the ware balance, the workforce and the warnings; Bill() turns it
@@ -658,7 +654,7 @@ end
 function planner.Plan(target)
   local set = target.set or "factory"
   local cat = planner.Catalogue(set, true)
-  local race = target.race or "generic"
+  local race, moduleRace = target.race or "argon", target.moduleRace
   local sunlight = target.sunlight
   if not sunlight and target.station then
     sunlight = GetComponentData(GetComponentData(target.station, "sectorid"), "sunlight")
@@ -692,7 +688,7 @@ function planner.Plan(target)
       if sizes and #sizes > 0 then
         -- one ship per bay at a time
         local id = table.concat(sizes, " ")
-        bySizes[id] = bySizes[id] or { shipResources(sizes, race, target.station) }
+        bySizes[id] = bySizes[id] or { shipResources(sizes, moduleRace, target.station) }
         local perShip, ships, hours, fromWare = bySizes[id][1], bySizes[id][2], bySizes[id][3], bySizes[id][4]
         if ships == 0 then warn("no owned %s ship blueprint", id) end
         if fromWare then warn("no known %s yard: ship build times from the hull wares", id) end
@@ -736,6 +732,10 @@ function planner.Plan(target)
   end
   plan.surplus = surplus
 
+  -- what the station's and the planned habitats eat is made by the workforce race's producers
+  local fed = target.station and stationProfile(target.station, set).habWares or {}
+  local function raceFor(w) return (fed[w] or habWares[w]) and race or moduleRace end
+
   local prodCounts, habCounts = {}, {}
   local missing = {}
   for _ = 1, 50 do
@@ -753,7 +753,7 @@ function planner.Plan(target)
     base = {}
     for w, r in pairs(baseRate) do base[w] = r end
     for w, n in pairs(moduleGoals) do
-      local _, p = producerFor(cat, w, race)
+      local _, p = producerFor(cat, w, raceFor(w))
       base[w] = base[w] + (p and n * rateOf(p, fraction, sunlight) or 0)
     end
     -- the balance of the current counts
@@ -780,7 +780,7 @@ function planner.Plan(target)
     end
     local next = {}
     for w, r in pairs(demand) do
-      local e, p = producerFor(cat, w, race)
+      local e, p = producerFor(cat, w, raceFor(w))
       if r <= 0 then
         -- covered by the station's surplus
       elseif e then
@@ -817,7 +817,7 @@ function planner.Plan(target)
   end
   plan.storage = m3
   for transport, volume in pairs(m3) do
-    local cands = candidates(cat.storage, race, function(e) return e.tags[transport] end)
+    local cands = candidates(cat.storage, moduleRace, function(e) return e.tags[transport] end)
     if #cands > 0 then ladder(cands, volume, counts) else warn("no owned %s storage", tostring(transport)) end
   end
   -- docks for the station's whole trade after the plan, less those it has; the base only while it has none
@@ -828,8 +828,8 @@ function planner.Plan(target)
     flow = tradeAfter(target.station, plan, lack)
   end
   plan.tradeAfter = flow
-  local piers = candidates(cat.dock, race, function(e) return e.group == "pier" end)
-  local areas = candidates(cat.dock, race, function(e) return e.group == "dock" end)
+  local piers = candidates(cat.dock, moduleRace, function(e) return e.group == "pier" end)
+  local areas = candidates(cat.dock, moduleRace, function(e) return e.group == "dock" end)
   plan.areaDocksM = math.max(1, areas[1] and areas[1].docksM or 1)
   plan.basePierDocks = havePierDocks > 0 and 0 or planner.basePierDocks
   plan.baseDockAreas = haveAreas > 0 and 0 or planner.baseDockAreas
