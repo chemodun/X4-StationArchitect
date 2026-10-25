@@ -624,9 +624,9 @@ local function finishPlacement(run, item)
     local pose = sab.PoseForPair(entry, stationConn, moduleConn, item.roll)
     pos, rows = pose.pos, pose.rows
   end
-  -- an undragged float drops only inside the plot
+  -- a float drops only inside the plot
   local size = sab.sizes[item.macro]
-  if not item.dragged and run.plot and size then
+  if run.plot and size then
     sab.FitPlot(sab.geo.worldBox(size, { pos.x, pos.y, pos.z }, rows or sab.ReadFloating(editor).rows), false)
   end
   sab.WriteFloating(editor, pos, rows)
@@ -678,13 +678,13 @@ end
 -- A pack item goes onto the free station connection that keeps the plan compact: candidates are every
 -- free connection x every connection of the module x four rolls, nearest module centre to the plan's
 -- anchor first, pre-checked in Lua against the plot and the placed boxes; the engine's snap (tags) and
--- valid flag (collision) give the verdict. Outer modules take outward connections only and keep a clearance.
+-- valid flag (collision) give the verdict. Outer modules take outward connections only, placed last.
 -- No place: the overlapping candidates go to the engine's collision check, then the plot grows when it
 -- blocked candidates, then a connector grows outward from the edge and the item tries again. Further
 -- connectors for the same item continue straight from the previous one's tip (a spur); the item tries the tip first.
 -- A target plan on an empty plot takes the grid layout (station_auto_builder_grid.lua) instead.
 
-local OUTER = { dockarea = 1000, pier = 2000, buildmodule = 2000, defencemodule = 1000, ventureplatform = 1000 }
+local OUTER = { "dockarea", "pier", "buildmodule", "defencemodule", "ventureplatform" }
 local TRIES_PER_FRAME, CHECKS_PER_FRAME = 8, 400
 local ROLLS = { 0, math.pi / 2, math.pi, 3 * math.pi / 2 }
 local RELAXED_TRIES, MAX_REACH, MAX_SPURS, MAX_PLOT, PLOT_STEP = 200, 6, 3, 20000, 1000
@@ -693,7 +693,7 @@ local AXES = { "x", "y", "z" }
 local STRAIGHT = 0.9
 local SPUR_GAP = 500
 -- classes with approach zones the engine keeps free (exclusionzones)
-local COLUMN = { "dockarea", "pier" }
+local COLUMN = { "dockarea", "pier", "buildmodule" }
 local GROUP_CLASSES = { { "production", "production" }, { "processingmodule", "production" }, { "buildmodule", "build" },
   { "storage", "storage" }, { "habitation", "habitation" }, { "dockarea", "dock" }, { "pier", "pier" } }
 
@@ -709,9 +709,9 @@ local function dist2(a, b)
   return dot(d, d)
 end
 
-local function outerMargin(macro)
-  for class, margin in pairs(OUTER) do
-    if IsMacroClass(macro, class) then return margin end
+local function outerClass(macro)
+  for _, class in ipairs(OUTER) do
+    if IsMacroClass(macro, class) then return true end
   end
   return nil
 end
@@ -1259,13 +1259,18 @@ local function buildCandidates(run, item)
   local chain = item.reach and spur and spur.owner == item.owner and spur.tipIdx or nil
   local tip = (not item.reach) and spur and spur.owner == item and spur.tipIdx or nil
   local prefer = item.connectors and run.lastPlacedIdx
-  local outwardOnly = item.margin or item.reach
-  local list, free = {}, 0
+  local outwardOnly = item.outer or item.reach
+  local list, free, outward = {}, 0, 0
   for _, f in ipairs(run.conns) do
-    if not f.used then free = free + 1 end
+    if not f.used then
+      free = free + 1
+      if dot(f.dir, { f.pos[1] - anchor[1], f.pos[2] - anchor[2], f.pos[3] - anchor[3] }) > 0 then outward = outward + 1 end
+    end
   end
-  -- a module with no connection to spare on the last free one would leave the items after it nowhere to go
-  item.closes = not item.isConnector and free + #mconns - 2 <= 0 and run.next < #run.items
+  -- a module with no connection to spare on the last free one would leave the items after it nowhere to go;
+  -- an outer one on the last outward one would leave no place to grow a connector from
+  item.closes = not item.isConnector and run.next < #run.items
+      and (free + #mconns - 2 <= 0 or (item.outer and outward + #mconns - 2 <= 0))
   for _, f in ipairs(run.conns) do
     local accept = not f.used
     if accept and outwardOnly then accept = dot(f.dir, { f.pos[1] - anchor[1], f.pos[2] - anchor[2], f.pos[3] - anchor[3] }) > 0 end
@@ -1302,8 +1307,8 @@ local function buildCandidates(run, item)
   sab.Debug("%s: %d candidates, %d module connections, anchor %.0f %.0f %.0f%s", item.macro, #list, #mconns, anchor[1], anchor[2], anchor[3], first)
 end
 
--- The Lua pre-check: inside the plot, clear of every placed box but the one it attaches to. An outer module
--- keeps its clearance in front of its outward face only (the approach of the ships), so it sits beside modules.
+-- The Lua pre-check: inside the plot, clear of every placed box but the one it attaches to and of every
+-- approach zone; a new zoned module's own zones clear of every body.
 local function boxOk(run, item, cand)
   local size = sab.sizes[item.macro]
   if not size then return true end
@@ -1315,37 +1320,23 @@ local function boxOk(run, item, cand)
     if not item.plotNeed or grow < item.plotNeed.grow then item.plotNeed = { grow = grow, box = box } end
     return false, "plot"
   end
-  -- the approach zones of the piers and dock areas: none entered, a new one's own zones clear of every body
+  -- the approach zones of the piers, dock areas and build modules: none entered, a new one's own zones clear of every body
   if inZone(run, box) then return false, "block" end
   if item.column then
     for _, z in ipairs(zoneBoxes(item.macro, { cand.pose.pos.x, cand.pose.pos.y, cand.pose.pos.z }, cand.pose.rows)) do
-      for idx, b in pairs(run.boxes) do
-        if idx ~= cand.f.entryIdx and overlaps(z, b, -1) then return false, "block" end
-      end
-    end
-  end
-  local front
-  if item.margin then
-    front = { min = { box.min[1], box.min[2], box.min[3] }, max = { box.max[1], box.max[2], box.max[3] } }
-    for i = 1, 3 do
-      if cand.f.dir[i] > 0.5 then
-        front.max[i] = front.max[i] + item.margin
-      elseif cand.f.dir[i] < -0.5 then
-        front.min[i] = front.min[i] - item.margin
+      for _, b in pairs(run.boxes) do
+        if overlaps(z, b, -1) then return false, "block" end
       end
     end
   end
   for idx, b in pairs(run.boxes) do
-    if idx ~= cand.f.entryIdx then
-      if not item.relaxed and overlaps(box, b, -5) then return false, "overlap" end
-      if front and not item.relaxed and overlaps(front, b, 0) then return false, "front" end
-    end
+    if idx ~= cand.f.entryIdx and not item.relaxed and overlaps(box, b, -5) then return false, "overlap" end
   end
   return true
 end
 
 local function skip(item, reason)
-  item.skips = item.skips or { plot = 0, block = 0, overlap = 0, front = 0, closes = 0, incompatible = 0, elsewhere = 0, rejected = 0, refused = 0 }
+  item.skips = item.skips or { plot = 0, block = 0, overlap = 0, closes = 0, incompatible = 0, elsewhere = 0, rejected = 0, refused = 0 }
   item.skips[reason] = item.skips[reason] + 1
 end
 
@@ -1458,12 +1449,12 @@ local function packStep(run, item)
   end
   local s, total = item.skips or {}, #item.candidates
   local function skipsText()
-    return string.format("%d candidates: plot %d, block %d, overlap %d, front %d, closes %d, incompatible %d, elsewhere %d, rejected %d, refused %d", total,
-      s.plot or 0, s.block or 0, s.overlap or 0, s.front or 0, s.closes or 0, s.incompatible or 0, s.elsewhere or 0, s.rejected or 0, s.refused or 0)
+    return string.format("%d candidates: plot %d, block %d, overlap %d, closes %d, incompatible %d, elsewhere %d, rejected %d, refused %d", total,
+      s.plot or 0, s.block or 0, s.overlap or 0, s.closes or 0, s.incompatible or 0, s.elsewhere or 0, s.rejected or 0, s.refused or 0)
   end
-  if not item.relaxed and ((s.overlap or 0) > 0 or (s.front or 0) > 0) then
+  if not item.relaxed and (s.overlap or 0) > 0 then
     item.relaxed, item.cursor, item.relaxedTries = true, 1, 0
-    sab.Debug("%s: no place among %s; the overlapping and front-blocked ones go to the engine's collision check", item.macro, skipsText())
+    sab.Debug("%s: no place among %s; the overlapping ones go to the engine's collision check", item.macro, skipsText())
     return
   end
   C.RemoveFloatingSequenceFromConstructionPlan(menu.holomap)
@@ -1556,7 +1547,7 @@ function sab.StartBill(bill, opts)
     else
       local size = sab.sizes[b.macro]
       for _ = 1, count do
-        items[#items + 1] = { macro = b.macro, pack = true, margin = outerMargin(b.macro), column = columnClass(b.macro), turn = b.turn,
+        items[#items + 1] = { macro = b.macro, pack = true, outer = outerClass(b.macro), column = columnClass(b.macro), turn = b.turn,
           group = b.group or groupOf(b.macro), volume = size and size.maxX * size.maxY * size.maxZ or 0 }
       end
       turns = math.max(turns, b.turn or 0)
@@ -1564,7 +1555,7 @@ function sab.StartBill(bill, opts)
   end
   if turns == 0 then
     table.sort(items, function(a, b)
-      if (a.margin ~= nil) ~= (b.margin ~= nil) then return a.margin == nil end
+      if (a.outer ~= nil) ~= (b.outer ~= nil) then return a.outer == nil end
       return a.volume > b.volume
     end)
   end

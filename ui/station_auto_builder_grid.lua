@@ -921,7 +921,7 @@ local function docks(g, run)
       dockCommit(g, D, it, best)
       if IsMacroClass(it.macro, "pier") then
         D.piers = D.piers + 1
-      elseif it.column then
+      elseif IsMacroClass(it.macro, "dockarea") then
         D.areas = D.areas + 1
       end
       if best.free then dropped = dropped + 1 else placed = placed + 1 end
