@@ -676,7 +676,7 @@ local AXES = { "x", "y", "z" }
 local STRAIGHT = 0.9
 local LATTICE_GAP, WING_GAP, LATERAL_WEIGHT, ROW_GAP = 100, 500, 0.25, 100
 local SIDES = { front = { 0, 0, -1 }, left = { -1, 0, 0 } }
--- the engine keeps the whole column above these free (the ships' approach), seen in Lua only as a rejection
+-- classes with approach zones the engine keeps free (exclusionzones)
 local COLUMN = { "dockarea", "pier" }
 local WING = { pier = "front", dock = "front", storage = "left", habitation = "left", other = "left" }
 local GROUP_CLASSES = { { "production", "production" }, { "processingmodule", "production" }, { "buildmodule", "build" },
@@ -726,11 +726,38 @@ local function worldBox(size, pos, rows)
   return box
 end
 
+-- The approach zones (exclusionzones, Extra Data API) of a macro through a pose, as boxes with their direction.
+local function zoneBoxes(macro, pos, rows)
+  local list = {}
+  for _, z in ipairs(ExtraData and ExtraData.GetMacroDataEx(macro, "exclusionzones") or {}) do
+    local m = mulRows(z.rows, rows)
+    local at, mid = rotate(z.position, rows), rotate(z.centre, m)
+    local box = { min = {}, max = {}, dir = unit(rotate(z.direction, rows)) }
+    for j = 1, 3 do
+      local h = (math.abs(m[1][j]) * z.size[1] + math.abs(m[2][j]) * z.size[2] + math.abs(m[3][j]) * z.size[3]) / 2
+      local c = pos[j] + at[j] + mid[j]
+      box.min[j], box.max[j] = c - h, c + h
+    end
+    list[#list + 1] = box
+  end
+  return list
+end
+
 local function overlaps(a, b, margin)
   for i = 1, 3 do
     if a.min[i] - margin >= b.max[i] or a.max[i] + margin <= b.min[i] then return false end
   end
   return true
+end
+
+-- A box entering a placed approach zone deeper than a metre.
+local function inZone(run, box)
+  for _, zones in pairs(run.zones) do
+    for _, z in ipairs(zones) do
+      if overlaps(box, z, -1) then return true end
+    end
+  end
+  return false
 end
 
 local function inside(a, b)
@@ -752,7 +779,7 @@ local function addEntry(run, idx, macro, pose)
   if size then
     local box = worldBox(size, { pose.x, pose.y, pose.z }, pose.rows)
     run.boxes[idx] = box
-    if columnClass(macro) then run.columns[idx] = box end
+    if columnClass(macro) then run.zones[idx] = zoneBoxes(macro, { pose.x, pose.y, pose.z }, pose.rows) end
     if run.plot then sab.FitPlot(box, false) end
   end
 end
@@ -767,7 +794,7 @@ end
 -- The plan's connections, boxes, anchor and plot at the start of a run.
 local function readPlanState(run, editor)
   run.conns = sab.PlanConnections(editor)
-  run.boxes, run.columns, run.sum, run.n = {}, {}, { 0, 0, 0 }, 0
+  run.boxes, run.zones, run.sum, run.n = {}, {}, { 0, 0, 0 }, 0
   for _, e in ipairs(sab.ReadPlan()) do
     local pose = sab.EntryPose(editor, e.idx)
     if pose then addEntry(run, e.idx, e.macro, pose) end
@@ -1045,7 +1072,7 @@ local function strutFor(kit, length, vertical)
 end
 
 -- for the grid layout (station_auto_builder_grid.lua)
-sab.geo = { rotate = rotate, unit = unit, mulRows = mulRows, worldBox = worldBox, armOf = armOf, strutFor = strutFor }
+sab.geo = { rotate = rotate, unit = unit, mulRows = mulRows, worldBox = worldBox, zoneBoxes = zoneBoxes, armOf = armOf, strutFor = strutFor }
 
 -- The shortest combination of at most four struts spanning need or more: lengths, longest first.
 local function spanWith(lengths, need)
@@ -1492,9 +1519,7 @@ local function chainClear(run, chain, f)
       for _, rb in ipairs(L and L.rowBoxes or {}) do
         if overlaps(box, rb, 0) or (rb.column and sameColumn(box, rb, 0)) then return false end
       end
-      for _, cb in pairs(run.columns) do
-        if sameColumn(box, cb, -5) then return false end
-      end
+      if inZone(run, box) then return false end
     end
     if far then
       local p = rotate(far.pos, pose.rows)
@@ -1902,9 +1927,14 @@ local function boxOk(run, item, cand)
       if overlaps(box, rb, 0) or ((column or rb.column) and sameColumn(box, rb, 0)) then return false, "block" end
     end
   end
-  -- the columns of the piers and dock areas already placed: the engine's rule, otherwise seen as a rejection
-  for _, cb in pairs(run.columns) do
-    if sameColumn(box, cb, -5) then return false, "block" end
+  -- the approach zones of the piers and dock areas: none entered, a new one's own zones clear of every body
+  if inZone(run, box) then return false, "block" end
+  if item.column then
+    for _, z in ipairs(zoneBoxes(item.macro, { cand.pose.pos.x, cand.pose.pos.y, cand.pose.pos.z }, cand.pose.rows)) do
+      for idx, b in pairs(run.boxes) do
+        if idx ~= cand.f.entryIdx and overlaps(z, b, -1) then return false, "block" end
+      end
+    end
   end
   local front
   if item.margin and not item.row then
@@ -2754,9 +2784,9 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   if extraRows then extraRows(kit) end
   y = ftable.properties.y + ftable:getVisibleHeight() + Helper.borderSize
 
-  -- at least three rows of the plan stay in view
+  -- the planned modules and their effect share the rest, each scrolling on its own with three rows at least
   local minHeight = 3 * (Helper.scaleY(Helper.standardTextHeight) + Helper.borderSize)
-  local ptable = formTable(frame, tabOrder, y, buttonHeight, math.max(minHeight, bottom - y))
+  local ptable = formTable(frame, tabOrder, y, buttonHeight, math.max(minHeight, math.floor((bottom - y - Helper.borderSize) / 2)))
   tabOrder = tabOrder + 1
   tables.planned = ptable
   local header = ptable:addRow(false, { fixed = true })
@@ -2779,27 +2809,34 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
     row = ptable:addRow(true, {})
     row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 146)), table.concat(names, ", ")), { wordwrap = true })
   end
+  if tops.planned then ptable:setTopRow(tops.planned) end
+  y = ptable.properties.y + ptable:getVisibleHeight() + Helper.borderSize
+
   local wares = {}
   for w in pairs(plan.consumed) do
     if math.abs((plan.produced[w] or 0) - plan.consumed[w]) >= 1 then wares[#wares + 1] = w end
   end
+  if #wares == 0 and not plan.adds and #plan.warnings == 0 then return plan, tabOrder, y end
   table.sort(wares, function(a, b) return sab.planner.Ware(a).name < sab.planner.Ware(b).name end)
+  local etable = formTable(frame, tabOrder, y, buttonHeight, math.max(minHeight, bottom - y))
+  tabOrder = tabOrder + 1
+  tables.effect = etable
   for _, w in ipairs(wares) do
-    row = ptable:addRow(true, {})
+    row = etable:addRow(true, {})
     row[1]:setColSpan(2):createText(sab.planner.Ware(w).name, {})
     row[3]:setColSpan(2):createText(string.format(tostring(ReadText(PAGE, 123)), string.format("%+d", (plan.produced[w] or 0) - plan.consumed[w])), { halign = "right" })
   end
   if plan.adds then
-    row = ptable:addRow(true, {})
+    row = etable:addRow(true, {})
     row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 124)), plan.workforce, plan.workforceCapacity,
       math.floor(plan.flow.import), math.floor(plan.flow.export)), {})
   end
   for _, warning in ipairs(plan.warnings) do
-    row = ptable:addRow(true, {})
+    row = etable:addRow(true, {})
     row[1]:setColSpan(4):createText(warning, { color = Color["text_warning"] })
   end
-  if tops.planned then ptable:setTopRow(tops.planned) end
-  return plan, tabOrder, ptable.properties.y + ptable:getVisibleHeight() + Helper.borderSize
+  if tops.effect then etable:setTopRow(tops.effect) end
+  return plan, tabOrder, etable.properties.y + etable:getVisibleHeight() + Helper.borderSize
 end
 
 -- The Bill tab: the manual rows.

@@ -559,18 +559,7 @@ end
 local function dockShape(macro, pose)
   local geo = sab.geo
   pose.body = geo.worldBox(sab.sizes[macro], pose.pos, pose.rows)
-  pose.zones = {}
-  for _, z in ipairs(ExtraData.GetMacroDataEx(macro, "exclusionzones") or {}) do
-    local m = geo.mulRows(z.rows, pose.rows)
-    local at, mid = geo.rotate(z.position, pose.rows), geo.rotate(z.centre, m)
-    local box = { min = {}, max = {}, dir = geo.unit(geo.rotate(z.direction, pose.rows)) }
-    for j = 1, 3 do
-      local h = (math.abs(m[1][j]) * z.size[1] + math.abs(m[2][j]) * z.size[2] + math.abs(m[3][j]) * z.size[3]) / 2
-      local c = pose.pos[j] + at[j] + mid[j]
-      box.min[j], box.max[j] = c - h, c + h
-    end
-    pose.zones[#pose.zones + 1] = box
-  end
+  pose.zones = geo.zoneBoxes(macro, pose.pos, pose.rows)
   pose.down = 0
   for _, z in ipairs(pose.zones) do
     if z.dir[2] < -0.99 then pose.down = pose.down + 1 end

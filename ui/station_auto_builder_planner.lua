@@ -494,6 +494,22 @@ local function stationLacks(target)
   return lack
 end
 
+-- The station's trade volume per hour after the plan: each ware's net now plus the plan's own (shortfall fillers
+-- replace imports, so the shortfall counts once).
+local function tradeAfter(station, plan, lack)
+  local p = stationProfile(station, plan.set)
+  local wares = {}
+  for _, list in ipairs({ p.makes, p.uses, p.habWares, plan.produced, plan.consumed }) do
+    for w in pairs(list) do wares[w] = true end
+  end
+  local flow = 0
+  for w in pairs(wares) do
+    local net = planner.Current(station, w).net + (plan.produced[w] or 0) - (plan.consumed[w] or 0) + (lack.wares[w] or 0)
+    flow = flow + math.abs(net) * planner.Ware(w).volume
+  end
+  return flow
+end
+
 -- *** the plan ***
 
 -- The target's goals; a target without a goals list is one goal itself.
@@ -669,16 +685,21 @@ function planner.Plan(target)
     local cands = candidates(cat.storage, race, function(e) return e.tags[transport] end)
     if #cands > 0 then ladder(cands, volume, counts) else warn("no owned %s storage", tostring(transport)) end
   end
+  -- docks for the station's whole trade after the plan, less those it has; the base only while it has none
   local flow = plan.flow.import + plan.flow.export
-  -- the new trade gets its own docks; the base only while the station has none
   local havePierDocks, haveAreas = 0, 0
-  if target.station then havePierDocks, haveAreas = stationDocks(target.station) end
+  if target.station then
+    havePierDocks, haveAreas = stationDocks(target.station)
+    flow = tradeAfter(target.station, plan, lack)
+  end
+  plan.tradeAfter = flow
   local piers = candidates(cat.dock, race, function(e) return e.group == "pier" end)
   local areas = candidates(cat.dock, race, function(e) return e.group == "dock" end)
   plan.areaDocksM = math.max(1, areas[1] and areas[1].docksM or 1)
   plan.basePierDocks = havePierDocks > 0 and 0 or planner.basePierDocks
   plan.baseDockAreas = haveAreas > 0 and 0 or planner.baseDockAreas
   local need, needAreas = dockNeed(plan, flow)
+  need, needAreas = math.max(0, need - havePierDocks), math.max(0, needAreas - haveAreas)
   if need > 0 and #piers == 0 then
     warn("no owned pier")
   elseif need > 0 then
