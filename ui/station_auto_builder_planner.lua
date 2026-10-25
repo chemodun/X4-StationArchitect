@@ -39,8 +39,11 @@ local sab = StationAutoBuilder
 local planner = {
   -- sizing rules
   storageHours = 4,           -- storage per ware: hours of its hourly flow
-  pierDockM3PerHour = 40000,  -- trade volume one L/XL dock serves per hour
-  dockAreaM3PerHour = 150000, -- one dock area per this much trade volume per hour, at least one
+  lShare = 0.7,               -- share of the trade volume carried by L/XL ships, the rest by M
+  pierDockM3PerHour = 250000, -- L/XL trade volume one pier dock serves per hour
+  mDockM3PerHour = 150000,    -- M trade volume one M dock of a dock area serves per hour
+  basePierDocks = 3,          -- a station without docks gets at least this, as vanilla's smallest prefabs
+  baseDockAreas = 1,
   docking = { high = 1, mid = 2, low = 4 }, -- target.docking: the volume per dock scales by this
   bigPier = 3,                -- piers with more docks: one per station at most, at the bottom
   -- set -> catalogue of owned module blueprints
@@ -63,9 +66,12 @@ local GROUPS = { "build", "production", "habitation", "storage", "dock", "pier" 
 
 local function ceil(x) return math.ceil(x - 1e-6) end
 
-local function perDock(target)
-  local scale = planner.docking[target.docking or "high"] or 1
-  return planner.pierDockM3PerHour * scale, planner.dockAreaM3PerHour * scale
+-- pier docks and dock areas for a trade flow, at least the plan's base
+local function dockNeed(plan, flow)
+  local scale = planner.docking[plan.target.docking or "high"] or 1
+  local pierDocks = ceil(flow * planner.lShare / (planner.pierDockM3PerHour / scale))
+  local areas = ceil(flow * (1 - planner.lShare) / (plan.areaDocksM * planner.mDockM3PerHour / scale))
+  return math.max(plan.basePierDocks, pierDocks), math.max(plan.baseDockAreas, areas)
 end
 
 function planner.Ware(ware)
@@ -492,33 +498,27 @@ function planner.Plan(target)
     if #cands > 0 then ladder(cands, volume, counts) else warn("no owned %s storage", tostring(transport)) end
   end
   local flow = plan.flow.import + plan.flow.export
-  -- the new trade gets its own docks; one pier and one dock area at the least while the station has none
-  local perPierDock, perArea = perDock(target)
+  -- the new trade gets its own docks; the base only while the station has none
   local havePierDocks, haveAreas = 0, 0
   if target.station then havePierDocks, haveAreas = stationDocks(target.station) end
   local piers = candidates(cat.dock, race, function(e) return e.group == "pier" end)
-  local need = math.max(havePierDocks > 0 and 0 or 1, ceil(flow / perPierDock))
+  local areas = candidates(cat.dock, race, function(e) return e.group == "dock" end)
+  plan.areaDocksM = math.max(1, areas[1] and areas[1].docksM or 1)
+  plan.basePierDocks = havePierDocks > 0 and 0 or planner.basePierDocks
+  plan.baseDockAreas = haveAreas > 0 and 0 or planner.baseDockAreas
+  local need, needAreas = dockNeed(plan, flow)
   if need > 0 and #piers == 0 then
     warn("no owned pier")
   elseif need > 0 then
-    -- one big pier at most, the rest from the smaller ones
-    local small, big = {}, nil
+    -- whole piers of one size, the largest up to bigPier docks, so an upgrade adds more of the same
+    local pick
     for _, e in ipairs(piers) do
-      if e.capacity <= planner.bigPier then small[#small + 1] = e elseif not big then big = e end
+      local better = not pick or e.capacity > pick.capacity or (e.capacity == pick.capacity and e.approaches < pick.approaches)
+      if e.capacity <= planner.bigPier and better then pick = e end
     end
-    table.sort(small, function(a, b)
-      if a.capacity ~= b.capacity then return a.capacity > b.capacity end
-      if a.approaches ~= b.approaches then return a.approaches < b.approaches end
-      return a.macro < b.macro
-    end)
-    if big and (need >= big.capacity or #small == 0) then
-      counts[big.macro] = (counts[big.macro] or 0) + 1
-      need = need - big.capacity
-    end
-    if #small > 0 then ladder(small, need, counts) elseif need > 0 then ladder(piers, need, counts) end
+    pick = pick or piers[#piers]
+    counts[pick.macro] = (counts[pick.macro] or 0) + ceil(need / pick.capacity)
   end
-  local areas = candidates(cat.dock, race, function(e) return e.group == "dock" end)
-  local needAreas = math.max(haveAreas > 0 and 0 or 1, ceil(flow / perArea))
   if needAreas > 0 and #areas == 0 then
     warn("no owned dock area")
   elseif needAreas > 0 then
@@ -714,7 +714,6 @@ function planner.Turns(plan)
   end
 
   local flow = plan.flow.import + plan.flow.export
-  local perPierDock, perArea = perDock(target)
   local turns, cum = {}, {}
   local placedWorkforce, placedHabitat, placedDocks, placedAreas, placedStorage = 0, 0, 0, 0, {}
   local finalIdx = 1
@@ -754,8 +753,9 @@ function planner.Turns(plan)
       end
     end
     emitStorage(true)
-    placedAreas = emitWhile(turn, areas, placedAreas, math.max(1, ceil(flow * share / perArea)), 1)
-    placedDocks = emitWhile(turn, piers, placedDocks, math.max(1, ceil(flow * share / perPierDock)))
+    local needDocks, needAreas = dockNeed(plan, flow * share)
+    placedAreas = emitWhile(turn, areas, placedAreas, math.max(1, needAreas), 1)
+    placedDocks = emitWhile(turn, piers, placedDocks, math.max(1, needDocks))
     if t == 1 then
       for _, e in ipairs(others) do
         for _ = 1, counts[e.macro] do turn[#turn + 1] = e.macro end
