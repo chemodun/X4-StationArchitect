@@ -218,13 +218,23 @@ local UPDATE = { 0x4c, 0x8d, 0x05, false, false, false, false, 0x0f, 0x11, 0x87,
   0x0f, 0x28, 0x0d, false, false, false, false, 0x48, 0x8b, 0xcf, 0x0f, 0x11, 0x8f, 0x50, 0x04, 0x00,
   0x00, 0x0f, 0x28, 0x05, false, false, false, false, 0x0f, 0x11, 0x87, 0x60, 0x04, 0x00, 0x00, 0xe8,
   false, false, false, false }
-local UPDATE_AT = 0x163
--- inside the update, +0x1f9: cmp byte [r15 + disp32], r12b, the editor's dragging flag that gates the snap search
+-- inside the update: cmp byte [r15 + disp32], r12b, the editor's dragging flag that gates the snap search
 ---@type (integer|false)[]
 local DRAGGING = { 0x45, 0x38, 0xa7, false, false, false, false }
-local DRAGGING_AT = 0x1f9
--- the editor layout every literal offset below belongs to; another value means its tail moved
-local DRAGGING_OFFSET = 0x570
+
+-- GOG 9.00: operand positions in the patterns above and the engine objects' field offsets; the patterns pin
+-- editor, plan and the floating rows, the code-read dragging offset must equal `dragging`. Another build needs its own set.
+local LAYOUT = {
+  dropRegistry = 0x13, dropResolver = 0x1e, resetRegistry = 0x26, resetResolver = 0x2b, resetRoutine = 0xdc,
+  updateCall = 0x163, draggingCmp = 0x1f9,
+  -- holomap: resolver kind, type check vfunc with its argument, the editor pointer
+  holomapKind = 4, holomapCheck = 0x11e0, holomapCheckArg = 0x3a, editor = 0x2c0,
+  -- editor: type check vfunc with its argument, plan entry vector, floating transform, snap result, dragging flag
+  editorCheck = 0x18, editorCheckArg = 2, plan = 0x300, floating = 0x430, snapPose = 0x470, valid = 0x4b0,
+  snapEntryIdx = 0x4b8, snapEntry = 0x4c0, snapModuleConn = 0x4c8, snapStationConn = 0x4d0, dragging = 0x570,
+  -- plan entry transform, connection name
+  entryTransform = 0x30, connectionName = 0x10,
+}
 
 -- nil: not located yet, false: unavailable, table: located
 ---@type table|false|nil
@@ -292,18 +302,18 @@ local function detect()
   local drop, reset = tonumber(dropAnchor - base), tonumber(resetAnchor - base)
   if not (inText(img, drop, #DROP) and matchBytes(img.base + drop, DROP)) then return false, "drop wrapper mismatch" end
   if not (inText(img, reset, #RESET) and matchBytes(img.base + reset, RESET)) then return false, "rotation reset wrapper mismatch" end
-  local registry, resolver = rel32(img, drop + 0x13), rel32(img, drop + 0x1e)
-  if registry ~= rel32(img, reset + 0x26) or resolver ~= rel32(img, reset + 0x2b) then return false, "wrappers disagree" end
+  local registry, resolver = rel32(img, drop + LAYOUT.dropRegistry), rel32(img, drop + LAYOUT.dropResolver)
+  if registry ~= rel32(img, reset + LAYOUT.resetRegistry) or resolver ~= rel32(img, reset + LAYOUT.resetResolver) then return false, "wrappers disagree" end
   local d = img.sec[".data"]
   if registry < d.from or registry + 8 > d.vto then return false, "registry outside .data" end
-  local routine = rel32(img, reset + 0xdc)
-  local at = routine + UPDATE_AT
+  local routine = rel32(img, reset + LAYOUT.resetRoutine)
+  local at = routine + LAYOUT.updateCall
   if not (inText(img, at, #UPDATE) and matchBytes(img.base + at, UPDATE)) then return false, "update call mismatch" end
   local update = rel32(img, at + #UPDATE - 4)
-  at = update + DRAGGING_AT
+  at = update + LAYOUT.draggingCmp
   if not (inText(img, at, #DRAGGING) and matchBytes(img.base + at, DRAGGING)) then return false, "dragging flag mismatch" end
   local dragging = i32(img.base + at + 3)
-  if dragging ~= DRAGGING_OFFSET then return false, string.format("dragging flag at +0x%x, not +0x%x", dragging, DRAGGING_OFFSET) end
+  if dragging ~= LAYOUT.dragging then return false, string.format("dragging flag at +0x%x, not +0x%x", dragging, LAYOUT.dragging) end
   if not (inText(img, resolver, 16) and inText(img, update, 16)) then return false, "target outside .text" end
   sab.Debug("engine located (%s): resolver 0x%x registry 0x%x update 0x%x dragging +0x%x", img.id, resolver, registry, update, dragging)
   return {
@@ -335,12 +345,12 @@ function sab.Editor()
   if not (engine and menu and menu.holomap ~= 0) then return nil end
   local registry = engine.registry[0]
   if registry == nil then return nil end
-  local holo = engine.resolve(registry, menu.holomap, 4)
+  local holo = engine.resolve(registry, menu.holomap, LAYOUT.holomapKind)
   if holo == nil then return nil end
-  if vfunc(holo, 0x11e0, FN_U8_I32)(holo, 0x3a) == 0 then return nil end
-  local editor = pp(ffi.cast(P, holo) + 0x2c0)[0]
+  if vfunc(holo, LAYOUT.holomapCheck, FN_U8_I32)(holo, LAYOUT.holomapCheckArg) == 0 then return nil end
+  local editor = pp(ffi.cast(P, holo) + LAYOUT.editor)[0]
   if editor == nil then return nil end
-  if vfunc(editor, 0x18, FN_U8_I32)(editor, 2) == 0 then return nil end
+  if vfunc(editor, LAYOUT.editorCheck, FN_U8_I32)(editor, LAYOUT.editorCheckArg) == 0 then return nil end
   return editor
 end
 
@@ -359,12 +369,12 @@ local function readTransform(p)
 end
 
 function sab.ReadFloating(editor)
-  return readTransform(editor + 0x430)
+  return readTransform(editor + LAYOUT.floating)
 end
 
 -- pos = { x, y, z } in the plan's frame; rows = three { x, y, z } or nil to keep the rotation
 function sab.WriteFloating(editor, pos, rows)
-  local f = fp(editor + 0x430)
+  local f = fp(editor + LAYOUT.floating)
   f[0], f[1], f[2] = pos.x, pos.y, pos.z
   if rows then
     for r = 1, 3 do
@@ -375,14 +385,14 @@ end
 
 -- A plan entry's transform as the editor holds it, built ones included.
 function sab.EntryPose(editor, idx)
-  local vec = pp(editor + 0x300)[0]
+  local vec = pp(editor + LAYOUT.plan)[0]
   if vec == nil then return nil end
   local first, last = pp(vec)[0], pp(vec + 8)[0]
   local n = tonumber((uptr(last) - uptr(first)) / 8)
   if idx < 0 or idx >= n then return nil end
   local e = pp(first)[idx]
   if e == nil then return nil end
-  local pose = readTransform(e + 0x30)
+  local pose = readTransform(e + LAYOUT.entryTransform)
   pose.count = n
   return pose
 end
@@ -531,19 +541,19 @@ function sab.PoseForPair(entryPose, stationConn, moduleConn, roll)
 end
 
 -- Run the editor's update without a cursor: the snap search from the floating transform as written.
--- A target entry pointer at +0x4b8.. means the nearest compatible pair inside the snap radius was found.
+-- A target entry pointer means the nearest compatible pair inside the snap radius was found.
 function sab.Snap(editor)
   if not C.HasBuildMapFloatingSelection(sab.menu.holomap) then return { snapped = false, valid = false } end
   -- the snap search runs only while the editor drags a module
   editor[engine.dragging] = 1
   engine.update(editor, 0, zeroRay)
-  local r = { snapped = pp(editor + 0x4c0)[0] ~= nil, valid = editor[0x4b0] ~= 0 }
+  local r = { snapped = pp(editor + LAYOUT.snapEntry)[0] ~= nil, valid = editor[LAYOUT.valid] ~= 0 }
   if r.snapped then
-    r.entryIdx = tonumber(u64(editor + 0x4b8))
-    local modConn, stationConn = pp(editor + 0x4c8)[0], pp(editor + 0x4d0)[0]
-    r.connection = modConn ~= nil and stdString(modConn + 0x10) or nil
-    r.predecessorConnection = stationConn ~= nil and stdString(stationConn + 0x10) or nil
-    r.pose = readTransform(editor + 0x470)
+    r.entryIdx = tonumber(u64(editor + LAYOUT.snapEntryIdx))
+    local modConn, stationConn = pp(editor + LAYOUT.snapModuleConn)[0], pp(editor + LAYOUT.snapStationConn)[0]
+    r.connection = modConn ~= nil and stdString(modConn + LAYOUT.connectionName) or nil
+    r.predecessorConnection = stationConn ~= nil and stdString(stationConn + LAYOUT.connectionName) or nil
+    r.pose = readTransform(editor + LAYOUT.snapPose)
   end
   return r
 end
