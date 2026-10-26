@@ -877,7 +877,7 @@ end
 
 local function addEntry(run, idx, macro, pose)
   run.n = run.n + 1
-  run.macros[idx] = macro
+  run.macros[idx], run.poses[idx] = macro, pose
   run.sum[1], run.sum[2], run.sum[3] = run.sum[1] + pose.x, run.sum[2] + pose.y, run.sum[3] + pose.z
   local size = sab.sizes[macro]
   if size then
@@ -898,7 +898,7 @@ end
 -- The plan's connections, boxes, anchor and plot at the start of a run.
 local function readPlanState(run, editor)
   run.conns = sab.PlanConnections(editor)
-  run.boxes, run.zones, run.macros, run.sum, run.n = {}, {}, {}, { 0, 0, 0 }, 0
+  run.boxes, run.zones, run.macros, run.poses, run.sum, run.n = {}, {}, {}, {}, { 0, 0, 0 }, 0
   for _, e in ipairs(sab.ReadPlan()) do
     local pose = checkedPose(editor, e)
     if pose then addEntry(run, e.idx, e.macro, pose) end
@@ -1209,7 +1209,8 @@ local function strutFor(kit, length, vertical)
 end
 
 -- for the grid layout (station_architect_grid.lua)
-sab.geo = { rotate = rotate, unit = unit, mulRows = mulRows, worldBox = worldBox, zoneBoxes = zoneBoxes, armOf = armOf, strutFor = strutFor }
+sab.geo = { rotate = rotate, unit = unit, mulRows = mulRows, worldBox = worldBox, zoneBoxes = zoneBoxes, armOf = armOf, strutFor = strutFor,
+  column = columnClass }
 
 -- The shortest combination of at most four struts spanning need or more: lengths, longest first.
 local function spanWith(lengths, need)
@@ -1327,6 +1328,12 @@ local function finishLayout(run)
   run.kit = connectorKit(run.items[1] and raceOf(run.items[1].macro) or nil)
   if not run.kit.cross then run.kit = nil end
   if not run.gridRoute then
+    run.phase = "begin"
+    return
+  end
+  -- an upgrade packs on the grid only around crosses that already stand on one
+  if not run.fromEmpty and not (run.kit and sab.grid.Seed(run)) then
+    run.gridRoute = false
     run.phase = "begin"
     return
   end
@@ -1628,7 +1635,7 @@ end
 -- A bill { { macro, count } } becomes pack items: inner modules first, largest first, then the outer ones.
 -- A bill whose entries carry a turn (planner.Turns) keeps its order: it is the build order.
 -- A connector in the bill sets the type the packer grows outward with instead of being an item.
--- opts.grid on an empty plan: the grid layout.
+-- opts.grid: the grid layout, on a non-empty plan only when its crosses stand on a grid.
 function sab.StartBill(bill, opts)
   local menu = sab.menu
   if not (menu and menu.shown and menu.holomap ~= 0) then
@@ -1660,7 +1667,7 @@ function sab.StartBill(bill, opts)
     if macro then connector = { macro = macro } end
   end
   local empty = items[1] and tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) == 0
-  local gridRoute = empty and opts and opts.grid or false
+  local gridRoute = opts and opts.grid or false
   if empty and not gridRoute then
     local centre = C.GetBuildPlotCenterOffset(menu.container)
     items[1].pack, items[1].free, items[1].pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
@@ -1668,9 +1675,9 @@ function sab.StartBill(bill, opts)
   return sab.StartRun(items, connector, turns > 0 and turns or nil, gridRoute, opts)
 end
 
--- gridRoute: read every module's connection geometry too, then pack on the grid (StartBill, empty plan only).
+-- gridRoute: read every module's connection geometry too, then pack on the grid (StartBill).
 -- opts.stopOnFail: the run stops at its first failed placement. opts.packOnly: a grid run stops once packed (layout
--- experiments). opts.subdivide: grid occupancy cells per cell side (nil: grid.subdivide).
+-- experiments).
 function sab.StartRun(items, connector, turns, gridRoute, opts)
   if sab.run then
     sab.Error("a run is already active")
@@ -1691,7 +1698,7 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
     return false
   end
   local run = { items = items, next = 1, phase = "begin", placed = 0, failed = 0, connector = connector, turns = turns,
-    stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, subdivide = opts and opts.subdivide }
+    stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly }
   readPlanState(run, editor)
   if engine == false then return false end
   run.planCount = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
@@ -1860,7 +1867,7 @@ sab.expanded = false
 -- goals: the added targets; new: the editor of the next one. Its ware and build module and the race are
 -- filled from the catalogue on the first panel build (targetChoices). station: the station it was derived for.
 local function defaultTarget()
-  return { goals = {}, new = { kind = "ware" }, fullCycle = false, workforce = true, selfSufficient = false, dense = false, moduleRace = "any" }
+  return { goals = {}, new = { kind = "ware" }, fullCycle = false, workforce = true, selfSufficient = false, moduleRace = "any" }
 end
 sab.target = defaultTarget()
 -- the goal list shows at most this many rows before it scrolls
@@ -2029,7 +2036,7 @@ function sab.TargetSpec(ctx)
   end
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
-    race = t.race, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, dense = t.dense, storageHours = t.storageHours }
+    race = t.race, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, storageHours = t.storageHours }
 end
 
 function sab.RunTarget()
@@ -2303,9 +2310,6 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   checkbox(input(ReadText(PAGE, 120), 3), t.workforce, true, function(v) t.workforce = v end)
   checkbox(input(ReadText(PAGE, 121), 3), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
   dropdown(input(ReadText(PAGE, 149)), choices.races, t.race, function(id) t.race = id end)
-  -- the grid packs an empty plan only
-  local fresh = not ctx.station or (sab.menu.holomap ~= 0 and tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) == 0)
-  checkbox(input(ReadText(PAGE, 134), 3), t.dense, fresh, function(v) t.dense = v end)
   row = stable:addRow(true, {})
   row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1, max = MAX_STORAGE_HOURS,
     start = t.storageHours or sab.planner.storageHours, step = 1, readOnly = not idle }):setText(ReadText(PAGE, 148))

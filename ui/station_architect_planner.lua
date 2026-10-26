@@ -1228,7 +1228,7 @@ function planner.Run(target)
   sab.Debug("planned:\n%s", planner.Print(plan))
   -- every goal is met already
   if not plan.adds then return nil, plan end
-  return sab.StartBill(planner.Turns(plan), { grid = true, subdivide = target.dense and 2 or nil }), plan
+  return sab.StartBill(planner.Turns(plan), { grid = true }), plan
 end
 
 sab.planner = planner

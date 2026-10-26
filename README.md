@@ -61,7 +61,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 ### Target
 
 1. Pick the kind of target (**Produce a ware** or **Build or maintain ships**), then the ware or the build module, and press **Add a target**. Each added target gets a slider for its number of production or build modules; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target.
-2. Set the options: **Modules race**, **Full cycle**, **Workforce**, **Self-sufficient workforce**, **Workforce race**, **Denser packing** (a smaller block on an empty plan, at the cost of a longer planning step) and **Storage, hours of flow** (how many hours of each ware's flow the storage holds).
+2. Set the options: **Modules race**, **Full cycle**, **Workforce**, **Self-sufficient workforce**, **Workforce race** and **Storage, hours of flow** (how many hours of each ware's flow the storage holds).
 3. Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning.
 
 ![The Target tab: two Hull Part Production modules with the full cycle and the workforce](docs/images/panel_target.png)

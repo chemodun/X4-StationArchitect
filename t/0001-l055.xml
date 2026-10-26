@@ -34,7 +34,6 @@
       <t id="130">Nova estação em %s</t>
       <t id="131">%s, candidato %s de %s</t>
       <t id="132">Turno %s de %s</t>
-      <t id="134">Empacotamento mais denso \(planejamento mais lento\)</t>
       <t id="135">Módulos no plano: %s de %s, falhos %s</t>
       <t id="136">Layout de empacotamento %s de %s: módulo %s de %s</t>
       <t id="138">Módulos por quadro</t>
