@@ -21,27 +21,13 @@ ffi.cdef [[
     float y;
     float z;
   } Coord3D;
-  typedef struct {
-    size_t idx;
-    const char* macroid;
-    UniverseID componentid;
-    UIPosRot offset;
-    const char* connectionid;
-    size_t predecessoridx;
-    const char* predecessorconnectionid;
-    bool isfixed;
-    uint32_t bookmarknum;
-  } UIConstructionPlanEntry2;
-
   void AddFloatingSequenceToConstructionPlan(UniverseID holomapid);
   void AddMacroToConstructionMap(UniverseID holomapid, const char* macroname, bool startdragging);
   void GenerateModuleLoadout(UILoadout* result, UniverseID holomapid, size_t cp_idx, UniverseID defensibleid, float level);
   void GenerateModuleLoadoutCounts(UILoadoutCounts* result, UniverseID holomapid, size_t cp_idx, UniverseID defensibleid, float level);
-  size_t GetBuildMapConstructionPlan2(UniverseID holomapid, UniverseID defensibleid, bool usestoredplan, UIConstructionPlanEntry2* result, uint32_t resultlen);
   size_t GetNumBuildMapConstructionPlan(UniverseID holomapid, bool usestoredplan);
   size_t GetNumUpgradeSlots(UniverseID destructibleid, const char* macroname, const char* upgradetypename);
   UniverseID GetPlayerID(void);
-  bool HasBuildMapFloatingSelection(UniverseID holomapid);
   void RemoveFloatingSequenceFromConstructionPlan(UniverseID holomapid);
   void UpdateConstructionMapItemLoadout(UniverseID holomapid, size_t itemidx, UniverseID defensibleid, UILoadout uiloadout);
   int64_t GetBuildPlotPrice(UniverseID sectorid, UIPosRot location, float x, float y, float z, const char* factionid);
@@ -65,7 +51,12 @@ local P, U8PP, U16P, U32P, I32P, U64P = ffi.typeof("uint8_t*"), ffi.typeof("uint
 local FLOATP, VOIDPP, CHARP, CHARPP, UPTR = ffi.typeof("float*"), ffi.typeof("void**"), ffi.typeof("const char*"), ffi.typeof("const char**"), ffi.typeof("uintptr_t")
 local FN_RESOLVE, FN_UPDATE = ffi.typeof("void*(*)(void*, uint64_t, uint32_t)"), ffi.typeof("void(*)(void*, uint8_t, const float*)")
 local FN_U8_I32 = ffi.typeof("uint8_t(*)(void*, int32_t)")
-local PLAN_ENTRIES = ffi.typeof("UIConstructionPlanEntry2[?]")
+-- vanilla's cdefs (ego_detailmonitor loads first); the Plan2 variant is 9.00 only
+local PLAN_ENTRIES = ffi.typeof("UIConstructionPlanEntry[?]")
+
+-- 9.00 only; 8.00 has no such export, its build menu never grows the plot
+local hasUpdatePlot, updatePlot = pcall(function() return C.UpdateConstructionMapBuildPlot end)
+if not hasUpdatePlot then updatePlot = nil end
 
 local sab = {
   configBlackboard = "$StationAutoBuilderConfig",
@@ -125,7 +116,7 @@ function sab.ReadPlan()
   local plan = {}
   if n == 0 then return plan end
   local buf = ffi.new(PLAN_ENTRIES, n)
-  n = C.GetBuildMapConstructionPlan2(menu.holomap, menu.container, false, buf, n)
+  n = C.GetBuildMapConstructionPlan(menu.holomap, menu.container, false, buf, n)
   for i = 0, tonumber(n) - 1 do
     local e = buf[i]
     plan[#plan + 1] = {
@@ -162,7 +153,7 @@ end
 -- What the exported map API withholds: the editor object behind the holomap, its floating module's
 -- transform and snap result, and the editor's own update that runs the snap search. Two exported
 -- wrappers are the anchors; their bytes are verified before any address read out of them is used,
--- and a mismatch disables the route (fail closed). Offsets: GOG 9.00, see the claude file.
+-- and a mismatch disables the route (fail closed). Builds: GOG 9.00 and 8.00, see the claude file.
 
 local function u32(p) return ffi.cast(U32P, p)[0] end
 local function i32(p) return ffi.cast(I32P, p)[0] end
@@ -175,7 +166,7 @@ local function u16p(p) return ffi.cast(U16P, p) end
 -- AddFloatingSequenceToConstructionPlan(holomapid): registry global, resolver, holomap kind 0x3a via vfunc
 -- 0x11e0, editor at holomap +0x2c0 checked by vfunc 0x18(2), tail jump to the drop; false = rel32 masked
 ---@type (integer|false)[]
-local DROP = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xf9, 0x48, 0x8b, 0xd1,
+local DROP_900 = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xf9, 0x48, 0x8b, 0xd1,
   0x48, 0x8b, 0x0d, false, false, false, false, 0x41, 0xb8, 0x04, 0x00, 0x00, 0x00, 0xe8, false, false,
   false, false, 0x48, 0x8b, 0xd8, 0x48, 0x85, 0xc0, 0x74, 0x4f, 0x48, 0x8b, 0x00, 0xba, 0x3a, 0x00,
   0x00, 0x00, 0x48, 0x8b, 0xcb, 0xff, 0x90, 0xe0, 0x11, 0x00, 0x00, 0x33, 0xc9, 0x84, 0xc0, 0x48,
@@ -188,7 +179,7 @@ local DROP = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48,
 -- ResetConstructionMapModuleRotation(holomapid, cp_idx): same resolve, the plan vector at editor +0x300,
 -- then the reset routine with the entry pointer
 ---@type (integer|false)[]
-local RESET = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57,
+local RESET_900 = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57,
   0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xf2, 0x48, 0x8b, 0xf9, 0x48, 0x8b, 0xd1, 0x41, 0xb8, 0x04,
   0x00, 0x00, 0x00, 0x48, 0x8b, 0x0d, false, false, false, false, 0xe8, false, false, false, false, 0x48,
   0x8b, 0xd8, 0x48, 0x85, 0xc0, 0x0f, 0x84, 0xa7, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x00, 0xba, 0x3a,
@@ -207,27 +198,93 @@ local RESET = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48
   0x48, 0x83, 0xc4, 0x20, 0x5f, 0xc3 }
 -- inside the reset routine, +0x163: identity rows into +0x440..+0x460, then update(editor, 0, zero ray)
 ---@type (integer|false)[]
-local UPDATE = { 0x4c, 0x8d, 0x05, false, false, false, false, 0x0f, 0x11, 0x87, 0x40, 0x04, 0x00, 0x00, 0x33, 0xd2,
+local UPDATE_900 = { 0x4c, 0x8d, 0x05, false, false, false, false, 0x0f, 0x11, 0x87, 0x40, 0x04, 0x00, 0x00, 0x33, 0xd2,
   0x0f, 0x28, 0x0d, false, false, false, false, 0x48, 0x8b, 0xcf, 0x0f, 0x11, 0x8f, 0x50, 0x04, 0x00,
   0x00, 0x0f, 0x28, 0x05, false, false, false, false, 0x0f, 0x11, 0x87, 0x60, 0x04, 0x00, 0x00, 0xe8,
   false, false, false, false }
 -- inside the update: cmp byte [r15 + disp32], r12b, the editor's dragging flag that gates the snap search
 ---@type (integer|false)[]
-local DRAGGING = { 0x45, 0x38, 0xa7, false, false, false, false }
+local DRAGGING_900 = { 0x45, 0x38, 0xa7, false, false, false, false }
 
--- GOG 9.00: operand positions in the patterns above and the engine objects' field offsets; the patterns pin
--- editor, plan and the floating rows, the code-read dragging offset must equal `dragging`. Another build needs its own set.
-local LAYOUT = {
-  dropRegistry = 0x13, dropResolver = 0x1e, resetRegistry = 0x26, resetResolver = 0x2b, resetRoutine = 0xdc,
-  updateCall = 0x163, draggingCmp = 0x1f9,
-  -- holomap: resolver kind, type check vfunc with its argument, the editor pointer
-  holomapKind = 4, holomapCheck = 0x11e0, holomapCheckArg = 0x3a, editor = 0x2c0,
-  -- editor: type check vfunc with its argument, plan entry vector, floating transform, snap result, dragging flag
-  editorCheck = 0x18, editorCheckArg = 2, plan = 0x300, floating = 0x430, snapPose = 0x470, valid = 0x4b0,
-  snapEntryIdx = 0x4b8, snapEntry = 0x4c0, snapModuleConn = 0x4c8, snapStationConn = 0x4d0, dragging = 0x570,
-  -- plan entry transform, connection name
-  entryTransform = 0x30, connectionName = 0x10,
+-- GOG 8.00: the same two wrappers with the registry behind a lazy getter and the reset routine as a tail jump;
+-- the update takes the editor alone (9.00 added the ray arguments, read only when the flag is set)
+---@type (integer|false)[]
+local DROP_800 = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xf9, 0xe8, false, false,
+  false, false, 0x41, 0xb8, 0x04, 0x00, 0x00, 0x00, 0x48, 0x8b, 0xd7, 0x48, 0x8b, 0xc8, 0xe8, false,
+  false, false, false, 0x48, 0x8b, 0xd8, 0x48, 0x85, 0xc0, 0x74, 0x53, 0x48, 0x8b, 0x10, 0x48, 0x8b,
+  0xc8, 0x4c, 0x8b, 0x82, 0x70, 0x11, 0x00, 0x00, 0xba, 0x39, 0x00, 0x00, 0x00, 0x41, 0xff, 0xd0, 0x33,
+  0xc9, 0x84, 0xc0, 0x48, 0x0f, 0x44, 0xd9, 0x48, 0x85, 0xdb, 0x74, 0x31, 0x48, 0x8b, 0x8b, 0xd0, 0x02,
+  0x00, 0x00, 0x48, 0x85, 0xc9, 0x74, 0x34, 0x48, 0x8b, 0x01, 0xba, 0x02, 0x00, 0x00, 0x00, 0xff, 0x50,
+  0x18, 0x84, 0xc0, 0x74, 0x25, 0x48, 0x8b, 0x8b, 0xd0, 0x02, 0x00, 0x00, 0x48, 0x8b, 0x5c, 0x24, 0x30,
+  0x48, 0x83, 0xc4, 0x20, 0x5f, 0xe9, false, false, false, false, 0x48, 0x8b, 0xd7, 0x48, 0x8d, 0x0d,
+  false, false, false, false, 0xe8, false, false, false, false, 0x48, 0x8b, 0x5c, 0x24, 0x30, 0x48, 0x83,
+  0xc4, 0x20, 0x5f, 0xc3 }
+---@type (integer|false)[]
+local RESET_800 = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b,
+  0xf2, 0x48, 0x8b, 0xf9, 0xe8, false, false, false, false, 0x41, 0xb8, 0x04, 0x00, 0x00, 0x00, 0x48,
+  0x8b, 0xd7, 0x48, 0x8b, 0xc8, 0xe8, false, false, false, false, 0x48, 0x8b, 0xd8, 0x48, 0x85, 0xc0,
+  0x0f, 0x84, 0x96, 0x00, 0x00, 0x00, 0x4c, 0x8b, 0x00, 0xba, 0x39, 0x00, 0x00, 0x00, 0x48, 0x8b, 0xc8,
+  0x41, 0xff, 0x90, 0x70, 0x11, 0x00, 0x00, 0x33, 0xc9, 0x84, 0xc0, 0x48, 0x0f, 0x44, 0xd9, 0x48, 0x85,
+  0xdb, 0x74, 0x77, 0x48, 0x8b, 0x8b, 0xd0, 0x02, 0x00, 0x00, 0x48, 0x85, 0xc9, 0x74, 0x7a, 0x48, 0x8b,
+  0x01, 0xba, 0x02, 0x00, 0x00, 0x00, 0xff, 0x50, 0x18, 0x84, 0xc0, 0x74, 0x6b, 0x48, 0x8b, 0x8b, 0xd0,
+  0x02, 0x00, 0x00, 0x48, 0x8b, 0x81, 0x10, 0x03, 0x00, 0x00, 0x48, 0x85, 0xc0, 0x74, 0x58, 0x4c, 0x8b,
+  0x00, 0x48, 0x8b, 0x40, 0x08, 0x49, 0x2b, 0xc0, 0x48, 0xc1, 0xf8, 0x03, 0x48, 0x3b, 0xf0, 0x73, 0x45,
+  0x49, 0x8b, 0x3c, 0xf0, 0x48, 0x85, 0xc9, 0x74, 0x3c, 0x48, 0x8b, 0x01, 0xba, 0x02, 0x00, 0x00, 0x00,
+  0xff, 0x50, 0x18, 0x84, 0xc0, 0x74, 0x2d, 0x48, 0x8b, 0x8b, 0xd0, 0x02, 0x00, 0x00, 0x48, 0x8b, 0xd7,
+  0x48, 0x8b, 0x5c, 0x24, 0x30, 0x48, 0x8b, 0x74, 0x24, 0x38, 0x48, 0x83, 0xc4, 0x20, 0x5f, 0xe9, false,
+  false, false, false, 0x48, 0x8b, 0xd7, 0x48, 0x8d, 0x0d, false, false, false, false, 0xe8, false,
+  false, false, false, 0x48, 0x8b, 0x5c, 0x24, 0x30, 0x48, 0x8b, 0x74, 0x24, 0x38, 0x48, 0x83, 0xc4,
+  0x20, 0x5f, 0xc3 }
+-- the registry getter's head: its global, read before the lazy creation
+---@type (integer|false)[]
+local GETTER_800 = { 0x48, 0x89, 0x5c, 0x24, 0x18, 0x57, 0x48, 0x83, 0xec, 0x30, 0x48, 0x8b, 0x05, false, false, false,
+  false, 0x90 }
+-- inside the reset routine: identity rows into +0x450..+0x470, then update(editor)
+---@type (integer|false)[]
+local UPDATE_800 = { 0x0f, 0x28, 0x05, false, false, false, false, 0x48, 0x8b, 0xcf, 0x0f, 0x11, 0x87, 0x50, 0x04, 0x00,
+  0x00, 0x0f, 0x28, 0x0d, false, false, false, false, 0x0f, 0x11, 0x8f, 0x60, 0x04, 0x00, 0x00, 0x0f,
+  0x28, 0x05, false, false, false, false, 0x0f, 0x11, 0x87, 0x70, 0x04, 0x00, 0x00, 0xe8, false, false,
+  false, false }
+-- inside the update: cmp byte [r15 + disp32], bl
+---@type (integer|false)[]
+local DRAGGING_800 = { 0x41, 0x38, 0x9f, false, false, false, false }
+
+-- Per build: the patterns, their operand positions and the engine objects' field offsets. The patterns pin
+-- editor, plan and the floating rows; the code-read dragging offset must equal `dragging`.
+local BUILDS = {
+  {
+    name = "9.00", drop = DROP_900, reset = RESET_900, update = UPDATE_900, draggingBytes = DRAGGING_900,
+    layout = {
+      dropRegistry = 0x13, dropResolver = 0x1e, resetRegistry = 0x26, resetResolver = 0x2b, resetRoutine = 0xdc,
+      updateCall = 0x163, draggingCmp = 0x1f9,
+      -- holomap: resolver kind, type check vfunc with its argument, the editor pointer
+      holomapKind = 4, holomapCheck = 0x11e0, holomapCheckArg = 0x3a, editor = 0x2c0,
+      -- editor: type check vfunc with its argument, plan entry vector, floating selection (begin, end),
+      -- floating transform, snap result, dragging flag
+      editorCheck = 0x18, editorCheckArg = 2, plan = 0x300, selection = 0x3c8, floating = 0x430, snapPose = 0x470,
+      valid = 0x4b0, snapEntryIdx = 0x4b8, snapEntry = 0x4c0, snapModuleConn = 0x4c8, snapStationConn = 0x4d0,
+      dragging = 0x570,
+      -- plan entry transform, connection name
+      entryTransform = 0x30, connectionName = 0x10,
+    },
+  },
+  {
+    name = "8.00", drop = DROP_800, reset = RESET_800, update = UPDATE_800, draggingBytes = DRAGGING_800, getter = GETTER_800,
+    layout = {
+      dropGetter = 0x0e, dropResolver = 0x1f, resetGetter = 0x16, resetResolver = 0x27, getterRegistry = 0x0d,
+      resetRoutine = 0xc9, updateCall = 0x144, draggingCmp = 0x1ee,
+      holomapKind = 4, holomapCheck = 0x1170, holomapCheckArg = 0x39, editor = 0x2d0,
+      -- the editor fields sit 0x10 above 9.00's
+      editorCheck = 0x18, editorCheckArg = 2, plan = 0x310, selection = 0x3d8, floating = 0x440, snapPose = 0x480,
+      valid = 0x4c0, snapEntryIdx = 0x4c8, snapEntry = 0x4d0, snapModuleConn = 0x4d8, snapStationConn = 0x4e0,
+      dragging = 0x580,
+      entryTransform = 0x30, connectionName = 0x10,
+    },
+  },
 }
+
+-- the matched build's layout; nil until located
+local LAYOUT
 
 -- nil: not located yet, false: unavailable, table: located
 ---@type table|false|nil
@@ -285,6 +342,36 @@ local function rel32(img, rva)
   return rva + 4 + i32(img.base + rva)
 end
 
+-- One build's walk from the two exports to registry, resolver and update; nil and the reason on any mismatch.
+local function walk(img, b, drop, reset)
+  local L = b.layout
+  if not (inText(img, drop, #b.drop) and matchBytes(img.base + drop, b.drop)) then return nil, "drop wrapper mismatch" end
+  if not (inText(img, reset, #b.reset) and matchBytes(img.base + reset, b.reset)) then return nil, "rotation reset wrapper mismatch" end
+  local resolver = rel32(img, drop + L.dropResolver)
+  if resolver ~= rel32(img, reset + L.resetResolver) then return nil, "wrappers disagree" end
+  local registry
+  if b.getter then
+    local getter = rel32(img, drop + L.dropGetter)
+    if getter ~= rel32(img, reset + L.resetGetter) then return nil, "wrappers disagree" end
+    if not (inText(img, getter, #b.getter) and matchBytes(img.base + getter, b.getter)) then return nil, "registry getter mismatch" end
+    registry = rel32(img, getter + L.getterRegistry)
+  else
+    registry = rel32(img, drop + L.dropRegistry)
+    if registry ~= rel32(img, reset + L.resetRegistry) then return nil, "wrappers disagree" end
+  end
+  local d = img.sec[".data"]
+  if registry < d.from or registry + 8 > d.vto then return nil, "registry outside .data" end
+  local at = rel32(img, reset + L.resetRoutine) + L.updateCall
+  if not (inText(img, at, #b.update) and matchBytes(img.base + at, b.update)) then return nil, "update call mismatch" end
+  local update = rel32(img, at + #b.update - 4)
+  at = update + L.draggingCmp
+  if not (inText(img, at, #b.draggingBytes) and matchBytes(img.base + at, b.draggingBytes)) then return nil, "dragging flag mismatch" end
+  local dragging = i32(img.base + at + 3)
+  if dragging ~= L.dragging then return nil, string.format("dragging flag at +0x%x, not +0x%x", dragging, L.dragging) end
+  if not (inText(img, resolver, 16) and inText(img, update, 16)) then return nil, "target outside .text" end
+  return { registry = registry, resolver = resolver, update = update, dragging = dragging }
+end
+
 ---@return table|false, string?
 local function detect()
   local dropAnchor = uptr(C.AddFloatingSequenceToConstructionPlan)
@@ -293,28 +380,23 @@ local function detect()
   if not img then return false, why end
   local base = uptr(img.base)
   local drop, reset = tonumber(dropAnchor - base), tonumber(resetAnchor - base)
-  if not (inText(img, drop, #DROP) and matchBytes(img.base + drop, DROP)) then return false, "drop wrapper mismatch" end
-  if not (inText(img, reset, #RESET) and matchBytes(img.base + reset, RESET)) then return false, "rotation reset wrapper mismatch" end
-  local registry, resolver = rel32(img, drop + LAYOUT.dropRegistry), rel32(img, drop + LAYOUT.dropResolver)
-  if registry ~= rel32(img, reset + LAYOUT.resetRegistry) or resolver ~= rel32(img, reset + LAYOUT.resetResolver) then return false, "wrappers disagree" end
-  local d = img.sec[".data"]
-  if registry < d.from or registry + 8 > d.vto then return false, "registry outside .data" end
-  local routine = rel32(img, reset + LAYOUT.resetRoutine)
-  local at = routine + LAYOUT.updateCall
-  if not (inText(img, at, #UPDATE) and matchBytes(img.base + at, UPDATE)) then return false, "update call mismatch" end
-  local update = rel32(img, at + #UPDATE - 4)
-  at = update + LAYOUT.draggingCmp
-  if not (inText(img, at, #DRAGGING) and matchBytes(img.base + at, DRAGGING)) then return false, "dragging flag mismatch" end
-  local dragging = i32(img.base + at + 3)
-  if dragging ~= LAYOUT.dragging then return false, string.format("dragging flag at +0x%x, not +0x%x", dragging, LAYOUT.dragging) end
-  if not (inText(img, resolver, 16) and inText(img, update, 16)) then return false, "target outside .text" end
-  sab.Debug("engine located (%s): resolver 0x%x registry 0x%x update 0x%x dragging +0x%x", img.id, resolver, registry, update, dragging)
-  return {
-    resolve = ffi.cast(FN_RESOLVE, img.base + resolver),
-    registry = ffi.cast(VOIDPP, img.base + registry),
-    update = ffi.cast(FN_UPDATE, img.base + update),
-    dragging = dragging,
-  }
+  local reasons = {}
+  for _, b in ipairs(BUILDS) do
+    local found, reason = walk(img, b, drop, reset)
+    if found then
+      LAYOUT = b.layout
+      sab.Debug("engine located (%s layout, %s): resolver 0x%x registry 0x%x update 0x%x dragging +0x%x", b.name, img.id,
+        found.resolver, found.registry, found.update, found.dragging)
+      return {
+        resolve = ffi.cast(FN_RESOLVE, img.base + found.resolver),
+        registry = ffi.cast(VOIDPP, img.base + found.registry),
+        update = ffi.cast(FN_UPDATE, img.base + found.update),
+        dragging = found.dragging,
+      }
+    end
+    reasons[#reasons + 1] = b.name .. ": " .. reason
+  end
+  return false, table.concat(reasons, "; ")
 end
 
 local function locate()
@@ -363,6 +445,12 @@ end
 
 function sab.ReadFloating(editor)
   return readTransform(editor + LAYOUT.floating)
+end
+
+-- Whether a module floats: the selection vector is not empty (what 9.00's HasBuildMapFloatingSelection reads).
+function sab.HasFloating(editor)
+  local sel = pp(editor + LAYOUT.selection)
+  return sel[0] ~= sel[1]
 end
 
 -- pos = { x, y, z } in the plan's frame; rows = three { x, y, z } or nil to keep the rotation
@@ -536,7 +624,7 @@ end
 -- Run the editor's update without a cursor: the snap search from the floating transform as written.
 -- A target entry pointer means the nearest compatible pair inside the snap radius was found.
 function sab.Snap(editor)
-  if not C.HasBuildMapFloatingSelection(sab.menu.holomap) then return { snapped = false, valid = false } end
+  if not sab.HasFloating(editor) then return { snapped = false, valid = false } end
   -- the snap search runs only while the editor drags a module
   local wasDragging = editor[engine.dragging]
   editor[engine.dragging] = 1
@@ -588,7 +676,7 @@ end
 local function finishPlacement(run, item)
   local menu = sab.menu
   local editor = sab.Editor()
-  if not (editor and C.HasBuildMapFloatingSelection(menu.holomap)) then
+  if not (editor and sab.HasFloating(editor)) then
     C.RemoveFloatingSequenceFromConstructionPlan(menu.holomap)
     menu.floatingNewModule = nil
     run.failed = run.failed + 1
@@ -874,7 +962,7 @@ function sab.FitPlot(box, shrink)
     sab.Debug("plot change refused: +%.0f %.0f %.0f / -%.0f %.0f %.0f m", pos.x, pos.y, pos.z, neg.x, neg.y, neg.z)
     return false
   end
-  C.UpdateConstructionMapBuildPlot(menu.holomap)
+  if updatePlot then updatePlot(menu.holomap) end
   if plotIsFree(GetComponentData(menu.container, "sectorid")) then
     C.PayBuildPlotSize(menu.container, C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container))
   end
@@ -943,7 +1031,7 @@ function sab.AnswerPlot(accept)
     sab.StopRun("plot change refused")
     return
   end
-  C.UpdateConstructionMapBuildPlot(menu.holomap)
+  if updatePlot then updatePlot(menu.holomap) end
   -- the plot as extended is what gets paid; the offer was its prediction
   local price = math.min(o.price, plotPrice(o.sector))
   if price > 0 then TransferPlayerMoneyTo(price, ConvertStringTo64Bit(tostring(C.GetSectorControlStation(o.sector)))) end
@@ -1432,7 +1520,7 @@ end
 local function packStep(run, item)
   local menu = sab.menu
   local editor = sab.Editor()
-  if not (editor and C.HasBuildMapFloatingSelection(menu.holomap)) then
+  if not (editor and sab.HasFloating(editor)) then
     C.RemoveFloatingSequenceFromConstructionPlan(menu.holomap)
     menu.floatingNewModule = nil
     run.failed = run.failed + 1

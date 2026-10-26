@@ -69,6 +69,13 @@ local planner = {
   wares = {},
 }
 
+-- 9.00: GetProductionMethodInfo2; 8.00 has only GetProductionMethodInfo (vanilla-declared there), same two fields
+local hasMethodInfo2 = pcall(function() return C.GetProductionMethodInfo2 end)
+local function methodInfo(ware, method)
+  if hasMethodInfo2 then return C.GetProductionMethodInfo2(ware, method) end
+  return C.GetProductionMethodInfo(ware, method)
+end
+
 local LIBS = {
   production = "moduletypes_production",
   processing = "moduletypes_processing",
@@ -123,7 +130,7 @@ local function methodOf(ware, p, races)
   -- a lone method needs no match (the scrapworks library product reports a 0.4 cycle against a 60 s method)
   if #methods == 1 then return methods[1] end
   for _, m in ipairs(methods) do
-    local info = C.GetProductionMethodInfo2(ware, m)
+    local info = methodInfo(ware, m)
     if math.abs(info.productiontime - p.cycle) < 1e-6 and math.abs(info.productionamount - p.amount) < 1e-6 then
       local count, same = tonumber(C.GetNumProductionMethodResources(ware, m)), true
       if count > 0 then
@@ -448,7 +455,7 @@ local function shipResources(sizes, race, station)
           for _, m in ipairs(equipment or {}) do addResources(total, GetMacroData(m, "ware"), setting) end
         else
           fromWare = true
-          seconds = seconds + C.GetProductionMethodInfo2(ware, buildMethod(ware, setting)).productiontime
+          seconds = seconds + methodInfo(ware, buildMethod(ware, setting)).productiontime
         end
       end
     end
