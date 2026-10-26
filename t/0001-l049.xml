@@ -4,18 +4,59 @@
   <add sel="/language">
     <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
       <t id="1">Stations-Autobauer</t>
-      <t id="2">Füllt den Bauplan Ihrer Station aus einer Modulliste direkt im Baumenü, Modul für Modul, wobei der spieleigene Editor jedes Modul selbst einrastet.</t>
+      <t id="2">Plant und baut Ihre Station anhand eines Ziels, einer zu produzierenden Ware oder zu bauender Schiffe: Er ermittelt jedes Modul, das das Ziel benötigt, und platziert sie nacheinander im Baumenü, wobei der spieleigene Editor jedes Modul an seinen Platz einrasten lässt.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Auto-Planer</t>
+      <t id="100">Stations-Autobauer</t>
       <t id="101">Kategorie</t>
       <t id="102">Anzahl</t>
-      <t id="103">Starten</t>
+      <t id="103">Start</t>
       <t id="104">Stopp</t>
-      <t id="105">Lauf rückgängig</t>
-      <t id="106">Platziert %s, fehlgeschlagen %s, übrig %s</t>
+      <t id="105">Baugrund optimieren</t>
+      <t id="106">Platziert %s, fehlgeschlagen %s, verbleibend %s</t>
       <t id="107">Letzter Lauf: %s platziert, %s fehlgeschlagen</t>
       <t id="108">Der Editor ist in dieser Spielversion nicht erreichbar</t>
+      <t id="109">Ziel</t>
+      <t id="110">Stückliste</t>
+      <t id="111">Eine Ware produzieren</t>
+      <t id="112">Schiffe bauen oder instand halten</t>
+      <t id="114">Ware</t>
+      <t id="115">Netto, jetzt / geplant</t>
+      <t id="116">Produktionsmodule</t>
+      <t id="117">Baumodul</t>
+      <t id="118">Schiffe pro Stunde</t>
+      <t id="119">Voller Zyklus</t>
+      <t id="120">Arbeitskräfte</t>
+      <t id="121">Autarke Arbeitskräfte</t>
+      <t id="122">Geplante Module</t>
+      <t id="123">%s /h</t>
+      <t id="124">Arbeitskräfte %s von %s, Module bei %s%% davon, Handel %s m³/h ein, %s m³/h aus</t>
+      <t id="125">Kein Plan: %s</t>
+      <t id="126">Panel ausklappen</t>
+      <t id="127">Panel einklappen</t>
+      <t id="128">Station hier planen</t>
+      <t id="129">Der Baugrund konnte an dieser Stelle nicht reserviert werden</t>
+      <t id="130">Neue Station in %s</t>
+      <t id="131">%s, Kandidat %s von %s</t>
+      <t id="132">Durchgang %s von %s</t>
+      <t id="134">Dichtere Anordnung \(langsamere Planung\)</t>
+      <t id="135">Module im Plan: %s von %s, fehlgeschlagen %s</t>
+      <t id="136">Anordnung %s von %s: Modul %s von %s</t>
+      <t id="138">Module pro Frame</t>
+      <t id="139">Plätze für Docks und Stege werden gesucht: %s von %s</t>
+      <t id="140">%s / %s /h</t>
+      <t id="142">Baugrundlizenz für %s x %s x %s km: %s</t>
+      <t id="143">Baugrundlizenz abgelehnt, nichts platziert</t>
+      <t id="144">Auf den niedrigsten Wert loslassen, um dieses Ziel zu entfernen</t>
+      <t id="145">Ziel hinzufügen</t>
+      <t id="146">Deckt die Engpässe der Station ab: %s</t>
+      <t id="147">Das Layout benötigt %s km, mehr als die Baugrundgrenze von %s km: nichts platziert</t>
+      <t id="148">Lager, Stunden des Durchsatzes</t>
+      <t id="149">Rasse der Arbeitskräfte</t>
+      <t id="150">Rasse der Module</t>
+      <t id="151">Beliebig</t>
+      <t id="152">Gewählte Ziele: %s</t>
+      <t id="153">Die Extra Data API kann Moduldaten in dieser Spielversion nicht lesen</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Stations-Autobauer</t>
@@ -25,7 +66,7 @@
       <t id="90910">Debug-Stufe</t>
       <t id="90911">Keine</t>
       <t id="90912">Debug</t>
-      <t id="90913">Ablaufverfolgung</t>
+      <t id="90913">Trace</t>
     </page>
   </add>
 </diff>

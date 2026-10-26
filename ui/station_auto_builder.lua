@@ -417,7 +417,7 @@ end
 function sab.Editor()
   if engine == nil then locate() end
   local menu = sab.menu
-  if not (engine and menu and menu.holomap ~= 0) then return nil end
+  if not (engine and menu and menu.holomap and menu.holomap ~= 0) then return nil end
   local registry = engine.registry[0]
   if registry == nil then return nil end
   local holo = engine.resolve(registry, menu.holomap, LAYOUT.holomapKind)

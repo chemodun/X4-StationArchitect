@@ -4,18 +4,59 @@
   <add sel="/language">
     <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
       <t id="1">Constructeur automatique de station</t>
-      <t id="2">Remplit le plan de construction de votre station à partir d'une liste de modules, dans le menu de construction, module par module, l'éditeur du jeu plaçant lui-même chacun d'eux.</t>
+      <t id="2">Planifie et construit votre station à partir d'une cible, une marchandise à produire ou des vaisseaux à construire : il détermine chaque module dont l'objectif a besoin et les place un par un dans le menu de construction, l'éditeur du jeu faisant s'aligner chaque module à sa place.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Planificateur auto</t>
+      <t id="100">Constructeur automatique de station</t>
       <t id="101">Catégorie</t>
       <t id="102">Nombre</t>
       <t id="103">Lancer</t>
       <t id="104">Arrêter</t>
-      <t id="105">Annuler l'exécution</t>
+      <t id="105">Optimiser le terrain</t>
       <t id="106">Placés %s, échoués %s, restants %s</t>
       <t id="107">Dernière exécution : %s placés, %s échoués</t>
-      <t id="108">L'éditeur n'est pas accessible sur cette version du jeu</t>
+      <t id="108">L'éditeur est inaccessible sur cette version du jeu</t>
+      <t id="109">Cible</t>
+      <t id="110">Liste</t>
+      <t id="111">Produire une marchandise</t>
+      <t id="112">Construire ou entretenir des vaisseaux</t>
+      <t id="114">Marchandise</t>
+      <t id="115">Net, actuel / prévu</t>
+      <t id="116">Modules de production</t>
+      <t id="117">Module de construction</t>
+      <t id="118">Vaisseaux par heure</t>
+      <t id="119">Cycle complet</t>
+      <t id="120">Main d'œuvre</t>
+      <t id="121">Main d'œuvre autosuffisante</t>
+      <t id="122">Modules prévus</t>
+      <t id="123">%s /h</t>
+      <t id="124">Main d'œuvre %s sur %s, modules à %s%% de celle-ci, commerce %s m³/h en entrée, %s m³/h en sortie</t>
+      <t id="125">Aucun plan : %s</t>
+      <t id="126">Développer le panneau</t>
+      <t id="127">Réduire le panneau</t>
+      <t id="128">Planifier une station ici</t>
+      <t id="129">Le terrain n'a pas pu être réservé à cet endroit</t>
+      <t id="130">Nouvelle station dans %s</t>
+      <t id="131">%s, candidat %s sur %s</t>
+      <t id="132">Tour %s sur %s</t>
+      <t id="134">Agencement plus dense \(planification plus lente\)</t>
+      <t id="135">Modules dans le plan : %s sur %s, échoués %s</t>
+      <t id="136">Agencement %s sur %s : module %s sur %s</t>
+      <t id="138">Modules par image</t>
+      <t id="139">Recherche d'emplacements pour les docks et les jetées : %s sur %s</t>
+      <t id="140">%s / %s /h</t>
+      <t id="142">Licence de terrain pour %s x %s x %s km : %s</t>
+      <t id="143">Licence de terrain refusée, rien n'a été placé</t>
+      <t id="144">Relâcher à la valeur minimale pour retirer cette cible</t>
+      <t id="145">Ajouter une cible</t>
+      <t id="146">Couvre les manques de la station : %s</t>
+      <t id="147">L'agencement requiert %s km, au-delà de la limite de terrain de %s km : rien n'a été placé</t>
+      <t id="148">Stockage, heures de flux</t>
+      <t id="149">Race de la main d'œuvre</t>
+      <t id="150">Race des modules</t>
+      <t id="151">Toutes</t>
+      <t id="152">Cibles sélectionnées : %s</t>
+      <t id="153">L'API Extra Data ne peut pas lire les données des modules sur cette version du jeu</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Constructeur automatique de station</t>

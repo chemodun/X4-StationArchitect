@@ -1,24 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Station Auto Builder - Portuguese text, page 1972092448 -->
+<!-- Station Auto Builder - Brazilian Portuguese text, page 1972092448 -->
 <diff>
   <add sel="/language">
     <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
-      <t id="1">Construtor automático de estações</t>
-      <t id="2">Preenche o plano de construção da sua estação a partir de uma lista de módulos dentro do menu de construção, um módulo de cada vez, com o próprio editor do jogo encaixando cada um no lugar.</t>
+      <t id="1">Construtor Automático de Estações</t>
+      <t id="2">Planeja e constrói sua estação a partir de um alvo, um produto a fabricar ou naves a construir: calcula todos os módulos de que a meta precisa e os coloca um por vez no menu de construção, com o próprio editor do jogo encaixando cada um no lugar.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Planejador automático</t>
+      <t id="100">Construtor Automático de Estações</t>
       <t id="101">Categoria</t>
       <t id="102">Quantidade</t>
       <t id="103">Executar</t>
       <t id="104">Parar</t>
-      <t id="105">Desfazer execução</t>
-      <t id="106">Colocados %s, falhados %s, restantes %s</t>
-      <t id="107">Última execução: %s colocados, %s falhados</t>
+      <t id="105">Otimizar terreno</t>
+      <t id="106">Colocados %s, falhos %s, restantes %s</t>
+      <t id="107">Última execução: %s colocados, %s falhos</t>
       <t id="108">O editor não está acessível nesta versão do jogo</t>
+      <t id="109">Alvo</t>
+      <t id="110">Lista</t>
+      <t id="111">Fabricar um produto</t>
+      <t id="112">Construir ou manter naves</t>
+      <t id="114">Produto</t>
+      <t id="115">Líquido, agora / planejado</t>
+      <t id="116">Módulos de produção</t>
+      <t id="117">Módulo de construção</t>
+      <t id="118">Naves por hora</t>
+      <t id="119">Ciclo completo</t>
+      <t id="120">Força de trabalho</t>
+      <t id="121">Força de trabalho autossuficiente</t>
+      <t id="122">Módulos planejados</t>
+      <t id="123">%s /h</t>
+      <t id="124">Força de trabalho %s de %s, módulos a %s%% dela, comércio %s m³/h de entrada, %s m³/h de saída</t>
+      <t id="125">Sem plano: %s</t>
+      <t id="126">Expandir o painel</t>
+      <t id="127">Recolher o painel</t>
+      <t id="128">Planejar uma estação aqui</t>
+      <t id="129">Não foi possível reservar o terreno neste ponto</t>
+      <t id="130">Nova estação em %s</t>
+      <t id="131">%s, candidato %s de %s</t>
+      <t id="132">Turno %s de %s</t>
+      <t id="134">Empacotamento mais denso \(planejamento mais lento\)</t>
+      <t id="135">Módulos no plano: %s de %s, falhos %s</t>
+      <t id="136">Layout de empacotamento %s de %s: módulo %s de %s</t>
+      <t id="138">Módulos por quadro</t>
+      <t id="139">Procurando lugares para docas e píeres: %s de %s</t>
+      <t id="140">%s / %s /h</t>
+      <t id="142">Licença de terreno para %s x %s x %s km: %s</t>
+      <t id="143">Licença de terreno recusada, nada colocado</t>
+      <t id="144">Solte no menor valor para remover este alvo</t>
+      <t id="145">Adicionar um alvo</t>
+      <t id="146">Cobre as faltas da estação: %s</t>
+      <t id="147">O layout precisa de %s km, acima do limite de terreno de %s km: nada colocado</t>
+      <t id="148">Armazenamento, horas de fluxo</t>
+      <t id="149">Raça da força de trabalho</t>
+      <t id="150">Raça dos módulos</t>
+      <t id="151">Qualquer</t>
+      <t id="152">Alvos selecionados: %s</t>
+      <t id="153">A API Extra Data não consegue ler os dados dos módulos nesta versão do jogo</t>
 
       <!-- Section: Station Auto Builder (90000) -->
-      <t id="90000">Construtor automático de estações</t>
+      <t id="90000">Construtor Automático de Estações</t>
 
       <!-- Section: Debug (90900) -->
       <t id="90900">Depuração</t>

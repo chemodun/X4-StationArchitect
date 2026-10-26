@@ -4,18 +4,59 @@
   <add sel="/language">
     <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
       <t id="1">Automatyczny budowniczy stacji</t>
-      <t id="2">Wypełnia plan budowy twojej stacji z listy modułów w menu budowy, moduł po module, a własny edytor gry sam dopasowuje każdy z nich.</t>
+      <t id="2">Planuje i buduje twoją stację na podstawie celu, towaru do wyprodukowania lub statków do zbudowania: wylicza wszystkie moduły potrzebne do celu i umieszcza je w menu budowy jeden po drugim, a wbudowany edytor gry przyciąga każdy z nich na miejsce.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Automatyczny planer</t>
+      <t id="100">Automatyczny budowniczy stacji</t>
       <t id="101">Kategoria</t>
       <t id="102">Liczba</t>
       <t id="103">Uruchom</t>
       <t id="104">Zatrzymaj</t>
-      <t id="105">Cofnij przebieg</t>
+      <t id="105">Optymalizuj działkę</t>
       <t id="106">Umieszczono %s, nieudane %s, pozostało %s</t>
-      <t id="107">Ostatni przebieg: %s umieszczono, %s nieudanych</t>
+      <t id="107">Ostatnie uruchomienie: %s umieszczono, %s nieudanych</t>
       <t id="108">Edytor jest niedostępny w tej wersji gry</t>
+      <t id="109">Cel</t>
+      <t id="110">Zestawienie</t>
+      <t id="111">Wyprodukuj towar</t>
+      <t id="112">Buduj lub utrzymuj statki</t>
+      <t id="114">Towar</t>
+      <t id="115">Netto, teraz / planowane</t>
+      <t id="116">Moduły produkcyjne</t>
+      <t id="117">Moduł budowy</t>
+      <t id="118">Statki na godzinę</t>
+      <t id="119">Pełny cykl</t>
+      <t id="120">Siła robocza</t>
+      <t id="121">Samowystarczalna siła robocza</t>
+      <t id="122">Planowane moduły</t>
+      <t id="123">%s /h</t>
+      <t id="124">Siła robocza %s z %s, moduły na %s%% jej wartości, handel %s m³/h przychodzące, %s m³/h wychodzące</t>
+      <t id="125">Brak planu: %s</t>
+      <t id="126">Rozwiń panel</t>
+      <t id="127">Zwiń panel</t>
+      <t id="128">Zaplanuj stację tutaj</t>
+      <t id="129">Nie można zarezerwować działki w tym miejscu</t>
+      <t id="130">Nowa stacja w %s</t>
+      <t id="131">%s, kandydat %s z %s</t>
+      <t id="132">Tura %s z %s</t>
+      <t id="134">Gęstsze upakowanie \(wolniejsze planowanie\)</t>
+      <t id="135">Moduły w planie: %s z %s, nieudane %s</t>
+      <t id="136">Układ upakowania %s z %s: moduł %s z %s</t>
+      <t id="138">Modułów na klatkę</t>
+      <t id="139">Szukanie miejsc na doki i molo: %s z %s</t>
+      <t id="140">%s / %s /h</t>
+      <t id="142">Licencja na działkę %s x %s x %s km: %s</t>
+      <t id="143">Licencja na działkę odrzucona, nic nie umieszczono</t>
+      <t id="144">Zwolnij przy najniższej wartości, aby usunąć ten cel</t>
+      <t id="145">Dodaj cel</t>
+      <t id="146">Pokrywa niedobory stacji: %s</t>
+      <t id="147">Układ wymaga %s km, powyżej limitu działki %s km: nic nie umieszczono</t>
+      <t id="148">Magazyn, godziny przepływu</t>
+      <t id="149">Rasa siły roboczej</t>
+      <t id="150">Rasa modułów</t>
+      <t id="151">Dowolna</t>
+      <t id="152">Wybrane cele: %s</t>
+      <t id="153">Extra Data API nie może odczytać danych modułów w tej wersji gry</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Automatyczny budowniczy stacji</t>
@@ -25,7 +66,7 @@
       <t id="90910">Poziom debugowania</t>
       <t id="90911">Brak</t>
       <t id="90912">Debugowanie</t>
-      <t id="90913">Ślad</t>
+      <t id="90913">Śledzenie</t>
     </page>
   </add>
 </diff>

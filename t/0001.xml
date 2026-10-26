@@ -4,7 +4,7 @@
   <add sel="/language">
     <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
       <t id="1">Station Auto Builder</t>
-      <t id="2">Fills your station's build plan from a bill of modules inside the build menu, one module at a time, with the game's own editor snapping each one into place.</t>
+      <t id="2">Plans and builds your station from a target, a ware to produce or ships to build: it works out every module the goal needs and places them in the build menu one at a time, with the game's own editor snapping each one into place.</t>
 
       <!-- Panel in the build menu (100) -->
       <t id="100">Station Auto Builder</t>
@@ -39,7 +39,7 @@
       <t id="130">New station in %s</t>
       <t id="131">%s, candidate %s of %s</t>
       <t id="132">Turn %s of %s</t>
-      <t id="134">Denser packing (slower planning)</t>
+      <t id="134">Denser packing \(slower planning\)</t>
       <t id="135">Modules in the plan: %s of %s, failed %s</t>
       <t id="136">Packing layout %s of %s: module %s of %s</t>
       <t id="138">Modules per frame</t>

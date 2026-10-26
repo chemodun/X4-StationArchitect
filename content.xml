@@ -9,55 +9,55 @@
   sync="false"
   enabled="true"
   lastupdate=""
-  description="Fills your station's build plan from a bill of modules inside the build menu, one module at a time, with the game's own editor snapping each one into place.">
+  description="Plans and builds your station from a target, a ware to produce or ships to build: it works out every module the goal needs and places them in the build menu one at a time, with the game's own editor snapping each one into place.">
   <text language="7"
-    description="Заполняет план строительства станции по списку модулей прямо в меню строительства, по одному модулю за раз, а штатный редактор игры сам пристыковывает каждый из них."></text>
+    description="Plans and builds your station from a target, a ware to produce or ships to build: it works out every module the goal needs and places them in the build menu one at a time, with the game's own editor snapping each one into place."></text>
   <!-- French -->
   <text language="33"
-    description="Remplit le plan de construction de votre station à partir d'une liste de modules, dans le menu de construction, module par module, l'éditeur du jeu plaçant lui-même chacun d'eux."></text>
+    description="Planifie et construit votre station à partir d'une cible, une marchandise à produire ou des vaisseaux à construire : il détermine chaque module dont l'objectif a besoin et les place un par un dans le menu de construction, l'éditeur du jeu faisant s'aligner chaque module à sa place."></text>
   <!-- Spanish -->
   <text language="34"
-    description="Rellena el plan de construcción de tu estación a partir de una lista de módulos dentro del menú de construcción, módulo a módulo, y el propio editor del juego encaja cada uno en su sitio."></text>
+    description="Planifica y construye tu estación a partir de un objetivo, una mercancía a producir o naves a construir: calcula todos los módulos que la meta necesita y los coloca uno a uno en el menú de construcción, y el propio editor del juego encaja cada uno en su sitio."></text>
   <!-- Italian -->
   <text language="39"
-    description="Riempie il piano di costruzione della tua stazione da un elenco di moduli, dentro il menu di costruzione, un modulo alla volta, con l'editor del gioco che aggancia ciascuno al suo posto."></text>
+    description="Pianifica e costruisce la tua stazione a partire da un obiettivo, una merce da produrre o navi da costruire: calcola tutti i moduli che lo scopo richiede e li posiziona uno alla volta nel menu di costruzione, con l'editor stesso del gioco che incastra ciascuno al suo posto."></text>
   <!-- Czech -->
   <text language="42"
-    description="Doplní stavební plán vaší stanice podle seznamu modulů přímo v nabídce stavby, modul po modulu, a vlastní editor hry každý z nich sám přichytí na místo."></text>
+    description="Naplánuje a postaví vaši stanici podle cíle, zboží k výrobě nebo lodí ke stavbě: spočítá všechny moduly, které cíl potřebuje, a umisťuje je v nabídce stavby jeden po druhém, přičemž vlastní editor hry každý z nich přichytí na místo."></text>
   <!-- English -->
   <text language="44"
-    description="Fills your station's build plan from a bill of modules inside the build menu, one module at a time, with the game's own editor snapping each one into place."></text>
+    description="Plans and builds your station from a target, a ware to produce or ships to build: it works out every module the goal needs and places them in the build menu one at a time, with the game's own editor snapping each one into place."></text>
   <!-- Polish -->
   <text language="48"
-    description="Wypełnia plan budowy twojej stacji z listy modułów w menu budowy, moduł po module, a własny edytor gry sam dopasowuje każdy z nich."></text>
+    description="Planuje i buduje twoją stację na podstawie celu, towaru do wyprodukowania lub statków do zbudowania: wylicza wszystkie moduły potrzebne do celu i umieszcza je w menu budowy jeden po drugim, a wbudowany edytor gry przyciąga każdy z nich na miejsce."></text>
   <!-- German -->
   <text language="49"
-    description="Füllt den Bauplan Ihrer Station aus einer Modulliste direkt im Baumenü, Modul für Modul, wobei der spieleigene Editor jedes Modul selbst einrastet."></text>
+    description="Plant und baut Ihre Station anhand eines Ziels, einer zu produzierenden Ware oder zu bauender Schiffe: Er ermittelt jedes Modul, das das Ziel benötigt, und platziert sie nacheinander im Baumenü, wobei der spieleigene Editor jedes Modul an seinen Platz einrasten lässt."></text>
   <!-- Portuguese -->
   <text language="55"
-    description="Preenche o plano de construção da sua estação a partir de uma lista de módulos dentro do menu de construção, um módulo de cada vez, com o próprio editor do jogo encaixando cada um no lugar."></text>
+    description="Planeja e constrói sua estação a partir de um alvo, um produto a fabricar ou naves a construir: calcula todos os módulos de que a meta precisa e os coloca um por vez no menu de construção, com o próprio editor do jogo encaixando cada um no lugar."></text>
   <!-- Japanese -->
   <text language="81"
-    description="建造メニューの中でモジュールの一覧からステーションの建造計画を1つずつ埋めていき、ゲーム自身のエディターが各モジュールを所定の位置にスナップします。"></text>
+    description="目標となる生産ウェアや建造する艦船からステーションを計画して建造します。目標に必要なすべてのモジュールを割り出し、建造メニューで1つずつ配置します。各モジュールはゲーム標準のエディターによって所定の位置にスナップされます。"></text>
   <!-- Korean -->
   <text language="82"
-    description="건조 메뉴 안에서 모듈 목록을 바탕으로 스테이션 건조 계획을 모듈 하나씩 채우며, 게임 자체 편집기가 각 모듈을 제자리에 맞춥니다."></text>
+    description="생산할 물품이나 건조할 함선 같은 목표로부터 스테이션을 계획하고 건설합니다. 목표에 필요한 모든 모듈을 계산해 건설 메뉴에서 하나씩 배치하며, 각 모듈은 게임 자체 편집기가 제자리에 맞춰 줍니다."></text>
   <!-- Chinese Simplified -->
   <text language="86"
-    description="在建造菜单中按模块清单逐个填充空间站的建造方案，由游戏自带的编辑器将每个模块吸附到位。"></text>
+    description="根据目标（要生产的货物或要建造的飞船）规划并建造你的空间站：计算目标所需的全部模块，并在建造菜单中逐个放置，每个模块都由游戏自带的编辑器吸附到位。"></text>
   <!-- Chinese Traditional -->
   <text language="88"
-    description="在建造選單中按模組清單逐個填充空間站的建造方案，由遊戲自帶的編輯器將每個模組吸附到位。"></text>
+    description="根據目標（要生產的貨物或要建造的飛船）規劃並建造你的空間站：計算目標所需的全部模塊，並在建造選單中逐個放置，每個模塊都由遊戲自帶的編輯器吸附到位。"></text>
   <!-- Turkish -->
   <text language="90"
-    description="İstasyonunuzun inşa planını, inşa menüsünün içinde bir modül listesinden modül modül doldurur; oyunun kendi düzenleyicisi her modülü yerine oturtur."></text>
+    description="İstasyonunuzu bir hedeften, üretilecek bir maldan veya inşa edilecek gemilerden yola çıkarak planlar ve kurar: hedefin gerektirdiği her modülü hesaplar ve oyunun kendi düzenleyicisi her birini yerine oturturken bunları inşaat menüsünde tek tek yerleştirir."></text>
   <!-- Bulgarian -->
   <text language="359"
-    description="Попълва строителния план на вашата станция по списък с модули направо в менюто за строеж, модул по модул, като собственият редактор на играта сам закача всеки от тях на мястото му."></text>
+    description="Планира и изгражда вашата станция по цел, стока за производство или кораби за строеж: изчислява всеки модул, нужен за целта, и ги поставя в менюто за строеж един по един, като собственият редактор на играта закача всеки на мястото му."></text>
   <!-- Ukrainian -->
   <text language="380"
-    description="Заповнює план будівництва вашої станції за списком модулів прямо в меню будівництва, модуль за модулем, а власний редактор гри сам пристиковує кожен із них."></text>
-  <dependency version="900"></dependency>
+    description="Планує та будує вашу станцію за ціллю, товаром для виробництва або кораблями для будівництва: розраховує кожен модуль, потрібний для мети, і розміщує їх у меню будівництва по одному, а власний редактор гри прикріплює кожен на своє місце."></text>
+  <dependency version="800"></dependency>
   <dependency id="ws_2042901274" optional="false" name="SirNukes Mod Support APIs" version="195"></dependency>
   <dependency id="ws_3715253556" optional="false" name="Options Helper" version="110"></dependency>
   <dependency id="ws_3770927339" optional="false" name="Print Extension List" version="100"></dependency>

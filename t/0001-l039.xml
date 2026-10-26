@@ -4,18 +4,59 @@
   <add sel="/language">
     <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
       <t id="1">Costruttore automatico di stazioni</t>
-      <t id="2">Riempie il piano di costruzione della tua stazione da un elenco di moduli, dentro il menu di costruzione, un modulo alla volta, con l'editor del gioco che aggancia ciascuno al suo posto.</t>
+      <t id="2">Pianifica e costruisce la tua stazione a partire da un obiettivo, una merce da produrre o navi da costruire: calcola tutti i moduli che lo scopo richiede e li posiziona uno alla volta nel menu di costruzione, con l'editor stesso del gioco che incastra ciascuno al suo posto.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Pianificatore automatico</t>
+      <t id="100">Costruttore automatico di stazioni</t>
       <t id="101">Categoria</t>
       <t id="102">Quantità</t>
       <t id="103">Esegui</t>
       <t id="104">Ferma</t>
-      <t id="105">Annulla esecuzione</t>
-      <t id="106">Piazzati %s, falliti %s, rimanenti %s</t>
-      <t id="107">Ultima esecuzione: %s piazzati, %s falliti</t>
+      <t id="105">Ottimizza lotto</t>
+      <t id="106">Posizionati %s, falliti %s, rimasti %s</t>
+      <t id="107">Ultima esecuzione: %s posizionati, %s falliti</t>
       <t id="108">L'editor non è raggiungibile in questa versione del gioco</t>
+      <t id="109">Obiettivo</t>
+      <t id="110">Distinta</t>
+      <t id="111">Produci una merce</t>
+      <t id="112">Costruisci o mantieni navi</t>
+      <t id="114">Merce</t>
+      <t id="115">Netto, ora / previsto</t>
+      <t id="116">Moduli di produzione</t>
+      <t id="117">Modulo di costruzione</t>
+      <t id="118">Navi all'ora</t>
+      <t id="119">Ciclo completo</t>
+      <t id="120">Forza lavoro</t>
+      <t id="121">Forza lavoro autosufficiente</t>
+      <t id="122">Moduli pianificati</t>
+      <t id="123">%s /h</t>
+      <t id="124">Forza lavoro %s di %s, moduli al %s%% di essa, commercio %s m³/h in entrata, %s m³/h in uscita</t>
+      <t id="125">Nessun piano: %s</t>
+      <t id="126">Espandi il pannello</t>
+      <t id="127">Comprimi il pannello</t>
+      <t id="128">Pianifica una stazione qui</t>
+      <t id="129">Non è stato possibile riservare il lotto in questo punto</t>
+      <t id="130">Nuova stazione in %s</t>
+      <t id="131">%s, candidato %s di %s</t>
+      <t id="132">Turno %s di %s</t>
+      <t id="134">Impacchettamento più denso \(pianificazione più lenta\)</t>
+      <t id="135">Moduli nel piano: %s di %s, falliti %s</t>
+      <t id="136">Disposizione %s di %s: modulo %s di %s</t>
+      <t id="138">Moduli per fotogramma</t>
+      <t id="139">Ricerca di posti per attracchi e moli: %s di %s</t>
+      <t id="140">%s / %s /h</t>
+      <t id="142">Licenza del lotto per %s x %s x %s km: %s</t>
+      <t id="143">Licenza del lotto rifiutata, nulla posizionato</t>
+      <t id="144">Rilascia al valore minimo per rimuovere questo obiettivo</t>
+      <t id="145">Aggiungi un obiettivo</t>
+      <t id="146">Copre le carenze della stazione: %s</t>
+      <t id="147">Il layout richiede %s km, oltre il limite del lotto di %s km: nulla posizionato</t>
+      <t id="148">Magazzino, ore di flusso</t>
+      <t id="149">Razza della forza lavoro</t>
+      <t id="150">Razza dei moduli</t>
+      <t id="151">Qualsiasi</t>
+      <t id="152">Obiettivi selezionati: %s</t>
+      <t id="153">L'API Extra Data non può leggere i dati dei moduli in questa versione del gioco</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Costruttore automatico di stazioni</t>

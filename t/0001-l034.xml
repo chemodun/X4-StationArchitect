@@ -4,18 +4,59 @@
   <add sel="/language">
     <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
       <t id="1">Constructor automático de estaciones</t>
-      <t id="2">Rellena el plan de construcción de tu estación a partir de una lista de módulos dentro del menú de construcción, módulo a módulo, y el propio editor del juego encaja cada uno en su sitio.</t>
+      <t id="2">Planifica y construye tu estación a partir de un objetivo, una mercancía a producir o naves a construir: calcula todos los módulos que la meta necesita y los coloca uno a uno en el menú de construcción, y el propio editor del juego encaja cada uno en su sitio.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Planificador automático</t>
+      <t id="100">Constructor automático de estaciones</t>
       <t id="101">Categoría</t>
       <t id="102">Cantidad</t>
       <t id="103">Ejecutar</t>
       <t id="104">Detener</t>
-      <t id="105">Deshacer ejecución</t>
+      <t id="105">Optimizar parcela</t>
       <t id="106">Colocados %s, fallidos %s, pendientes %s</t>
       <t id="107">Última ejecución: %s colocados, %s fallidos</t>
       <t id="108">El editor no es accesible en esta versión del juego</t>
+      <t id="109">Objetivo</t>
+      <t id="110">Lista</t>
+      <t id="111">Producir una mercancía</t>
+      <t id="112">Construir o mantener naves</t>
+      <t id="114">Mercancía</t>
+      <t id="115">Neto, ahora / previsto</t>
+      <t id="116">Módulos de producción</t>
+      <t id="117">Módulo de construcción</t>
+      <t id="118">Naves por hora</t>
+      <t id="119">Ciclo completo</t>
+      <t id="120">Personal</t>
+      <t id="121">Personal autosuficiente</t>
+      <t id="122">Módulos previstos</t>
+      <t id="123">%s /h</t>
+      <t id="124">Personal %s de %s, módulos al %s%% de este, comercio %s m³/h de entrada, %s m³/h de salida</t>
+      <t id="125">Sin plan: %s</t>
+      <t id="126">Ampliar el panel</t>
+      <t id="127">Contraer el panel</t>
+      <t id="128">Planificar una estación aquí</t>
+      <t id="129">No se pudo reservar la parcela en este punto</t>
+      <t id="130">Nueva estación en %s</t>
+      <t id="131">%s, candidato %s de %s</t>
+      <t id="132">Turno %s de %s</t>
+      <t id="134">Empaquetado más denso \(planificación más lenta\)</t>
+      <t id="135">Módulos en el plan: %s de %s, fallidos %s</t>
+      <t id="136">Disposición de empaquetado %s de %s: módulo %s de %s</t>
+      <t id="138">Módulos por fotograma</t>
+      <t id="139">Buscando sitio para muelles y embarcaderos: %s de %s</t>
+      <t id="140">%s / %s /h</t>
+      <t id="142">Licencia de parcela para %s x %s x %s km: %s</t>
+      <t id="143">Licencia de parcela rechazada, no se colocó nada</t>
+      <t id="144">Suelta en el valor mínimo para quitar este objetivo</t>
+      <t id="145">Añadir un objetivo</t>
+      <t id="146">Cubre los déficits de la estación: %s</t>
+      <t id="147">La disposición necesita %s km, por encima del límite de parcela de %s km: no se colocó nada</t>
+      <t id="148">Almacenamiento, horas de flujo</t>
+      <t id="149">Raza del personal</t>
+      <t id="150">Raza de los módulos</t>
+      <t id="151">Cualquiera</t>
+      <t id="152">Objetivos seleccionados: %s</t>
+      <t id="153">La API de Extra Data no puede leer los datos de módulos en esta versión del juego</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Constructor automático de estaciones</t>

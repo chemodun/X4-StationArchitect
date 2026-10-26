@@ -3,28 +3,69 @@
 <diff>
   <add sel="/language">
     <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
-      <t id="1">Otomatik İstasyon İnşa Aracı</t>
-      <t id="2">İstasyonunuzun inşa planını, inşa menüsünün içinde bir modül listesinden modül modül doldurur; oyunun kendi düzenleyicisi her modülü yerine oturtur.</t>
+      <t id="1">Otomatik İstasyon Kurucusu</t>
+      <t id="2">İstasyonunuzu bir hedeften, üretilecek bir maldan veya inşa edilecek gemilerden yola çıkarak planlar ve kurar: hedefin gerektirdiği her modülü hesaplar ve oyunun kendi düzenleyicisi her birini yerine oturturken bunları inşaat menüsünde tek tek yerleştirir.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Otomatik Planlayıcı</t>
+      <t id="100">Otomatik İstasyon Kurucusu</t>
       <t id="101">Kategori</t>
       <t id="102">Adet</t>
       <t id="103">Çalıştır</t>
       <t id="104">Durdur</t>
-      <t id="105">Çalıştırmayı geri al</t>
+      <t id="105">Araziyi optimize et</t>
       <t id="106">Yerleştirilen %s, başarısız %s, kalan %s</t>
       <t id="107">Son çalıştırma: %s yerleştirildi, %s başarısız</t>
-      <t id="108">Bu oyun sürümünde düzenleyiciye erişilemiyor</t>
+      <t id="108">Düzenleyiciye bu oyun sürümünde erişilemiyor</t>
+      <t id="109">Hedef</t>
+      <t id="110">Liste</t>
+      <t id="111">Mal üret</t>
+      <t id="112">Gemi inşa et veya sürdür</t>
+      <t id="114">Mal</t>
+      <t id="115">Net, şimdi / planlanan</t>
+      <t id="116">Üretim modülleri</t>
+      <t id="117">İnşaat modülü</t>
+      <t id="118">Saatte gemi</t>
+      <t id="119">Tam döngü</t>
+      <t id="120">İş gücü</t>
+      <t id="121">Kendine yeten iş gücü</t>
+      <t id="122">Planlanan modüller</t>
+      <t id="123">%s /h</t>
+      <t id="124">İş gücü %s / %s, modüller bunun %s%% kadarında, ticaret %s m³/h giriş, %s m³/h çıkış</t>
+      <t id="125">Plan yok: %s</t>
+      <t id="126">Paneli genişlet</t>
+      <t id="127">Paneli daralt</t>
+      <t id="128">Burada istasyon planla</t>
+      <t id="129">Arazi bu noktada ayrılamadı</t>
+      <t id="130">%s içinde yeni istasyon</t>
+      <t id="131">%s, aday %s / %s</t>
+      <t id="132">Tur %s / %s</t>
+      <t id="134">Daha sıkı yerleşim \(daha yavaş planlama\)</t>
+      <t id="135">Plandaki modüller: %s / %s, başarısız %s</t>
+      <t id="136">Yerleşim düzeni %s / %s: modül %s / %s</t>
+      <t id="138">Kare başına modül</t>
+      <t id="139">Dok ve iskeleler için yer aranıyor: %s / %s</t>
+      <t id="140">%s / %s /h</t>
+      <t id="142">%s x %s x %s km arazi ruhsatı: %s</t>
+      <t id="143">Arazi ruhsatı reddedildi, hiçbir şey yerleştirilmedi</t>
+      <t id="144">Bu hedefi kaldırmak için en düşük değerde bırakın</t>
+      <t id="145">Hedef ekle</t>
+      <t id="146">İstasyonun açıklarını karşılar: %s</t>
+      <t id="147">Düzen %s km gerektiriyor, bu %s km arazi sınırını aşıyor: hiçbir şey yerleştirilmedi</t>
+      <t id="148">Depolama, akış saatleri</t>
+      <t id="149">İş gücü ırkı</t>
+      <t id="150">Modül ırkı</t>
+      <t id="151">Herhangi</t>
+      <t id="152">Seçilen hedefler: %s</t>
+      <t id="153">Extra Data API bu oyun sürümünde modül verilerini okuyamıyor</t>
 
       <!-- Section: Station Auto Builder (90000) -->
-      <t id="90000">Otomatik İstasyon İnşa Aracı</t>
+      <t id="90000">Otomatik İstasyon Kurucusu</t>
 
       <!-- Section: Debug (90900) -->
-      <t id="90900">Hata Ayıklama</t>
-      <t id="90910">Hata Ayıklama Seviyesi</t>
+      <t id="90900">Hata ayıklama</t>
+      <t id="90910">Hata ayıklama düzeyi</t>
       <t id="90911">Yok</t>
-      <t id="90912">Hata Ayıklama</t>
+      <t id="90912">Hata ayıklama</t>
       <t id="90913">İzleme</t>
     </page>
   </add>

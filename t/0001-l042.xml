@@ -4,18 +4,59 @@
   <add sel="/language">
     <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
       <t id="1">Automatický stavitel stanic</t>
-      <t id="2">Doplní stavební plán vaší stanice podle seznamu modulů přímo v nabídce stavby, modul po modulu, a vlastní editor hry každý z nich sám přichytí na místo.</t>
+      <t id="2">Naplánuje a postaví vaši stanici podle cíle, zboží k výrobě nebo lodí ke stavbě: spočítá všechny moduly, které cíl potřebuje, a umisťuje je v nabídce stavby jeden po druhém, přičemž vlastní editor hry každý z nich přichytí na místo.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Automatický plánovač</t>
+      <t id="100">Automatický stavitel stanic</t>
       <t id="101">Kategorie</t>
       <t id="102">Počet</t>
       <t id="103">Spustit</t>
       <t id="104">Zastavit</t>
-      <t id="105">Vrátit běh</t>
+      <t id="105">Optimalizovat parcelu</t>
       <t id="106">Umístěno %s, selhalo %s, zbývá %s</t>
       <t id="107">Poslední běh: %s umístěno, %s selhalo</t>
       <t id="108">Editor není v této verzi hry dostupný</t>
+      <t id="109">Cíl</t>
+      <t id="110">Soupis</t>
+      <t id="111">Vyrobit zboží</t>
+      <t id="112">Stavět nebo udržovat lodě</t>
+      <t id="114">Zboží</t>
+      <t id="115">Čistě, nyní / plán</t>
+      <t id="116">Výrobní moduly</t>
+      <t id="117">Stavební modul</t>
+      <t id="118">Lodí za hodinu</t>
+      <t id="119">Celý cyklus</t>
+      <t id="120">Pracovní síla</t>
+      <t id="121">Soběstačná pracovní síla</t>
+      <t id="122">Plánované moduly</t>
+      <t id="123">%s /h</t>
+      <t id="124">Pracovní síla %s z %s, moduly na %s%% z ní, obchod %s m³/h dovnitř, %s m³/h ven</t>
+      <t id="125">Žádný plán: %s</t>
+      <t id="126">Rozbalit panel</t>
+      <t id="127">Sbalit panel</t>
+      <t id="128">Naplánovat stanici zde</t>
+      <t id="129">Parcelu na tomto místě nelze rezervovat</t>
+      <t id="130">Nová stanice v %s</t>
+      <t id="131">%s, kandidát %s z %s</t>
+      <t id="132">Kolo %s z %s</t>
+      <t id="134">Hustší uspořádání \(pomalejší plánování\)</t>
+      <t id="135">Moduly v plánu: %s z %s, selhalo %s</t>
+      <t id="136">Rozvržení %s z %s: modul %s z %s</t>
+      <t id="138">Modulů na snímek</t>
+      <t id="139">Hledání míst pro doky a mola: %s z %s</t>
+      <t id="140">%s / %s /h</t>
+      <t id="142">Licence parcely pro %s x %s x %s km: %s</t>
+      <t id="143">Licence parcely zamítnuta, nic nebylo umístěno</t>
+      <t id="144">Uvolněte na nejnižší hodnotě pro odebrání tohoto cíle</t>
+      <t id="145">Přidat cíl</t>
+      <t id="146">Pokryje nedostatky stanice: %s</t>
+      <t id="147">Rozvržení potřebuje %s km, nad limitem parcely %s km: nic nebylo umístěno</t>
+      <t id="148">Sklad, hodiny toku</t>
+      <t id="149">Rasa pracovní síly</t>
+      <t id="150">Rasa modulů</t>
+      <t id="151">Jakákoli</t>
+      <t id="152">Vybrané cíle: %s</t>
+      <t id="153">Extra Data API nemůže na této verzi hry číst data modulů</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Automatický stavitel stanic</t>
