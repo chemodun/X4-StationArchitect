@@ -13,7 +13,6 @@
       <t id="103">Spustit</t>
       <t id="104">Zastavit</t>
       <t id="105">Optimalizovat parcelu</t>
-      <t id="106">Umístěno %s, selhalo %s, zbývá %s</t>
       <t id="107">Poslední běh: %s umístěno, %s selhalo</t>
       <t id="108">Editor není v této verzi hry dostupný</t>
       <t id="109">Cíl</t>
@@ -21,10 +20,7 @@
       <t id="111">Vyrobit zboží</t>
       <t id="112">Stavět nebo udržovat lodě</t>
       <t id="114">Zboží</t>
-      <t id="115">Čistě, nyní / plán</t>
-      <t id="116">Výrobní moduly</t>
       <t id="117">Stavební modul</t>
-      <t id="118">Lodí za hodinu</t>
       <t id="119">Celý cyklus</t>
       <t id="120">Pracovní síla</t>
       <t id="121">Soběstačná pracovní síla</t>
@@ -35,7 +31,6 @@
       <t id="126">Rozbalit panel</t>
       <t id="127">Sbalit panel</t>
       <t id="128">Naplánovat stanici zde</t>
-      <t id="129">Parcelu na tomto místě nelze rezervovat</t>
       <t id="130">Nová stanice v %s</t>
       <t id="131">%s, kandidát %s z %s</t>
       <t id="132">Kolo %s z %s</t>
@@ -57,6 +52,7 @@
       <t id="151">Jakákoli</t>
       <t id="152">Vybrané cíle: %s</t>
       <t id="153">Extra Data API nemůže na této verzi hry číst data modulů</t>
+      <t id="154">Zastaveno, plán byl změněn ručně: umístěno %s, selhalo %s</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Automatický stavitel stanic</t>

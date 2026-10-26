@@ -13,7 +13,6 @@
       <t id="103">Esegui</t>
       <t id="104">Ferma</t>
       <t id="105">Ottimizza lotto</t>
-      <t id="106">Posizionati %s, falliti %s, rimasti %s</t>
       <t id="107">Ultima esecuzione: %s posizionati, %s falliti</t>
       <t id="108">L'editor non è raggiungibile in questa versione del gioco</t>
       <t id="109">Obiettivo</t>
@@ -21,10 +20,7 @@
       <t id="111">Produci una merce</t>
       <t id="112">Costruisci o mantieni navi</t>
       <t id="114">Merce</t>
-      <t id="115">Netto, ora / previsto</t>
-      <t id="116">Moduli di produzione</t>
       <t id="117">Modulo di costruzione</t>
-      <t id="118">Navi all'ora</t>
       <t id="119">Ciclo completo</t>
       <t id="120">Forza lavoro</t>
       <t id="121">Forza lavoro autosufficiente</t>
@@ -35,7 +31,6 @@
       <t id="126">Espandi il pannello</t>
       <t id="127">Comprimi il pannello</t>
       <t id="128">Pianifica una stazione qui</t>
-      <t id="129">Non è stato possibile riservare il lotto in questo punto</t>
       <t id="130">Nuova stazione in %s</t>
       <t id="131">%s, candidato %s di %s</t>
       <t id="132">Turno %s di %s</t>
@@ -57,6 +52,7 @@
       <t id="151">Qualsiasi</t>
       <t id="152">Obiettivi selezionati: %s</t>
       <t id="153">L'API Extra Data non può leggere i dati dei moduli in questa versione del gioco</t>
+      <t id="154">Interrotto, il piano è stato modificato a mano: %s posizionati, %s falliti</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Costruttore automatico di stazioni</t>

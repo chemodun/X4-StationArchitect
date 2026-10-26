@@ -39,6 +39,7 @@ ffi.cdef [[
   void UpdateConstructionMapBuildPlot(UniverseID holomapid);
   void PayBuildPlotSize(UniverseID stationid, Coord3D plotsize, Coord3D plotcenter);
   UniverseID ReserveBuildPlot(UniverseID sectorid, const char* factionid, const char* set, UIPosRot location, float x, float y, float z);
+  void SetConstructionMapCollisionDetection(UniverseID holomapid, bool value);
   void SetStationModuleLoadoutLevel(UniverseID stationid, float value);
   bool StopPanMap(UniverseID holomapid);
 ]]
@@ -53,6 +54,7 @@ local FN_RESOLVE, FN_UPDATE = ffi.typeof("void*(*)(void*, uint64_t, uint32_t)"),
 local FN_U8_I32 = ffi.typeof("uint8_t(*)(void*, int32_t)")
 -- vanilla's cdefs (ego_detailmonitor loads first); the Plan2 variant is 9.00 only
 local PLAN_ENTRIES = ffi.typeof("UIConstructionPlanEntry[?]")
+local BOOL1 = ffi.typeof("bool[1]")
 
 -- 9.00 only; 8.00 has no such export, its build menu never grows the plot
 local hasUpdatePlot, updatePlot = pcall(function() return C.UpdateConstructionMapBuildPlot end)
@@ -740,6 +742,9 @@ local function finishPlacement(run, item)
     local plan = sab.ReadPlan()
     local added = plan[#plan]
     menu.floatingNewModule = nil
+    -- not this one module: the player changed the plan, Tick stops the run
+    if count ~= run.countBefore + 1 or added.macro ~= item.macro then return false, true end
+    run.planCount = count
     run.placed = run.placed + 1
     applyDefaultLoadout(added)
     sab.Debug("placed %s as entry %d: %s on entry %d %s at %.0f %.0f %.0f", item.macro, added.idx, added.connection, added.predecessorIdx, added.predecessorConnection, added.offset.x, added.offset.y, added.offset.z)
@@ -976,7 +981,7 @@ end
 -- The licence still to pay for the plot as it is now (vanilla's plot menu price).
 local function plotPrice(sector)
   local menu = sab.menu
-  local size, buf = C.GetBuildPlotSize(menu.container), ffi.new("bool[1]", 0)
+  local size, buf = C.GetBuildPlotSize(menu.container), ffi.new(BOOL1, 0)
   local full = tonumber(C.GetBuildPlotPrice(sector, C.GetObjectPositionInSector(menu.container), size.x, size.y, size.z, "player"))
   return full - tonumber(C.GetBuildPlotPayment(menu.container, buf))
 end
@@ -1000,7 +1005,7 @@ function sab.OfferPlot(run)
   end
   local size = { x = (f.pos[1] + f.neg[1]) * PLOT_STEP, y = (f.pos[2] + f.neg[2]) * PLOT_STEP, z = (f.pos[3] + f.neg[3]) * PLOT_STEP }
   -- the predicted plot, not the current one: plotPrice reads the plot as it is
-  local buf = ffi.new("bool[1]", 0)
+  local buf = ffi.new(BOOL1, 0)
   local full = tonumber(C.GetBuildPlotPrice(sector, C.GetObjectPositionInSector(menu.container), size.x, size.y, size.z, "player"))
   local price = full - tonumber(C.GetBuildPlotPayment(menu.container, buf))
   sab.Debug("plot after the pack: %.0f x %.0f x %.0f km, licence %d Cr to pay", size.x / 1000, size.y / 1000, size.z / 1000, price)
@@ -1439,7 +1444,7 @@ local function addPlacement(run, editor, added, cand)
   end
 end
 
--- One frame of attempts for a pack item: "placed", "more" or "exhausted".
+-- One frame of attempts for a pack item: "placed", "more", "exhausted" or "changed" (a drop not of this item).
 local function tryCandidates(run, item, editor)
   local menu = sab.menu
   local tries, checks = 0, 0
@@ -1464,10 +1469,13 @@ local function tryCandidates(run, item, editor)
       if snap.snapped and snap.entryIdx == cand.f.entryIdx and snap.connection == cand.m.name and snap.predecessorConnection == cand.f.name then
         if snap.valid then
           C.AddFloatingSequenceToConstructionPlan(menu.holomap)
-          if tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) > run.countBefore then
+          local count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
+          if count > run.countBefore then
             local plan = sab.ReadPlan()
             local added = plan[#plan]
             menu.floatingNewModule = nil
+            if count ~= run.countBefore + 1 or added.macro ~= item.macro then return "changed" end
+            run.planCount = count
             run.placed = run.placed + 1
             applyDefaultLoadout(added)
             addPlacement(run, editor, added, cand)
@@ -1530,7 +1538,7 @@ local function packStep(run, item)
   end
   if not item.candidates then buildCandidates(run, item) end
   local result = tryCandidates(run, item, editor)
-  if result == "more" then return end
+  if result == "more" or result == "changed" then return end
   if result == "placed" then
     advance(run)
     return
@@ -1686,6 +1694,7 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
     stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, subdivide = opts and opts.subdivide }
   readPlanState(run, editor)
   if engine == false then return false end
+  run.planCount = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
   run.fromEmpty = run.n == 0
   run.gridRoute = gridRoute
   -- connection geometry: every connector (spurs), on the grid route every module too
@@ -1717,6 +1726,8 @@ function sab.StopRun(reason)
   -- the drag a dragged float started ends here, as vanilla's mouse-up ends it
   C.StopPanMap(menu.holomap)
   sab.run = nil
+  -- the player's module overlap setting again
+  menu.applySettings()
   sab.Debug("run %s: %d placed, %d failed", reason or "finished", run.placed, run.failed)
   -- a plan this run started from nothing gets a plot fitted to it on each side
   if run.fromEmpty and run.placed > 0 then
@@ -1767,6 +1778,14 @@ function sab.Tick(chained)
     sab.StopRun("engine access lost")
     return
   end
+  -- an entry added, removed or replaced by the player (list pick, undo, plan load) leaves the run's state stale
+  if tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) ~= run.planCount then
+    sab.StopRun("the plan changed outside the run")
+    sab.lastRun.changed = true
+    return
+  end
+  -- the valid flag is the run's collision check: on whatever vanilla's module overlap setting says
+  C.SetConstructionMapCollisionDetection(menu.holomap, true)
   if run.phase == "pack" then
     sab.grid.Step(run)
     return
@@ -2016,7 +2035,12 @@ end
 function sab.RunTarget()
   local spec = sab.planner and sab.TargetSpec(sab.PanelContext())
   if not spec then return end
-  if sab.planner.Run(spec) then sab.panelDirty = true end
+  local ok, started = pcall(sab.planner.Run, spec)
+  if not ok then
+    sab.Error("plan failed: %s", tostring(started))
+    return
+  end
+  if started then sab.panelDirty = true end
 end
 
 local function categoryOptions()
@@ -2075,6 +2099,7 @@ local function progressText()
   local last = sab.lastRun
   if last and last.declined then return ReadText(PAGE, 143) end
   if last and last.tooLarge then return string.format(tostring(ReadText(PAGE, 147)), last.tooLarge, MAX_PLOT / 1000) end
+  if last and last.changed then return string.format(tostring(ReadText(PAGE, 154)), last.placed, last.failed) end
   if last then return string.format(tostring(ReadText(PAGE, 107)), last.placed, last.failed) end
   return ""
 end
@@ -2566,7 +2591,7 @@ function sab.DisplayDialog()
   local title = ttable:addRow(false, { bgColor = Color["row_title_background"] })
   title[1]:createText(string.format(tostring(ReadText(PAGE, 130)), tostring(GetComponentData(d.sector, "name"))), Helper.headerRowCenteredProperties)
 
-  -- the error and button rows below need three rows of the view
+  -- the button row below needs three rows of the view
   local bottom = Helper.viewHeight - y - Helper.frameBorder - Helper.scaleY(3 * buttonHeight)
   local plan, tabOrder, nextY = addTargetTables(frame, 2, ttable.properties.y + ttable:getVisibleHeight() + Helper.borderSize, bottom, true,
     buttonHeight, dialogContext(d), dirty, function(kit)
@@ -2576,12 +2601,7 @@ function sab.DisplayDialog()
     end, "dialog")
 
   local btable = frame:addTable(2, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = nextY })
-  local row
-  if d.error then
-    row = btable:addRow(true, {})
-    row[1]:setColSpan(2):createText(d.error, { color = Color["text_warning"] })
-  end
-  row = btable:addRow(true, {})
+  local row = btable:addRow(true, {})
   row[1]:createButton({ height = buttonHeight, active = plan ~= nil and plan.adds }):setText(ReadText(1001, 14), { halign = "center" })
   row[1].handlers.onClick = sab.ConfirmDialog
   row[2]:createButton({ height = buttonHeight }):setText(ReadText(1001, 64), { halign = "center" })
@@ -2589,7 +2609,8 @@ function sab.DisplayDialog()
   frame:display()
 end
 
--- OK: reserve the plot at the spot, pay it where vanilla would, set the module loadout level, open the build menu.
+-- OK: the map's own plot placement (the Plots tab's "Create plot"), the smallest plot on the cursor; the click
+-- validates and reserves it as vanilla does, and plotPlaced picks the station up. The run grows the plot.
 function sab.ConfirmDialog()
   local menu, d = sab.mapMenu, sab.dialog
   if not d then return end
@@ -2599,43 +2620,46 @@ function sab.ConfirmDialog()
     sab.Error("plan failed: %s", tostring(plan))
     return
   end
-  -- the smallest plot: the run grows it to the modules
-  local size = PLOT_STEP
-  local loc = ffi.new("UIPosRot")
-  loc.x, loc.y, loc.z = d.x, d.y, d.z
-  local station = C.ReserveBuildPlot(d.sector, "player", "factory", loc, size, size, size)
-  if station == 0 then
-    d.error = ReadText(PAGE, 129)
-    sab.dialogDirty = true
-    sab.Debug("plot of %d m refused at %s %.0f %.0f %.0f", size, tostring(d.sector), d.x, d.y, d.z)
-    return
-  end
+  sab.pendingTarget = { spec = spec, loadout = d.loadout, since = getElapsedTime() }
+  sab.CloseDialog()
+  menu.infoTableMode = "plots"
+  menu.currentsector = d.sector
+  menu.updatePlotData("plots_new", true)
+  menu.storeCurrentPlots()
+  menu.mode = "selectbuildlocation"
+  menu.clearSelectedComponents()
+  C.ShowBuildPlotPlacementMap(menu.holomap, d.sector)
+  local km = PLOT_STEP / 1000
+  menu.plotData.size = { x = km, y = km, z = km }
+  menu.plotData.dimensions = { posX = km, negX = 0, posY = km, negY = 0, posZ = km, negZ = 0 }
+  menu.refreshInfoFrame()
+  menu.buttonNewPlot()
+  sab.Debug("plot placement started: %d m, loadout %s", PLOT_STEP, tostring(d.loadout))
+end
+
+-- The map's click reserved the plot: the loadout level, then vanilla's own "Initiate construction".
+local function plotPlaced(station)
+  local menu, p = sab.mapMenu, sab.pendingTarget
   station = ConvertStringTo64Bit(tostring(station))
-  if GetComponentData(d.sector, "isplayerowned") then
-    C.PayBuildPlotSize(station, { x = size, y = size, z = size }, { x = d.x, y = d.y, z = d.z })
-  end
-  C.SetStationModuleLoadoutLevel(station, d.loadout)
-  sab.pendingTarget = { station = station, spec = spec, since = getElapsedTime() }
+  C.SetStationModuleLoadoutLevel(station, p.loadout)
+  ---@diagnostic disable-next-line: assign-type-mismatch
+  p.station, p.since = station, getElapsedTime()
   -- the build menu keeps the dialog's goals for the new station
   sab.target.station, sab.target.planRead = station, true
-  sab.Debug("plot reserved: station %s, %d m, loadout %s", tostring(station), size, tostring(d.loadout))
-  sab.CloseDialog()
-  AddUITriggeredEvent(menu.name, "initiateconstruction_station", station)
-  Helper.closeMenuAndOpenNewMenu(menu, MENU_NAME, { 0, 0, station })
-  menu.cleanup()
+  sab.Debug("plot reserved: station %s, loadout %s", tostring(station), tostring(p.loadout))
+  menu.plotInitiateConstruction(station)
 end
 
 -- The build menu opened on the reserved plot: start the planned run.
 function sab.StartPending()
   local menu, p = sab.menu, sab.pendingTarget
-  local age = getElapsedTime() - p.since
-  if menu.container ~= p.station then
-    if age > 30 then
-      sab.pendingTarget = nil
-      sab.Debug("pending target dropped: another station opened")
-    end
+  if not p.station then return end
+  if getElapsedTime() - p.since > 30 then
+    sab.pendingTarget = nil
+    sab.Debug("pending target dropped: the build menu did not open on station %s in time", tostring(p.station))
     return
   end
+  if menu.container ~= p.station then return end
   if not sab.RouteOk() then
     sab.pendingTarget = nil
     sab.Error("pending target dropped: the route is unavailable on this build")
@@ -2692,6 +2716,22 @@ local function hookMapMenu()
       local ok, err = pcall(sab.DisplayDialog)
       if not ok then sab.Error("dialog failed: %s", tostring(err)) end
     end
+    -- the placement: vanilla's click reserves the plot and makes it the current one (active off, component set);
+    -- active off without a plot is a right click or Escape, another mode is another tab
+    local p, pd = sab.pendingTarget, menu.plotData
+    if p and not p.station and menu.shown and not (menu.mode == "selectbuildlocation" and pd and pd.active) then
+      local station = menu.mode == "selectbuildlocation" and pd and pd.component or nil
+      if station and station ~= 0 and station ~= "plots_new" and GetComponentData(ConvertStringTo64Bit(tostring(station)), "isplayerowned") then
+        local ok, err = pcall(plotPlaced, station)
+        if not ok then
+          sab.pendingTarget = nil
+          sab.Error("plot placement failed: %s", tostring(err))
+        end
+      else
+        sab.pendingTarget = nil
+        sab.Debug("pending target dropped: the plot placement was left")
+      end
+    end
   end
   local viewCreated = menu.viewCreated
   menu.viewCreated = function(layer, ...)
@@ -2704,15 +2744,17 @@ local function hookMapMenu()
   local cleanup = menu.cleanup
   menu.cleanup = function(...)
     sab.dialog, sab.dialogDirty, sab.dialogFrame, sab.dialogTables = nil, nil, nil, nil
+    if sab.pendingTarget and not sab.pendingTarget.station then sab.pendingTarget = nil end
     return cleanup(...)
   end
   local onCloseElement = menu.onCloseElement
-  menu.onCloseElement = function(...)
-    if sab.dialog then
+  -- a third argument is a forced close: the view is gone, the map must close, cleanup drops the dialog
+  menu.onCloseElement = function(dueToClose, layer, ...)
+    if sab.dialog and select("#", ...) == 0 then
       sab.CloseDialog()
       return
     end
-    return onCloseElement(...)
+    return onCloseElement(dueToClose, layer, ...)
   end
 end
 
@@ -2737,6 +2779,9 @@ local function hookMenu()
       local ok, err = pcall(sab.Tick)
       if not ok then
         sab.Error("tick failed: %s", tostring(err))
+        -- drop the float, end the drag and show the result as a normal stop does
+        local stopped, why = pcall(sab.StopRun, "tick failed")
+        if not stopped then sab.Error("stop after a failed tick failed: %s", tostring(why)) end
         sab.run = nil
       end
       if sab.planRefresh and menu.shown then
@@ -2787,8 +2832,9 @@ local function hookMenu()
     return cleanup(...)
   end
   local onCloseElement = menu.onCloseElement
+  -- Escape (or a close) while a run is on: the run stops, vanilla then handles the close as usual
   menu.onCloseElement = function(...)
-    if sab.run then sab.StopRun("menu closed") end
+    if sab.run then sab.StopRun("stopped by Escape or a close") end
     return onCloseElement(...)
   end
 end

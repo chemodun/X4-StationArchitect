@@ -44,6 +44,7 @@ ffi.cdef [[
   uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID stationid, bool includeconstructions, bool includewrecks);
   WorkForceInfo GetWorkForceInfo(UniverseID containerid, const char* raceid);
 ]]
+local BLUEPRINTS, WARE_AMOUNTS, IDS = ffi.typeof("UIBlueprint[?]"), ffi.typeof("UIWareAmount[?]"), ffi.typeof("UniverseID[?]")
 -- the loadout and build order types are vanilla's (menu_ship_configuration.lua)
 local loadoutApi = pcall(ffi.cdef, [[
   void GenerateShipLoadout2(UILoadout2* result, UniverseID containerid, UniverseID shipid, const char* macroname, float level);
@@ -113,7 +114,7 @@ local function blueprints(set, lib)
   local macros = {}
   local n = C.GetNumBlueprints(set, lib, "")
   if n == 0 then return macros end
-  local buf = ffi.new("UIBlueprint[?]", n)
+  local buf = ffi.new(BLUEPRINTS, n)
   n = C.GetBlueprints(buf, n, set, lib, "")
   for i = 0, tonumber(n) - 1 do macros[#macros + 1] = ffi.string(buf[i].macro) end
   return macros
@@ -134,7 +135,7 @@ local function methodOf(ware, p, races)
     if math.abs(info.productiontime - p.cycle) < 1e-6 and math.abs(info.productionamount - p.amount) < 1e-6 then
       local count, same = tonumber(C.GetNumProductionMethodResources(ware, m)), true
       if count > 0 then
-        local buf = ffi.new("UIWareAmount[?]", count)
+        local buf = ffi.new(WARE_AMOUNTS, count)
         count = tonumber(C.GetProductionMethodResources(buf, count, ware, m))
         for i = 0, count - 1 do
           if wanted[ffi.string(buf[i].wareid)] ~= buf[i].amount then same = false end
@@ -317,7 +318,7 @@ end
 -- The efficiency factor of a built build module of the station that fabricates the size; nil when it has none.
 local function bayFor(station, size)
   local n = C.GetNumStationModules(station, false, false)
-  local buf = ffi.new("UniverseID[?]", n)
+  local buf = ffi.new(IDS, n)
   n = C.GetStationModules(buf, n, station, false, false)
   for i = 0, tonumber(n) - 1 do
     local macro = GetComponentData(ConvertStringTo64Bit(tostring(buf[i])), "macro")
@@ -385,7 +386,7 @@ local function addResources(total, ware, setting)
   local method = buildMethod(ware, setting)
   local n = method and C.GetNumProductionMethodResources(ware, method) or 0
   if n == 0 then return false end
-  local buf = ffi.new("UIWareAmount[?]", n)
+  local buf = ffi.new(WARE_AMOUNTS, n)
   n = C.GetProductionMethodResources(buf, n, ware, method)
   for i = 0, tonumber(n) - 1 do
     local res = ffi.string(buf[i].wareid)
@@ -489,7 +490,7 @@ local function stationMacros(station)
     for _, e in ipairs(sab.ReadPlan()) do macros[#macros + 1] = e.macro end
   else
     local n = C.GetNumStationModules(station, true, false)
-    local buf = ffi.new("UniverseID[?]", n)
+    local buf = ffi.new(IDS, n)
     n = C.GetStationModules(buf, n, station, true, false)
     for i = 0, tonumber(n) - 1 do macros[#macros + 1] = GetComponentData(ConvertStringTo64Bit(tostring(buf[i])), "macro") end
   end

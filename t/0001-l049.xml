@@ -13,7 +13,6 @@
       <t id="103">Start</t>
       <t id="104">Stopp</t>
       <t id="105">Baugrund optimieren</t>
-      <t id="106">Platziert %s, fehlgeschlagen %s, verbleibend %s</t>
       <t id="107">Letzter Lauf: %s platziert, %s fehlgeschlagen</t>
       <t id="108">Der Editor ist in dieser Spielversion nicht erreichbar</t>
       <t id="109">Ziel</t>
@@ -21,10 +20,7 @@
       <t id="111">Eine Ware produzieren</t>
       <t id="112">Schiffe bauen oder instand halten</t>
       <t id="114">Ware</t>
-      <t id="115">Netto, jetzt / geplant</t>
-      <t id="116">Produktionsmodule</t>
       <t id="117">Baumodul</t>
-      <t id="118">Schiffe pro Stunde</t>
       <t id="119">Voller Zyklus</t>
       <t id="120">Arbeitskräfte</t>
       <t id="121">Autarke Arbeitskräfte</t>
@@ -35,7 +31,6 @@
       <t id="126">Panel ausklappen</t>
       <t id="127">Panel einklappen</t>
       <t id="128">Station hier planen</t>
-      <t id="129">Der Baugrund konnte an dieser Stelle nicht reserviert werden</t>
       <t id="130">Neue Station in %s</t>
       <t id="131">%s, Kandidat %s von %s</t>
       <t id="132">Durchgang %s von %s</t>
@@ -57,6 +52,7 @@
       <t id="151">Beliebig</t>
       <t id="152">Gewählte Ziele: %s</t>
       <t id="153">Die Extra Data API kann Moduldaten in dieser Spielversion nicht lesen</t>
+      <t id="154">Angehalten, der Plan wurde von Hand geändert: %s platziert, %s fehlgeschlagen</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Stations-Autobauer</t>

@@ -13,7 +13,6 @@
       <t id="103">Executar</t>
       <t id="104">Parar</t>
       <t id="105">Otimizar terreno</t>
-      <t id="106">Colocados %s, falhos %s, restantes %s</t>
       <t id="107">Última execução: %s colocados, %s falhos</t>
       <t id="108">O editor não está acessível nesta versão do jogo</t>
       <t id="109">Alvo</t>
@@ -21,10 +20,7 @@
       <t id="111">Fabricar um produto</t>
       <t id="112">Construir ou manter naves</t>
       <t id="114">Produto</t>
-      <t id="115">Líquido, agora / planejado</t>
-      <t id="116">Módulos de produção</t>
       <t id="117">Módulo de construção</t>
-      <t id="118">Naves por hora</t>
       <t id="119">Ciclo completo</t>
       <t id="120">Força de trabalho</t>
       <t id="121">Força de trabalho autossuficiente</t>
@@ -35,7 +31,6 @@
       <t id="126">Expandir o painel</t>
       <t id="127">Recolher o painel</t>
       <t id="128">Planejar uma estação aqui</t>
-      <t id="129">Não foi possível reservar o terreno neste ponto</t>
       <t id="130">Nova estação em %s</t>
       <t id="131">%s, candidato %s de %s</t>
       <t id="132">Turno %s de %s</t>
@@ -57,6 +52,7 @@
       <t id="151">Qualquer</t>
       <t id="152">Alvos selecionados: %s</t>
       <t id="153">A API Extra Data não consegue ler os dados dos módulos nesta versão do jogo</t>
+      <t id="154">Interrompido, o plano foi alterado manualmente: %s colocados, %s falhos</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Construtor Automático de Estações</t>

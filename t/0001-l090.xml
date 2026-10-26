@@ -13,7 +13,6 @@
       <t id="103">Çalıştır</t>
       <t id="104">Durdur</t>
       <t id="105">Araziyi optimize et</t>
-      <t id="106">Yerleştirilen %s, başarısız %s, kalan %s</t>
       <t id="107">Son çalıştırma: %s yerleştirildi, %s başarısız</t>
       <t id="108">Düzenleyiciye bu oyun sürümünde erişilemiyor</t>
       <t id="109">Hedef</t>
@@ -21,10 +20,7 @@
       <t id="111">Mal üret</t>
       <t id="112">Gemi inşa et veya sürdür</t>
       <t id="114">Mal</t>
-      <t id="115">Net, şimdi / planlanan</t>
-      <t id="116">Üretim modülleri</t>
       <t id="117">İnşaat modülü</t>
-      <t id="118">Saatte gemi</t>
       <t id="119">Tam döngü</t>
       <t id="120">İş gücü</t>
       <t id="121">Kendine yeten iş gücü</t>
@@ -35,7 +31,6 @@
       <t id="126">Paneli genişlet</t>
       <t id="127">Paneli daralt</t>
       <t id="128">Burada istasyon planla</t>
-      <t id="129">Arazi bu noktada ayrılamadı</t>
       <t id="130">%s içinde yeni istasyon</t>
       <t id="131">%s, aday %s / %s</t>
       <t id="132">Tur %s / %s</t>
@@ -57,6 +52,7 @@
       <t id="151">Herhangi</t>
       <t id="152">Seçilen hedefler: %s</t>
       <t id="153">Extra Data API bu oyun sürümünde modül verilerini okuyamıyor</t>
+      <t id="154">Durduruldu, plan elle değiştirildi: yerleştirilen %s, başarısız %s</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Otomatik İstasyon Kurucusu</t>

@@ -13,7 +13,6 @@
       <t id="103">Lancer</t>
       <t id="104">Arrêter</t>
       <t id="105">Optimiser le terrain</t>
-      <t id="106">Placés %s, échoués %s, restants %s</t>
       <t id="107">Dernière exécution : %s placés, %s échoués</t>
       <t id="108">L'éditeur est inaccessible sur cette version du jeu</t>
       <t id="109">Cible</t>
@@ -21,10 +20,7 @@
       <t id="111">Produire une marchandise</t>
       <t id="112">Construire ou entretenir des vaisseaux</t>
       <t id="114">Marchandise</t>
-      <t id="115">Net, actuel / prévu</t>
-      <t id="116">Modules de production</t>
       <t id="117">Module de construction</t>
-      <t id="118">Vaisseaux par heure</t>
       <t id="119">Cycle complet</t>
       <t id="120">Main d'œuvre</t>
       <t id="121">Main d'œuvre autosuffisante</t>
@@ -35,7 +31,6 @@
       <t id="126">Développer le panneau</t>
       <t id="127">Réduire le panneau</t>
       <t id="128">Planifier une station ici</t>
-      <t id="129">Le terrain n'a pas pu être réservé à cet endroit</t>
       <t id="130">Nouvelle station dans %s</t>
       <t id="131">%s, candidat %s sur %s</t>
       <t id="132">Tour %s sur %s</t>
@@ -57,6 +52,7 @@
       <t id="151">Toutes</t>
       <t id="152">Cibles sélectionnées : %s</t>
       <t id="153">L'API Extra Data ne peut pas lire les données des modules sur cette version du jeu</t>
+      <t id="154">Arrêté, le plan a été modifié à la main : %s placés, %s échoués</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Constructeur automatique de station</t>

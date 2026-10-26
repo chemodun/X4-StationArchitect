@@ -13,7 +13,6 @@
       <t id="103">Uruchom</t>
       <t id="104">Zatrzymaj</t>
       <t id="105">Optymalizuj działkę</t>
-      <t id="106">Umieszczono %s, nieudane %s, pozostało %s</t>
       <t id="107">Ostatnie uruchomienie: %s umieszczono, %s nieudanych</t>
       <t id="108">Edytor jest niedostępny w tej wersji gry</t>
       <t id="109">Cel</t>
@@ -21,10 +20,7 @@
       <t id="111">Wyprodukuj towar</t>
       <t id="112">Buduj lub utrzymuj statki</t>
       <t id="114">Towar</t>
-      <t id="115">Netto, teraz / planowane</t>
-      <t id="116">Moduły produkcyjne</t>
       <t id="117">Moduł budowy</t>
-      <t id="118">Statki na godzinę</t>
       <t id="119">Pełny cykl</t>
       <t id="120">Siła robocza</t>
       <t id="121">Samowystarczalna siła robocza</t>
@@ -35,7 +31,6 @@
       <t id="126">Rozwiń panel</t>
       <t id="127">Zwiń panel</t>
       <t id="128">Zaplanuj stację tutaj</t>
-      <t id="129">Nie można zarezerwować działki w tym miejscu</t>
       <t id="130">Nowa stacja w %s</t>
       <t id="131">%s, kandydat %s z %s</t>
       <t id="132">Tura %s z %s</t>
@@ -57,6 +52,7 @@
       <t id="151">Dowolna</t>
       <t id="152">Wybrane cele: %s</t>
       <t id="153">Extra Data API nie może odczytać danych modułów w tej wersji gry</t>
+      <t id="154">Zatrzymano, plan został zmieniony ręcznie: umieszczono %s, nieudane %s</t>
 
       <!-- Section: Station Auto Builder (90000) -->
       <t id="90000">Automatyczny budowniczy stacji</t>
