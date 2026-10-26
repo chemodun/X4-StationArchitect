@@ -1,4 +1,4 @@
-[size=140][u]Station Auto Builder[/u][/size]
+[size=140][u]Station Architect[/u][/size]
 
 Building a large station by hand means working out every module it needs and then dragging each one into place; the game's generator places a whole list at once, but with random results and no second chance. This extension does both steps for you inside the build menu: tell it what the station should produce or build, and it computes every module the goal needs, then places them one at a time while the game's own editor snaps each one into place. Nothing is bought or built until you press the usual Apply.
 
@@ -57,8 +57,8 @@ Building a large station by hand means working out every module it needs and the
 [/list]
 [size=130][u]Installation[/u][/size]
 
-You can download the latest version via Steam client - [url=https://steamcommunity.com/sharedfiles/filedetails/?id=]Station Auto Builder[/url]
-Or you can do it via the Nexus Mods - [url=https://www.nexusmods.com/x4foundations/mods/]Station Auto Builder[/url]
+You can download the latest version via Steam client - [url=https://steamcommunity.com/sharedfiles/filedetails/?id=]Station Architect[/url]
+Or you can do it via the Nexus Mods - [url=https://www.nexusmods.com/x4foundations/mods/]Station Architect[/url]
 
 [size=130][u]Save state[/u][/size]
 
@@ -66,7 +66,7 @@ Or you can do it via the Nexus Mods - [url=https://www.nexusmods.com/x4foundatio
 
 [size=130][u]Usage[/u][/size]
 
-Open the build menu of one of your stations. The Station Auto Builder panel sits under the menu's title bar; expand it to plan. It has two tabs: [b]Target[/b] and [b]Bill[/b].
+Open the build menu of one of your stations. The Station Architect panel sits under the menu's title bar; expand it to plan. It has two tabs: [b]Target[/b] and [b]Bill[/b].
 
 [size=125][u]Target[/u][/size]
 [list=1]
@@ -76,9 +76,17 @@ Open the build menu of one of your stations. The Station Auto Builder panel sits
 [*] Press [b]Run[/b]. The run first finds a layout, then places the modules one after another; the panel shows the progress, and [b]Stop[/b] halts it after the current module. [b]Modules per frame[/b] sets how many modules are placed per frame.
 [*] When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press Apply as usual. [b]Optimize plot[/b] fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. [b]Reset[/b] starts the target over from what the station has.
 [/list]
+[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_target.png[/img][/spoiler]
+
+[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_running.png[/img][/spoiler]
+
+[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/build_menu_run.png[/img][/spoiler]
+
 [size=125][u]From the map[/u][/size]
 
 Right-click empty space in a sector on the map and choose [b]Plan a station here[/b]. The dialog shows the same target form, plus [b]Preset for all station modules[/b] (the loadout of the new modules). OK closes the dialog and puts the game's own plot box on your cursor, as the Plots tab's [b]Create plot[/b] does: the box turns red where a plot may not go, and a left click reserves it. The build menu then opens and the run starts; a right click or Escape before that click cancels the plan. The plot starts at 1 km and grows with the modules; Apply stays your click.
+
+[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/map_dialog.png[/img][/spoiler]
 
 [size=125][u]Bill[/u][/size]
 
@@ -86,15 +94,11 @@ The manual route: pick a category and a module from your blueprints, set the cou
 
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_bill.png[/img][/spoiler]
 
-[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_running.png[/img][/spoiler]
-
-[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/build_menu_run.png[/img][/spoiler]
-
 Connection modules in the bill are not placed as such: they are the budget of connectors the run may insert when a module finds no free connection.
 
 [size=130][u]Options[/u][/size]
 
-In the game's Extension Options, the Station Auto Builder page has a Debug Level setting (None, Debug, Trace) for the game log.
+In the game's Extension Options, the Station Architect page has a Debug Level setting (None, Debug, Trace) for the game log.
 
 [size=130][u]Credits[/u][/size]
 [list]
