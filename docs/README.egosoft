@@ -1,23 +1,34 @@
 [size=140][u]Station Auto Builder[/u][/size]
 
-Building a large station by hand means dragging every module into place; the game's generator places a whole list at once but with random results and no second chance. This extension fills your station's build plan from a bill of modules inside the build menu, one module at a time, and lets the game's own editor snap each one into place while you watch. Nothing is bought or built until you press the usual Apply.
+Building a large station by hand means working out every module it needs and then dragging each one into place; the game's generator places a whole list at once, but with random results and no second chance. This extension does both steps for you inside the build menu: tell it what the station should produce or build, and it computes every module the goal needs, then places them one at a time while the game's own editor snaps each one into place. Nothing is bought or built until you press the usual Apply.
 
 [size=130][u]Features[/u][/size]
 [list]
-[*] A planner panel in the station build menu: pick modules from your blueprints, set a count per module, press Run.
-[*] Modules are placed one after another on the station's free connections, visibly, in the real build plan.
-[*] The plan stays yours: undo, save and load plans, add or move modules by hand, Apply and pay as usual.
-[*] A module the planner cannot place is reported, not silently dropped; the game's own generator stays available for the rest.
+[*] [b]Target planner[/b]: choose what the station should do, not which modules it needs. A target is a ware to produce (a number of its production modules) or ships to build or maintain (a number of build modules); several targets fit in one plan.
+[*] [b]Full cycle[/b]: every intermediate ware down to the raw resources and the energy cells, with the storage to hold them. Without it, only the target's own modules and their storage.
+[*] [b]Workforce[/b]: habitats for the workforce the planned modules need; [b]Self-sufficient workforce[/b] adds the food and medical supplies that workforce eats. The workforce race and the race of all other modules are separate choices; "Any" picks the best of your blueprints for each module.
+[*] [b]Read from the game, not from tables[/b]: production rates with the workforce and sunlight bonuses of each production method, module sizes, connections, docking bays and approach zones, ship build times at the station's workforce. Docks and piers are sized for the station's planned traffic.
+[*] [b]A preview before anything is placed[/b]: the planned modules, each ware's net per hour now and after the plan, workforce, trade volume in and out, and warnings.
+[*] [b]Existing stations[/b]: the planner reads what a station already makes as its current targets, ticks Full cycle and Workforce when the station looks like it, and adds the modules for any shortfall it finds (a missing resource, habitats short of the workforce).
+[*] [b]Compact layout[/b]: production, storage and habitats are packed in a tight block linked by connection modules; ship build modules sit on the sides with their approach corridors clear; docks and piers go outward.
+[*] [b]A new station from the map[/b]: right-click empty space in a sector, choose [b]Plan a station here[/b], set the target, and OK reserves the plot, opens the build menu and starts the run.
+[*] [b]Bill route[/b]: the manual alternative, a list of modules and counts from your blueprints, placed the same way.
+[*] [b]Plot licence[/b]: where the plot costs money, the run shows the plot size it needs and the price, and places nothing until you buy the licence. [b]Optimize plot[/b] shrinks the plot to the planned modules afterwards.
+[*] [b]The plan stays yours[/b]: move, add or remove modules by hand, save or load plans, and press Apply to pay as usual; the build menu's Cancel discards the whole unconfirmed plan.
 [/list]
 [size=130][u]Limitations[/u][/size]
 [list]
-[*] Works only inside the open build menu of a station you own.
-[*] Windows version of the game only: the placement route reads the game's own editor in memory, which the native Linux build does not expose the same way. On a game build where that route is not available the panel says so and Run stays off; nothing else in the build menu changes.
-[*] Modules are placed on free connections of the current plan; a module that fits nowhere is reported as failed. The plot grows with the run as the modules need room. Where the plot licence costs money, a run on an empty plan first shows the plot it will need and its price, and places nothing until you buy the licence; Cancel stops the run.
+[*] Works only inside the open build menu of a station you own, with your own blueprints.
+[*] This mod requires [b]Protected UI Mode[/b] in the game's Extensions settings to be disabled.
+[*] Windows version of the game only: the placement route reads the game's own editor in memory, which the native Linux build does not expose the same way. The Windows game running on Linux through Proton or Wine should work.
+[*] Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable and Run stays off; nothing else in the build menu changes.
+[*] The plot is limited to the game's 20 km: a layout that needs more is refused before anything is placed.
+[*] Ship build times assume the station has its build drones; a shipyard without them builds several times slower than planned.
+[*] A module that fits nowhere is reported as failed, never silently dropped.
 [/list]
 [size=130][u]Requirements[/u][/size]
 [list]
-[*] [b]X4: Foundations[/b]: Version [b]9.00[/b] or higher, Windows version.
+[*] [b]X4: Foundations[/b]: Version [b]8.00[/b] or higher, Windows version.
 [*] [b]Mod Support APIs[/b]: Version [b]1.95[/b] or higher by [url=https://next.nexusmods.com/profile/sirnukes?gameId=2659]SirNukes[/url].
 [list]
 [*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2042901274]SirNukes Mod Support APIs[/url]
@@ -38,6 +49,11 @@ Building a large station by hand means dragging every module into place; the gam
 [*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3823580916]Lua Log API[/url]
 [*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/2473]Lua Log API[/url]
 [/list]
+[*] [b]Extra Data API[/b]: Version [b]1.00[/b] or higher by [url=https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659]Chem O`Dun[/url].
+[list]
+[*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3825599643]Extra Data API[/url]
+[*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/]Extra Data API[/url]
+[/list]
 [/list]
 [size=130][u]Installation[/u][/size]
 
@@ -50,19 +66,31 @@ Or you can do it via the Nexus Mods - [url=https://www.nexusmods.com/x4foundatio
 
 [size=130][u]Usage[/u][/size]
 
-Open the build menu of one of your stations. The planner panel sits under the menu's title bar.
+Open the build menu of one of your stations. The Station Auto Builder panel sits under the menu's title bar; expand it to plan. It has two tabs: [b]Target[/b] and [b]Bill[/b].
+
+[size=125][u]Target[/u][/size]
+[list=1]
+[*] Pick the kind of target ([b]Produce a ware[/b] or [b]Build or maintain ships[/b]), then the ware or the build module, and press [b]Add a target[/b]. Each added target gets a slider for its number of production or build modules; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target.
+[*] Set the options: [b]Modules race[/b], [b]Full cycle[/b], [b]Workforce[/b], [b]Self-sufficient workforce[/b], [b]Workforce race[/b], [b]Denser packing[/b] (a smaller block on an empty plan, at the cost of a longer planning step) and [b]Storage, hours of flow[/b] (how many hours of each ware's flow the storage holds).
+[*] Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning.
+[*] Press [b]Run[/b]. The run first finds a layout, then places the modules one after another; the panel shows the progress, and [b]Stop[/b] halts it after the current module. [b]Modules per frame[/b] sets how many modules are placed per frame.
+[*] When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press Apply as usual. [b]Optimize plot[/b] fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. [b]Reset[/b] starts the target over from what the station has.
+[/list]
+[size=125][u]From the map[/u][/size]
+
+Right-click empty space in a sector on the map and choose [b]Plan a station here[/b]. The dialog shows the same target form, plus [b]Preset for all station modules[/b] (the loadout of the new modules), the plot size and its price. OK reserves the plot at that spot, opens the build menu and starts the run; Apply stays your click.
+
+[size=125][u]Bill[/u][/size]
+
+The manual route: pick a category and a module from your blueprints, set the count, press [b]Add[/b]. Repeat for every module type; a row's X removes it, [b]Clear[/b] empties the bill. [b]Run[/b] places the modules on the station's free connections, nearest to the centre first, docks, piers, build and defence modules on outward connections.
 
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationAutoBuilder/refs/heads/main/docs/images/panel_bill.png[/img][/spoiler]
-[list=1]
-[*] Pick a category and a module from your blueprints, set the count, press Add. Repeat for every module type you want; a row's X removes it, Clear empties the bill.
-[*] Press Run. Modules are placed one after another; the panel counts placed, failed and left. Stop halts the run after the current module.
-[*] When the run ends, check the plan, move or remove what you like by hand, and press Apply as usual. The build menu's own Cancel discards the whole unconfirmed plan. Optimize plot fits the plot to the planned modules on every side (the smallest plot on an empty plan), so a plot a run grew or one you emptied is not paid larger than needed.
-[/list]
+
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationAutoBuilder/refs/heads/main/docs/images/panel_running.png[/img][/spoiler]
 
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationAutoBuilder/refs/heads/main/docs/images/build_menu_run.png[/img][/spoiler]
 
-Connection modules in the bill are not placed as such: they are the budget of connectors the planner may insert when a module finds no free connection. Big modules go first and nearest to the station's centre, docks, piers, build and defence modules on outward connections with clearance around them.
+Connection modules in the bill are not placed as such: they are the budget of connectors the run may insert when a module finds no free connection.
 
 [size=130][u]Options[/u][/size]
 
@@ -80,7 +108,7 @@ In the game's Extension Options, the Station Auto Builder page has a Debug Level
 [/list]
 [size=130][u]Changelog[/u][/size]
 
-[size=125][u][1.00] - 2026-10-23[/u][/size]
+[size=125][u][1.00] - 2026-10-??[/u][/size]
 [list]
 [*] Added
 [list]
