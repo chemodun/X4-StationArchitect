@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Station Auto Builder - Korean text, page 1972092448 -->
+<!-- Station Architect - Korean text, page 1972092448 -->
 <diff>
   <add sel="/language">
-    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
-      <t id="1">스테이션 자동 빌더</t>
+    <page id="1972092448" title="Station Architect" descr="" voice="no">
+      <t id="1">스테이션 건축가</t>
       <t id="2">생산할 물품이나 건조할 함선 같은 목표로부터 스테이션을 계획하고 건설합니다. 목표에 필요한 모든 모듈을 계산해 건설 메뉴에서 하나씩 배치하며, 각 모듈은 게임 자체 편집기가 제자리에 맞춰 줍니다.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">스테이션 자동 빌더</t>
+      <t id="100">스테이션 건축가</t>
       <t id="101">분류</t>
       <t id="102">수량</t>
       <t id="103">실행</t>
@@ -54,8 +54,8 @@
       <t id="153">이 게임 빌드에서는 Extra Data API가 모듈 데이터를 읽을 수 없습니다</t>
       <t id="154">중지됨, 계획이 수동으로 변경되었습니다: 배치 %s, 실패 %s</t>
 
-      <!-- Section: Station Auto Builder (90000) -->
-      <t id="90000">스테이션 자동 빌더</t>
+      <!-- Section: Station Architect (90000) -->
+      <t id="90000">스테이션 건축가</t>
 
       <!-- Section: Debug (90900) -->
       <t id="90900">디버그</t>

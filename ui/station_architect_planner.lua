@@ -1,4 +1,4 @@
--- Station Auto Builder: target planner core. A target (a ware per hour, or ships of a size per hour) becomes
+-- Station Architect: target planner core. A target (a ware per hour, or ships of a size per hour) becomes
 -- a bill of modules from the owned blueprints; no UI here. Module data is read from the game at plan time.
 ---@diagnostic disable-next-line: unresolved-require
 local ffi = require("ffi")
@@ -52,7 +52,7 @@ local loadoutApi = pcall(ffi.cdef, [[
   double GetBuildDuration(UniverseID containerid, UIBuildOrderList order);
 ]])
 
-local sab = StationAutoBuilder
+local sab = StationArchitect
 
 local planner = {
   -- sizing rules

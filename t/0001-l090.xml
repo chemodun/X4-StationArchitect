@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Station Auto Builder - Turkish text, page 1972092448 -->
+<!-- Station Architect - Turkish text, page 1972092448 -->
 <diff>
   <add sel="/language">
-    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
-      <t id="1">Otomatik İstasyon Kurucusu</t>
+    <page id="1972092448" title="Station Architect" descr="" voice="no">
+      <t id="1">İstasyon Mimarı</t>
       <t id="2">İstasyonunuzu bir hedeften, üretilecek bir maldan veya inşa edilecek gemilerden yola çıkarak planlar ve kurar: hedefin gerektirdiği her modülü hesaplar ve oyunun kendi düzenleyicisi her birini yerine oturturken bunları inşaat menüsünde tek tek yerleştirir.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Otomatik İstasyon Kurucusu</t>
+      <t id="100">İstasyon Mimarı</t>
       <t id="101">Kategori</t>
       <t id="102">Adet</t>
       <t id="103">Çalıştır</t>
@@ -54,8 +54,8 @@
       <t id="153">Extra Data API bu oyun sürümünde modül verilerini okuyamıyor</t>
       <t id="154">Durduruldu, plan elle değiştirildi: yerleştirilen %s, başarısız %s</t>
 
-      <!-- Section: Station Auto Builder (90000) -->
-      <t id="90000">Otomatik İstasyon Kurucusu</t>
+      <!-- Section: Station Architect (90000) -->
+      <t id="90000">İstasyon Mimarı</t>
 
       <!-- Section: Debug (90900) -->
       <t id="90900">Hata ayıklama</t>

@@ -1,6 +1,6 @@
--- Station Auto Builder - places a bill of modules through the vanilla build menu's own editor,
+-- Station Architect - places a bill of modules through the vanilla build menu's own editor,
 -- one module every two frames, so the player watches the plan grow and keeps undo, save plan and Apply.
--- Design, engine facts and the test plan: claude/mod-station_auto_builder.md.
+-- Design, engine facts and the test plan: claude/mod-station_architect.md.
 
 ---@diagnostic disable-next-line: unresolved-require
 local ffi = require("ffi")
@@ -61,7 +61,7 @@ local hasUpdatePlot, updatePlot = pcall(function() return C.UpdateConstructionMa
 if not hasUpdatePlot then updatePlot = nil end
 
 local sab = {
-  configBlackboard = "$StationAutoBuilderConfig",
+  configBlackboard = "$StationArchitectConfig",
   playerId = nil,
   cfg = {},
   debugLevel = "none",
@@ -80,7 +80,7 @@ local sab = {
 
 local function format(fmt, ...)
   if select("#", ...) > 0 then fmt = string.format(fmt, ...) end
-  return "StationAutoBuilder: " .. fmt
+  return "StationArchitect: " .. fmt
 end
 
 function sab.Error(fmt, ...) UIError(format(fmt, ...)) end
@@ -775,7 +775,7 @@ end
 -- No place: the overlapping candidates go to the engine's collision check, then the plot grows when it
 -- blocked candidates, then a connector grows outward from the edge and the item tries again. Further
 -- connectors for the same item continue straight from the previous one's tip (a spur); the item tries the tip first.
--- A target plan on an empty plot takes the grid layout (station_auto_builder_grid.lua) instead.
+-- A target plan on an empty plot takes the grid layout (station_architect_grid.lua) instead.
 
 local OUTER = { "dockarea", "pier", "buildmodule", "defencemodule", "ventureplatform" }
 local TRIES_PER_FRAME, CHECKS_PER_FRAME = 8, 400
@@ -1208,7 +1208,7 @@ local function strutFor(kit, length, vertical)
   return best
 end
 
--- for the grid layout (station_auto_builder_grid.lua)
+-- for the grid layout (station_architect_grid.lua)
 sab.geo = { rotate = rotate, unit = unit, mulRows = mulRows, worldBox = worldBox, zoneBoxes = zoneBoxes, armOf = armOf, strutFor = strutFor }
 
 -- The shortest combination of at most four struts spanning need or more: lengths, longest first.
@@ -2146,9 +2146,9 @@ end
 -- Input rows of a 4-column form table; a change marks the owning frame dirty through `dirty`.
 local function rowKit(ftable, idle, buttonHeight, dirty)
   local kit = {}
-  function kit.input(label)
+  function kit.input(label, span)
     local row = ftable:addRow(true, {})
-    row[1]:createText(label, { minRowHeight = buttonHeight })
+    row[1]:setColSpan(span or 1):createText(label, { minRowHeight = buttonHeight })
     return row
   end
   function kit.dropdown(row, options, current, onChange, active)
@@ -2268,7 +2268,7 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
       if ware then g.modules = math.max(low, math.min(top, g.modules or 1)) else g.bays = math.max(low, math.min(top, g.bays or 1)) end
       row = gtable:addRow(true, {})
       row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low, max = top,
-        start = ware and g.modules or g.bays, step = 1, hideMaxValue = true, active = idle, mouseOverText = ReadText(PAGE, 144) })
+        start = ware and g.modules or g.bays, step = 1, hideMaxValue = true, readOnly = not idle, mouseOverText = ReadText(PAGE, 144) })
           :setText(goalText(g, i, ok, plan, cat, ctx))
       row[1].handlers.onSliderCellChanged = function(_, value)
         if ware then g.modules = value else g.bays = value end
@@ -2299,16 +2299,16 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   input, dropdown = kit.input, kit.dropdown
   local checkbox = kit.checkbox
   dropdown(input(ReadText(PAGE, 150)), choices.moduleRaces, t.moduleRace, function(id) t.moduleRace = id end)
-  checkbox(input(ReadText(PAGE, 119)), t.fullCycle, true, function(v) t.fullCycle = v end)
-  checkbox(input(ReadText(PAGE, 120)), t.workforce, true, function(v) t.workforce = v end)
-  checkbox(input(ReadText(PAGE, 121)), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
+  checkbox(input(ReadText(PAGE, 119), 3), t.fullCycle, true, function(v) t.fullCycle = v end)
+  checkbox(input(ReadText(PAGE, 120), 3), t.workforce, true, function(v) t.workforce = v end)
+  checkbox(input(ReadText(PAGE, 121), 3), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
   dropdown(input(ReadText(PAGE, 149)), choices.races, t.race, function(id) t.race = id end)
   -- the grid packs an empty plan only
   local fresh = not ctx.station or (sab.menu.holomap ~= 0 and tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) == 0)
-  checkbox(input(ReadText(PAGE, 134)), t.dense, fresh, function(v) t.dense = v end)
+  checkbox(input(ReadText(PAGE, 134), 3), t.dense, fresh, function(v) t.dense = v end)
   row = stable:addRow(true, {})
   row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1, max = MAX_STORAGE_HOURS,
-    start = t.storageHours or sab.planner.storageHours, step = 1, active = idle }):setText(ReadText(PAGE, 148))
+    start = t.storageHours or sab.planner.storageHours, step = 1, readOnly = not idle }):setText(ReadText(PAGE, 148))
   ---@diagnostic disable-next-line: inject-field
   row[1].handlers.onSliderCellChanged = function(_, value) t.storageHours = value end
   row[1].handlers.onSliderCellConfirm = dirty
@@ -2544,7 +2544,7 @@ function sab.DisplayPanel()
 end
 
 -- *** map dialog (07c) ***
--- The Interact Menu API entry on an empty sector spot (MD cue Plot_Menu_Item) raises StationAutoBuilder.PlotDialog;
+-- The Interact Menu API entry on an empty sector spot (MD cue Plot_Menu_Item) raises StationArchitect.PlotDialog;
 -- the spot itself is taken from the interact menu at its open. OK reserves the plot there, sets the station-wide
 -- options and opens the build menu, which starts the run from sab.pendingTarget.
 
@@ -2840,8 +2840,8 @@ local function hookMenu()
 end
 
 local function init()
-  RegisterEvent("StationAutoBuilder.ConfigChanged", sab.ReadConfig)
-  RegisterEvent("StationAutoBuilder.PlotDialog", sab.OpenPlotDialog)
+  RegisterEvent("StationArchitect.ConfigChanged", sab.ReadConfig)
+  RegisterEvent("StationArchitect.PlotDialog", sab.OpenPlotDialog)
   sab.ReadConfig()
   hookMenu()
   hookInteractMenu()
@@ -2850,6 +2850,6 @@ local function init()
 end
 
 -- reachable from a console eval while the panel does not exist yet
-StationAutoBuilder = sab
+StationArchitect = sab
 
 Register_OnLoad_Init(init)

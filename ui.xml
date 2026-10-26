@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon name="station_auto_builder" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../ui/core/addon.xsd">
+<addon name="station_architect" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../ui/core/addon.xsd">
   <environment type="menus">
     <dependency name="sn_mod_support_apis" />
     <dependency name="ego_detailmonitor" />
     <dependency name="ego_interactmenu" />
     <dependency name="lua_log_api" />
     <dependency name="extra_data_api" />
-    <file name="ui/station_auto_builder.lua" />
-    <file name="ui/station_auto_builder_planner.lua" />
-    <file name="ui/station_auto_builder_grid.lua" />
+    <file name="ui/station_architect.lua" />
+    <file name="ui/station_architect_planner.lua" />
+    <file name="ui/station_architect_grid.lua" />
   </environment>
 </addon>

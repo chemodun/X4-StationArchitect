@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Station Auto Builder - German text, page 1972092448 -->
+<!-- Station Architect - German text, page 1972092448 -->
 <diff>
   <add sel="/language">
-    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
-      <t id="1">Stations-Autobauer</t>
+    <page id="1972092448" title="Station Architect" descr="" voice="no">
+      <t id="1">Stationsarchitekt</t>
       <t id="2">Plant und baut Ihre Station anhand eines Ziels, einer zu produzierenden Ware oder zu bauender Schiffe: Er ermittelt jedes Modul, das das Ziel benötigt, und platziert sie nacheinander im Baumenü, wobei der spieleigene Editor jedes Modul an seinen Platz einrasten lässt.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Stations-Autobauer</t>
+      <t id="100">Stationsarchitekt</t>
       <t id="101">Kategorie</t>
       <t id="102">Anzahl</t>
       <t id="103">Start</t>
@@ -54,8 +54,8 @@
       <t id="153">Die Extra Data API kann Moduldaten in dieser Spielversion nicht lesen</t>
       <t id="154">Angehalten, der Plan wurde von Hand geändert: %s platziert, %s fehlgeschlagen</t>
 
-      <!-- Section: Station Auto Builder (90000) -->
-      <t id="90000">Stations-Autobauer</t>
+      <!-- Section: Station Architect (90000) -->
+      <t id="90000">Stationsarchitekt</t>
 
       <!-- Section: Debug (90900) -->
       <t id="90900">Debug</t>

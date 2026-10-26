@@ -84,11 +84,11 @@ Right-click empty space in a sector on the map and choose [b]Plan a station here
 
 The manual route: pick a category and a module from your blueprints, set the count, press [b]Add[/b]. Repeat for every module type; a row's X removes it, [b]Clear[/b] empties the bill. [b]Run[/b] places the modules on the station's free connections, nearest to the centre first, docks, piers, build and defence modules on outward connections.
 
-[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationAutoBuilder/refs/heads/main/docs/images/panel_bill.png[/img][/spoiler]
+[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_bill.png[/img][/spoiler]
 
-[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationAutoBuilder/refs/heads/main/docs/images/panel_running.png[/img][/spoiler]
+[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_running.png[/img][/spoiler]
 
-[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationAutoBuilder/refs/heads/main/docs/images/build_menu_run.png[/img][/spoiler]
+[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/build_menu_run.png[/img][/spoiler]
 
 Connection modules in the bill are not placed as such: they are the budget of connectors the run may insert when a module finds no free connection.
 

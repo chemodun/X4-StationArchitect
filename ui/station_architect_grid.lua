@@ -1,4 +1,4 @@
--- Station Auto Builder: dense grid layout. Crosses joined arm to arm make a grid of cells; every module is a
+-- Station Architect: dense grid layout. Crosses joined arm to arm make a grid of cells; every module is a
 -- block of cells in one of its poses (any connection on any cross arm, four rolls), packed into one footprint
 -- floor by floor; crosses form the shortest tree to every module, a module's free connection carries a cross or
 -- another module directly; straight runs of bare crosses become struts. Sizes, connections and lengths come
@@ -7,7 +7,7 @@
 local ffi = require("ffi")
 local C = ffi.C
 
-local sab = StationAutoBuilder
+local sab = StationArchitect
 local grid = {}
 sab.grid = grid
 

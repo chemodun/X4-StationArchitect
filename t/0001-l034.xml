@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Station Auto Builder - Spanish text, page 1972092448 -->
+<!-- Station Architect - Spanish text, page 1972092448 -->
 <diff>
   <add sel="/language">
-    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
-      <t id="1">Constructor automático de estaciones</t>
+    <page id="1972092448" title="Station Architect" descr="" voice="no">
+      <t id="1">Arquitecto de estaciones</t>
       <t id="2">Planifica y construye tu estación a partir de un objetivo, una mercancía a producir o naves a construir: calcula todos los módulos que la meta necesita y los coloca uno a uno en el menú de construcción, y el propio editor del juego encaja cada uno en su sitio.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Constructor automático de estaciones</t>
+      <t id="100">Arquitecto de estaciones</t>
       <t id="101">Categoría</t>
       <t id="102">Cantidad</t>
       <t id="103">Ejecutar</t>
@@ -54,8 +54,8 @@
       <t id="153">La API de Extra Data no puede leer los datos de módulos en esta versión del juego</t>
       <t id="154">Detenido, el plan se modificó a mano: %s colocados, %s fallidos</t>
 
-      <!-- Section: Station Auto Builder (90000) -->
-      <t id="90000">Constructor automático de estaciones</t>
+      <!-- Section: Station Architect (90000) -->
+      <t id="90000">Arquitecto de estaciones</t>
 
       <!-- Section: Debug (90900) -->
       <t id="90900">Depuración</t>

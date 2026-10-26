@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Station Auto Builder - English text, page 1972092448 -->
+<!-- Station Architect - English text, page 1972092448 -->
 <diff>
   <add sel="/language">
-    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
-      <t id="1">Station Auto Builder</t>
+    <page id="1972092448" title="Station Architect" descr="" voice="no">
+      <t id="1">Station Architect</t>
       <t id="2">Plans and builds your station from a target, a ware to produce or ships to build: it works out every module the goal needs and places them in the build menu one at a time, with the game's own editor snapping each one into place.</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">Station Auto Builder</t>
+      <t id="100">Station Architect</t>
       <t id="101">Category</t>
       <t id="102">Count</t>
       <t id="103">Run</t>
@@ -54,8 +54,8 @@
       <t id="153">The Extra Data API cannot read module data on this game build</t>
       <t id="154">Stopped, the plan was changed by hand: %s placed, %s failed</t>
 
-      <!-- Section: Station Auto Builder (90000) -->
-      <t id="90000">Station Auto Builder</t>
+      <!-- Section: Station Architect (90000) -->
+      <t id="90000">Station Architect</t>
 
       <!-- Section: Debug (90900) -->
       <t id="90900">Debug</t>

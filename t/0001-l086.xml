@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Station Auto Builder - Chinese Simplified text, page 1972092448 -->
+<!-- Station Architect - Chinese Simplified text, page 1972092448 -->
 <diff>
   <add sel="/language">
-    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
-      <t id="1">空间站自动建造器</t>
+    <page id="1972092448" title="Station Architect" descr="" voice="no">
+      <t id="1">空间站建筑师</t>
       <t id="2">根据目标（要生产的货物或要建造的飞船）规划并建造你的空间站：计算目标所需的全部模块，并在建造菜单中逐个放置，每个模块都由游戏自带的编辑器吸附到位。</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">空间站自动建造器</t>
+      <t id="100">空间站建筑师</t>
       <t id="101">类别</t>
       <t id="102">数量</t>
       <t id="103">运行</t>
@@ -54,8 +54,8 @@
       <t id="153">此游戏版本下，Extra Data API 无法读取模块数据</t>
       <t id="154">已停止，规划被手动更改：已放置 %s，失败 %s</t>
 
-      <!-- Section: Station Auto Builder (90000) -->
-      <t id="90000">空间站自动建造器</t>
+      <!-- Section: Station Architect (90000) -->
+      <t id="90000">空间站建筑师</t>
 
       <!-- Section: Debug (90900) -->
       <t id="90900">调试</t>

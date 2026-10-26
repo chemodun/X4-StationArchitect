@@ -1,4 +1,4 @@
-# Station Auto Builder
+# Station Architect
 
 Building a large station by hand means working out every module it needs and then dragging each one into place; the game's generator places a whole list at once, but with random results and no second chance. This extension does both steps for you inside the build menu: tell it what the station should produce or build, and it computes every module the goal needs, then places them one at a time while the game's own editor snaps each one into place. Nothing is bought or built until you press the usual Apply.
 
@@ -47,8 +47,8 @@ Building a large station by hand means working out every module it needs and the
 
 ## Installation
 
-You can download the latest version via Steam client - [Station Auto Builder](https://steamcommunity.com/sharedfiles/filedetails/?id=)
-Or you can do it via the Nexus Mods - [Station Auto Builder](https://www.nexusmods.com/x4foundations/mods/)
+You can download the latest version via Steam client - [Station Architect](https://steamcommunity.com/sharedfiles/filedetails/?id=)
+Or you can do it via the Nexus Mods - [Station Architect](https://www.nexusmods.com/x4foundations/mods/)
 
 ## Save state
 
@@ -56,7 +56,7 @@ Or you can do it via the Nexus Mods - [Station Auto Builder](https://www.nexusmo
 
 ## Usage
 
-Open the build menu of one of your stations. The Station Auto Builder panel sits under the menu's title bar; expand it to plan. It has two tabs: **Target** and **Bill**.
+Open the build menu of one of your stations. The Station Architect panel sits under the menu's title bar; expand it to plan. It has two tabs: **Target** and **Bill**.
 
 ### Target
 
@@ -66,25 +66,29 @@ Open the build menu of one of your stations. The Station Auto Builder panel sits
 4. Press **Run**. The run first finds a layout, then places the modules one after another; the panel shows the progress, and **Stop** halts it after the current module. **Modules per frame** sets how many modules are placed per frame.
 5. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press Apply as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has.
 
-### From the map
-
-Right-click empty space in a sector on the map and choose **Plan a station here**. The dialog shows the same target form, plus **Preset for all station modules** (the loadout of the new modules). OK closes the dialog and puts the game's own plot box on your cursor, as the Plots tab's **Create plot** does: the box turns red where a plot may not go, and a left click reserves it. The build menu then opens and the run starts; a right click or Escape before that click cancels the plan. The plot starts at 1 km and grows with the modules; Apply stays your click.
-
-### Bill
-
-The manual route: pick a category and a module from your blueprints, set the count, press **Add**. Repeat for every module type; a row's X removes it, **Clear** empties the bill. **Run** places the modules on the station's free connections, nearest to the centre first, docks, piers, build and defence modules on outward connections.
-
-![The planner panel with a bill of two module types](docs/images/panel_bill.png)
+![The Target tab: two Hull Part Production modules with the full cycle and the workforce](docs/images/panel_target.png)
 
 ![A run in progress](docs/images/panel_running.png)
 
 ![The build menu during a run: the new modules appear on the station one by one](docs/images/build_menu_run.png)
 
+### From the map
+
+Right-click empty space in a sector on the map and choose **Plan a station here**. The dialog shows the same target form, plus **Preset for all station modules** (the loadout of the new modules). OK closes the dialog and puts the game's own plot box on your cursor, as the Plots tab's **Create plot** does: the box turns red where a plot may not go, and a left click reserves it. The build menu then opens and the run starts; a right click or Escape before that click cancels the plan. The plot starts at 1 km and grows with the modules; Apply stays your click.
+
+![The map dialog for a new station](docs/images/map_dialog.png)
+
+### Bill
+
+The manual route: pick a category and a module from your blueprints, set the count, press **Add**. Repeat for every module type; a row's X removes it, **Clear** empties the bill. **Run** places the modules on the station's free connections, nearest to the centre first, docks, piers, build and defence modules on outward connections.
+
+![The Bill tab with a connector, three storage modules and a dock area](docs/images/panel_bill.png)
+
 Connection modules in the bill are not placed as such: they are the budget of connectors the run may insert when a module finds no free connection.
 
 ## Options
 
-In the game's Extension Options, the Station Auto Builder page has a Debug Level setting (None, Debug, Trace) for the game log.
+In the game's Extension Options, the Station Architect page has a Debug Level setting (None, Debug, Trace) for the game log.
 
 ## Credits
 

@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Station Auto Builder - Chinese Traditional text, page 1972092448 -->
+<!-- Station Architect - Chinese Traditional text, page 1972092448 -->
 <diff>
   <add sel="/language">
-    <page id="1972092448" title="Station Auto Builder" descr="" voice="no">
-      <t id="1">空間站自動建造器</t>
+    <page id="1972092448" title="Station Architect" descr="" voice="no">
+      <t id="1">空間站建築師</t>
       <t id="2">根據目標（要生產的貨物或要建造的飛船）規劃並建造你的空間站：計算目標所需的全部模塊，並在建造選單中逐個放置，每個模塊都由遊戲自帶的編輯器吸附到位。</t>
 
       <!-- Panel in the build menu (100) -->
-      <t id="100">空間站自動建造器</t>
+      <t id="100">空間站建築師</t>
       <t id="101">類別</t>
       <t id="102">數量</t>
       <t id="103">運行</t>
@@ -54,8 +54,8 @@
       <t id="153">此遊戲版本下，Extra Data API 無法讀取模塊資料</t>
       <t id="154">已停止，規劃被手動更改：已放置 %s，失敗 %s</t>
 
-      <!-- Section: Station Auto Builder (90000) -->
-      <t id="90000">空間站自動建造器</t>
+      <!-- Section: Station Architect (90000) -->
+      <t id="90000">空間站建築師</t>
 
       <!-- Section: Debug (90900) -->
       <t id="90900">除錯</t>
