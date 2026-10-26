@@ -1,6 +1,6 @@
 [h1]Station Architect[/h1]
 
-Building a large station by hand means working out every module it needs and then dragging each one into place; the game's generator places a whole list at once, but with random results and no second chance. This extension does both steps for you inside the build menu: tell it what the station should produce or build, and it computes every module the goal needs, then places them one at a time while the game's own editor snaps each one into place. Nothing is bought or built until you press the usual Apply.
+This extension plans and builds your station inside the build menu. Tell it what the station should produce or build, and it works out every module the goal needs, then places them one at a time while the game's own editor snaps each one into place. Nothing is bought or built until you press the usual Apply.
 
 [h2][b]Features[/b][/h2]
 [list]
@@ -57,8 +57,8 @@ Building a large station by hand means working out every module it needs and the
 [/list]
 [h2][b]Installation[/b][/h2]
 
-You can download the latest version via Steam client - [url=https://steamcommunity.com/sharedfiles/filedetails/?id=]Station Architect[/url]
-Or you can do it via the Nexus Mods - [url=https://www.nexusmods.com/x4foundations/mods/]Station Architect[/url]
+You can download the latest version via Steam client - [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3827769999]Station Architect[/url]
+Or you can do it via the Nexus Mods - [url=https://www.nexusmods.com/x4foundations/mods/2520]Station Architect[/url]
 
 [h2][b]Save state[/b][/h2]
 
@@ -73,28 +73,44 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 [*] Pick the kind of target ([b]Produce a ware[/b] or [b]Build or maintain ships[/b]), then the ware or the build module, and press [b]Add a target[/b]. Each added target gets a slider for its number of production or build modules; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target.
 [*] Set the options: [b]Modules race[/b], [b]Full cycle[/b], [b]Workforce[/b], [b]Self-sufficient workforce[/b], [b]Workforce race[/b], [b]Denser packing[/b] (a smaller block on an empty plan, at the cost of a longer planning step) and [b]Storage, hours of flow[/b] (how many hours of each ware's flow the storage holds).
 [*] Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning.
-[*] Press [b]Run[/b]. The run first finds a layout, then places the modules one after another; the panel shows the progress, and [b]Stop[/b] halts it after the current module. [b]Modules per frame[/b] sets how many modules are placed per frame.
-[*] When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press Apply as usual. [b]Optimize plot[/b] fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. [b]Reset[/b] starts the target over from what the station has.
 [/list]
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_target.png[/img]
-
+[list=1]
+[*] Press [b]Run[/b]. The run first finds a layout. Where the plot costs money, it then shows the plot size it needs and the licence price, and places nothing until you press [b]Buy licence[/b]; [b]Cancel[/b] ends the run.
+[/list]
+[img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_licence.png[/img]
+[list=1]
+[*] The run places the modules one after another; the panel shows the progress, and [b]Stop[/b] halts it after the current module. [b]Modules per frame[/b] sets how many modules are placed per frame.
+[/list]
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_running.png[/img]
 
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/build_menu_run.png[/img]
-
+[list=1]
+[*] When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press Apply as usual. [b]Optimize plot[/b] fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. [b]Reset[/b] starts the target over from what the station has.
+[/list]
 [h2]From the map[/h2]
 
-Right-click empty space in a sector on the map and choose [b]Plan a station here[/b]. The dialog shows the same target form, plus [b]Preset for all station modules[/b] (the loadout of the new modules). OK closes the dialog and puts the game's own plot box on your cursor, as the Plots tab's [b]Create plot[/b] does: the box turns red where a plot may not go, and a left click reserves it. The build menu then opens and the run starts; a right click or Escape before that click cancels the plan. The plot starts at 1 km and grows with the modules; Apply stays your click.
+Right-click empty space in a sector on the map and choose [b]Plan a station here[/b].
+
+[img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/map_context_menu.png[/img]
+
+The dialog shows the same target form, plus [b]Preset for all station modules[/b] (the loadout of the new modules).
 
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/map_dialog.png[/img]
 
+OK closes the dialog and puts the game's own plot box on your cursor, as the Plots tab's [b]Create plot[/b] does: the box turns red where a plot may not go, and a left click reserves it. A right click or Escape before that click cancels the plan.
+
+[img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/map_plot_placement.png[/img]
+
+The build menu then opens and the run starts. The plot starts at 1 km and grows with the modules; Apply stays your click.
+
 [h2]Bill[/h2]
 
-The manual route: pick a category and a module from your blueprints, set the count, press [b]Add[/b]. Repeat for every module type; a row's X removes it, [b]Clear[/b] empties the bill. [b]Run[/b] places the modules on the station's free connections, nearest to the centre first, docks, piers, build and defence modules on outward connections.
+The manual route: pick a category and a module from your blueprints, set the count, press [b]Add[/b]. Repeat for every module type; a row's X removes it, [b]Clear[/b] empties the bill.
 
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_bill.png[/img]
 
-Connection modules in the bill are not placed as such: they are the budget of connectors the run may insert when a module finds no free connection.
+[b]Run[/b] places the modules on the station's free connections, nearest to the centre first, docks, piers, build and defence modules on outward connections. Connection modules in the bill are not placed as such: they are the budget of connectors the run may insert when a module finds no free connection.
 
 [h2][b]Options[/b][/h2]
 
