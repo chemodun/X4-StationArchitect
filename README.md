@@ -1,6 +1,6 @@
 # Station Architect
 
-Building a large station by hand means working out every module it needs and then dragging each one into place; the game's generator places a whole list at once, but with random results and no second chance. This extension does both steps for you inside the build menu: tell it what the station should produce or build, and it computes every module the goal needs, then places them one at a time while the game's own editor snaps each one into place. Nothing is bought or built until you press the usual Apply.
+This extension plans and builds your station inside the build menu. Tell it what the station should produce or build, and it works out every module the goal needs, then places them one at a time while the game's own editor snaps each one into place. Nothing is bought or built until you press the usual Apply.
 
 ## Features
 
@@ -47,8 +47,8 @@ Building a large station by hand means working out every module it needs and the
 
 ## Installation
 
-You can download the latest version via Steam client - [Station Architect](https://steamcommunity.com/sharedfiles/filedetails/?id=)
-Or you can do it via the Nexus Mods - [Station Architect](https://www.nexusmods.com/x4foundations/mods/)
+You can download the latest version via Steam client - [Station Architect](https://steamcommunity.com/sharedfiles/filedetails/?id=3827769999)
+Or you can do it via the Nexus Mods - [Station Architect](https://www.nexusmods.com/x4foundations/mods/2520)
 
 ## Save state
 
@@ -63,28 +63,44 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 1. Pick the kind of target (**Produce a ware** or **Build or maintain ships**), then the ware or the build module, and press **Add a target**. Each added target gets a slider for its number of production or build modules; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target.
 2. Set the options: **Modules race**, **Full cycle**, **Workforce**, **Self-sufficient workforce**, **Workforce race**, **Denser packing** (a smaller block on an empty plan, at the cost of a longer planning step) and **Storage, hours of flow** (how many hours of each ware's flow the storage holds).
 3. Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning.
-4. Press **Run**. The run first finds a layout, then places the modules one after another; the panel shows the progress, and **Stop** halts it after the current module. **Modules per frame** sets how many modules are placed per frame.
-5. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press Apply as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has.
 
 ![The Target tab: two Hull Part Production modules with the full cycle and the workforce](docs/images/panel_target.png)
+
+4. Press **Run**. The run first finds a layout. Where the plot costs money, it then shows the plot size it needs and the licence price, and places nothing until you press **Buy licence**; **Cancel** ends the run.
+
+![A run waiting for the plot licence](docs/images/panel_licence.png)
+
+5. The run places the modules one after another; the panel shows the progress, and **Stop** halts it after the current module. **Modules per frame** sets how many modules are placed per frame.
 
 ![A run in progress](docs/images/panel_running.png)
 
 ![The build menu during a run: the new modules appear on the station one by one](docs/images/build_menu_run.png)
 
+6. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press Apply as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has.
+
 ### From the map
 
-Right-click empty space in a sector on the map and choose **Plan a station here**. The dialog shows the same target form, plus **Preset for all station modules** (the loadout of the new modules). OK closes the dialog and puts the game's own plot box on your cursor, as the Plots tab's **Create plot** does: the box turns red where a plot may not go, and a left click reserves it. The build menu then opens and the run starts; a right click or Escape before that click cancels the plan. The plot starts at 1 km and grows with the modules; Apply stays your click.
+Right-click empty space in a sector on the map and choose **Plan a station here**.
+
+![The map's context menu on empty space](docs/images/map_context_menu.png)
+
+The dialog shows the same target form, plus **Preset for all station modules** (the loadout of the new modules).
 
 ![The map dialog for a new station](docs/images/map_dialog.png)
 
+OK closes the dialog and puts the game's own plot box on your cursor, as the Plots tab's **Create plot** does: the box turns red where a plot may not go, and a left click reserves it. A right click or Escape before that click cancels the plan.
+
+![The plot box on the cursor after OK](docs/images/map_plot_placement.png)
+
+The build menu then opens and the run starts. The plot starts at 1 km and grows with the modules; Apply stays your click.
+
 ### Bill
 
-The manual route: pick a category and a module from your blueprints, set the count, press **Add**. Repeat for every module type; a row's X removes it, **Clear** empties the bill. **Run** places the modules on the station's free connections, nearest to the centre first, docks, piers, build and defence modules on outward connections.
+The manual route: pick a category and a module from your blueprints, set the count, press **Add**. Repeat for every module type; a row's X removes it, **Clear** empties the bill.
 
 ![The Bill tab with a connector, three storage modules and a dock area](docs/images/panel_bill.png)
 
-Connection modules in the bill are not placed as such: they are the budget of connectors the run may insert when a module finds no free connection.
+**Run** places the modules on the station's free connections, nearest to the centre first, docks, piers, build and defence modules on outward connections. Connection modules in the bill are not placed as such: they are the budget of connectors the run may insert when a module finds no free connection.
 
 ## Options
 
