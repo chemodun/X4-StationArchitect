@@ -11,7 +11,7 @@ Building a large station by hand means working out every module it needs and the
 [*] [b]A preview before anything is placed[/b]: the planned modules, each ware's net per hour now and after the plan, workforce, trade volume in and out, and warnings.
 [*] [b]Existing stations[/b]: the planner reads what a station already makes as its current targets, ticks Full cycle and Workforce when the station looks like it, and adds the modules for any shortfall it finds (a missing resource, habitats short of the workforce).
 [*] [b]Compact layout[/b]: production, storage and habitats are packed in a tight block linked by connection modules; ship build modules sit on the sides with their approach corridors clear; docks and piers go outward.
-[*] [b]A new station from the map[/b]: right-click empty space in a sector, choose [b]Plan a station here[/b], set the target, and OK reserves the plot, opens the build menu and starts the run.
+[*] [b]A new station from the map[/b]: right-click empty space in a sector, choose [b]Plan a station here[/b], set the target, and OK hands you the game's own plot box; click where it may go, and the build menu opens with the run started.
 [*] [b]Bill route[/b]: the manual alternative, a list of modules and counts from your blueprints, placed the same way.
 [*] [b]Plot licence[/b]: where the plot costs money, the run shows the plot size it needs and the price, and places nothing until you buy the licence. [b]Optimize plot[/b] shrinks the plot to the planned modules afterwards.
 [*] [b]The plan stays yours[/b]: move, add or remove modules by hand, save or load plans, and press Apply to pay as usual; the build menu's Cancel discards the whole unconfirmed plan.
@@ -52,7 +52,7 @@ Building a large station by hand means working out every module it needs and the
 [*] [b]Extra Data API[/b]: Version [b]1.00[/b] or higher by [url=https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659]Chem O`Dun[/url].
 [list]
 [*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3825599643]Extra Data API[/url]
-[*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/]Extra Data API[/url]
+[*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/2519]Extra Data API[/url]
 [/list]
 [/list]
 [size=3][u][b]Installation[/b][/u][/size]
@@ -78,7 +78,7 @@ Open the build menu of one of your stations. The Station Auto Builder panel sits
 [/list]
 [size=3][u][i]From the map[/i][/u][/size]
 
-Right-click empty space in a sector on the map and choose [b]Plan a station here[/b]. The dialog shows the same target form, plus [b]Preset for all station modules[/b] (the loadout of the new modules), the plot size and its price. OK reserves the plot at that spot, opens the build menu and starts the run; Apply stays your click.
+Right-click empty space in a sector on the map and choose [b]Plan a station here[/b]. The dialog shows the same target form, plus [b]Preset for all station modules[/b] (the loadout of the new modules). OK closes the dialog and puts the game's own plot box on your cursor, as the Plots tab's [b]Create plot[/b] does: the box turns red where a plot may not go, and a left click reserves it. The build menu then opens and the run starts; a right click or Escape before that click cancels the plan. The plot starts at 1 km and grows with the modules; Apply stays your click.
 
 [size=3][u][i]Bill[/i][/u][/size]
 
