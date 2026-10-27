@@ -668,8 +668,9 @@ end
 local function beginPlacement(run, item)
   local menu = sab.menu
   run.countBefore = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
-  -- dragged: the drop waits a frame; not dragged: the editor takes it in the frame of the float
-  item.dragged = perFrame(run) <= 1
+  -- dragged: the drop waits a frame; not dragged: the editor takes it in the frame of the float. A free drop
+  -- is never dragged: a dragged float follows the cursor.
+  item.dragged = perFrame(run) <= 1 and not item.free
   C.AddMacroToConstructionMap(menu.holomap, item.macro, item.dragged)
   menu.floatingNewModule = item.macro
   run.phase = "drop"
@@ -721,19 +722,22 @@ local function finishPlacement(run, item)
   end
   sab.WriteFloating(editor, pos, rows)
   local snap = sab.Snap(editor)
-  local wrongEntry = snap.snapped and ((item.entryIdx and snap.entryIdx ~= item.entryIdx)
+  -- alone: a free drop that must not snap (a detached grid's root)
+  local wrongEntry = snap.snapped and ((item.entryIdx and snap.entryIdx ~= item.entryIdx) or item.alone
     or (pair and (snap.entryIdx ~= entryIdx or snap.connection ~= pair.connection or snap.predecessorConnection ~= pair.predecessorConnection)))
   -- a module touching two free connections may take the other one: the same place is the planned placement
   if wrongEntry and pair and not item.entryIdx and samePlace(snap.pose, pos, rows) then
     sab.Debug("%s: snapped to entry %d %s / %s, the planned place", item.macro, snap.entryIdx, snap.predecessorConnection, snap.connection)
     wrongEntry = false
   end
-  if (snap.snapped and not wrongEntry) or (item.free and snap.valid) then
+  if (snap.snapped and not wrongEntry) or (item.free and snap.valid and not (item.alone and snap.snapped)) then
     C.AddFloatingSequenceToConstructionPlan(menu.holomap)
   end
   local count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
-  -- a snap to the wanted entry the editor calls invalid can be a passing state: stay floated, retry next frames
-  if count <= run.countBefore and pair and snap.snapped and not wrongEntry and (item.validRetries or 0) < VALID_RETRIES then
+  -- a snap to the wanted entry the editor calls invalid can be a passing state, so is a free drop not checked
+  -- yet: stay floated, retry next frames
+  local pending = (pair and snap.snapped and not wrongEntry) or (item.free and not snap.snapped and not snap.valid)
+  if count <= run.countBefore and pending and (item.validRetries or 0) < VALID_RETRIES then
     item.validRetries = (item.validRetries or 0) + 1
     return false, true
   end
@@ -780,7 +784,7 @@ end
 local OUTER = { "dockarea", "pier", "buildmodule", "defencemodule", "ventureplatform" }
 local TRIES_PER_FRAME, CHECKS_PER_FRAME = 8, 400
 local ROLLS = { 0, math.pi / 2, math.pi, 3 * math.pi / 2 }
-local RELAXED_TRIES, MAX_REACH, MAX_SPURS, MAX_PLOT, PLOT_STEP = 200, 6, 3, 20000, 1000
+local RELAXED_TRIES, MAX_REACH, MAX_SPURS, MAX_PLOT, PLOT_STEP, PLOT_MARGIN = 200, 6, 3, 20000, 1000, 10
 sab.maxPlotKm = MAX_PLOT / 1000
 local AXES = { "x", "y", "z" }
 local STRAIGHT = 0.9
@@ -868,9 +872,10 @@ local function inZone(run, box)
   return false
 end
 
+-- box a inside the plot b, clear of its faces
 local function inside(a, b)
   for i = 1, 3 do
-    if a.min[i] < b.min[i] or a.max[i] > b.max[i] then return false end
+    if a.min[i] < b.min[i] + PLOT_MARGIN or a.max[i] > b.max[i] - PLOT_MARGIN then return false end
   end
   return true
 end
@@ -895,14 +900,45 @@ local function readPlot(run)
     max = { centre.x + size.x / 2, centre.y + size.y / 2, centre.z + size.z / 2 } }
 end
 
+-- A station from a macro-only saved plan holds its modules as roots (no predecessor) stacked at its origin.
+-- run.stacked: two or more such roots, run.stackedIdx those entries; run.comp: each entry's connected part, keyed
+-- by one of its entries.
+local function readStacked(run, plan)
+  local parent, stacked = {}, 0
+  run.stackedIdx = {}
+  local function find(i)
+    while parent[i] ~= i do i = parent[i] end
+    return i
+  end
+  for _, e in ipairs(plan) do parent[e.idx] = e.idx end
+  for _, e in ipairs(plan) do
+    if parent[e.predecessorIdx] then
+      parent[find(e.idx)] = find(e.predecessorIdx)
+    else
+      local o = e.offset
+      if math.abs(o.x) < 1 and math.abs(o.y) < 1 and math.abs(o.z) < 1 and math.abs(o.yaw) < 0.01 and math.abs(o.pitch) < 0.01
+          and math.abs(o.roll) < 0.01 then
+        stacked = stacked + 1
+        run.stackedIdx[e.idx] = true
+      end
+    end
+  end
+  run.stacked = stacked >= 2
+  run.comp = {}
+  for _, e in ipairs(plan) do run.comp[e.idx] = find(e.idx) end
+  if run.stacked then sab.Debug("stacked station: %d of %d entries are roots at its origin", stacked, #plan) end
+end
+
 -- The plan's connections, boxes, anchor and plot at the start of a run.
 local function readPlanState(run, editor)
   run.conns = sab.PlanConnections(editor)
   run.boxes, run.zones, run.macros, run.poses, run.sum, run.n = {}, {}, {}, {}, { 0, 0, 0 }, 0
-  for _, e in ipairs(sab.ReadPlan()) do
+  local plan = sab.ReadPlan()
+  for _, e in ipairs(plan) do
     local pose = checkedPose(editor, e)
     if pose then addEntry(run, e.idx, e.macro, pose) end
   end
+  readStacked(run, plan)
   readPlot(run)
 end
 
@@ -929,8 +965,9 @@ local function plotChange(box, shrink, quiet)
   local faces, need = { pos = {}, neg = {}, uncapped = {} }, 0
   for i, axis in ipairs(AXES) do
     local hp, hn = math.ceil(have.pos[i] / PLOT_STEP - 0.001), math.ceil(have.neg[i] / PLOT_STEP - 0.001)
-    local p = math.max(0, math.ceil(box.max[i] / PLOT_STEP - 0.001))
-    local n = math.max(0, math.ceil(-box.min[i] / PLOT_STEP - 0.001))
+    -- the editor refuses a module whose box ends on a plot face
+    local p = math.max(0, math.ceil((box.max[i] + PLOT_MARGIN) / PLOT_STEP))
+    local n = math.max(0, math.ceil((PLOT_MARGIN - box.min[i]) / PLOT_STEP))
     if not shrink then p, n = math.max(p, hp), math.max(n, hn) end
     if p + n == 0 then p = 1 end
     need = math.max(need, (p + n) * PLOT_STEP)
@@ -1321,6 +1358,51 @@ local function notePlaced(run, item, addedIdx, cand)
   if item.reach and (cand or item.spurDir) then run.spur = { owner = item.owner, tipIdx = addedIdx, dir = cand and cand.f.dir or item.spurDir } end
 end
 
+-- Distinct approach directions of a dock module.
+local function approaches(macro)
+  local dirs, n = {}, 0
+  for _, z in ipairs(ExtraData and ExtraData.GetMacroDataEx(macro, "exclusionzones") or {}) do
+    local k = string.format("%.1f,%.1f,%.1f", z.direction[1], z.direction[2], z.direction[3])
+    if not dirs[k] then dirs[k], n = true, n + 1 end
+  end
+  return n
+end
+
+-- The root of a stacked station's detached grid: the bill's pier with the fewest approach directions, else one
+-- owned pier more (the plan's race first, then the fewest approach directions, then the most docks up to a big
+-- pier).
+local function rootPier(run)
+  local best
+  for _, it in ipairs(run.items) do
+    if IsMacroClass(it.macro, "pier") and (not best or approaches(it.macro) < approaches(best.macro)) then best = it end
+  end
+  if best then return best end
+  local race = run.items[1] and raceOf(run.items[1].macro)
+  local pick, pickKey
+  for _, m in ipairs(sab.menu.modules and sab.menu.modules.moduletypes_dock or {}) do
+    if IsMacroClass(m, "pier") then
+      local bays = #(ExtraData.GetMacroDataEx(m, "dockingbays") or {})
+      local k = { raceOf(m) == race and 0 or 1, approaches(m), bays <= sab.planner.bigPier and -bays or bays }
+      local better = not pickKey
+      for i = 1, pickKey and #k or 0 do
+        if k[i] ~= pickKey[i] then
+          better = k[i] < pickKey[i]
+          break
+        end
+      end
+      if better then pick, pickKey = m, k end
+    end
+  end
+  if not pick then return nil end
+  sab.macroConns[pick] = sab.macroConns[pick] or sab.Connections(pick)
+  local size = sab.sizes[pick]
+  local it = { macro = pick, pack = true, outer = outerClass(pick), column = columnClass(pick), turn = run.items[1] and run.items[1].turn,
+    group = groupOf(pick), volume = size and size.maxX * size.maxY * size.maxZ or 0, extra = true }
+  run.items[#run.items + 1] = it
+  sab.Debug("stacked station: no pier in the bill, one %s more as the root", pick)
+  return it
+end
+
 -- The connector kit for spurs, then the grid packer, or the plain packer with the first item dropped free at
 -- the plot centre.
 local function finishLayout(run)
@@ -1331,8 +1413,17 @@ local function finishLayout(run)
     run.phase = "begin"
     return
   end
-  -- an upgrade packs on the grid only around crosses that already stand on one
+  -- an upgrade packs on the grid only around crosses that already stand on one; a stacked station without them
+  -- gets a grid of its own beside it, rooted on a free pier
   if not run.fromEmpty and not (run.kit and sab.grid.Seed(run)) then
+    run.rootPier = run.kit and run.stacked and rootPier(run)
+    if run.rootPier then
+      run.rootPier.rootPier = true
+      run.detached = true
+      sab.Debug("stacked station: a detached grid rooted on %s", run.rootPier.macro)
+      sab.grid.Start(run)
+      return
+    end
     run.gridRoute = false
     run.phase = "begin"
     return

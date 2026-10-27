@@ -69,6 +69,12 @@ local function poses(g, macro)
         local pose = sab.PoseForWorld({ a * d[1], a * d[2], a * d[3] }, d, c, roll)
         local p = { pose.pos.x, pose.pos.y, pose.pos.z }
         local box = geo.worldBox(size, p, pose.rows)
+        -- the body lies beyond the connection it hangs by: a box reaching back past it is loose (8.00 models)
+        local flat = false
+        for i = 1, 3 do
+          if d[i] > 0 and box.min[i] < a then box.min[i] = a elseif d[i] < 0 and box.max[i] > -a then box.max[i] = -a end
+          if box.min[i] >= box.max[i] then flat = true end
+        end
         local lo, hi, tlo, thi = {}, {}, {}, {}
         for i = 1, 3 do
           lo[i] = math.floor((box.min[i] + eps) / u + 0.5)
@@ -77,7 +83,7 @@ local function poses(g, macro)
           tlo[i] = math.floor((box.min[i] + 1) / u + 0.5)
           thi[i] = math.floor((box.max[i] - 1) / u + 0.5)
         end
-        if not (lo[1] <= 0 and hi[1] >= 0 and lo[2] <= 0 and hi[2] >= 0 and lo[3] <= 0 and hi[3] >= 0) then
+        if not flat and not (lo[1] <= 0 and hi[1] >= 0 and lo[2] <= 0 and hi[2] >= 0 and lo[3] <= 0 and hi[3] >= 0) then
           local cells = {}
           for x = lo[1], hi[1] do
             for y = lo[2], hi[2] do
@@ -473,21 +479,69 @@ local function keepsAccess(g, best)
     taken[key(g, x, y, z)] = true
     if y > top then top = y end
   end
+  -- the free arms of the crosses the placement adds, by cell
+  local armsFree = {}
+  local function newCross(n, used)
+    local arms = {}
+    for di = 1, 6 do arms[di] = not used[di] end
+    armsFree[key(g, n[1], n[2], n[3])] = arms
+  end
   for _, off in ipairs(pose.cells) do take(node[1] + off[1], node[2] + off[2], node[3] + off[3]) end
   if best.kind == "root" then
     take(node[1], node[2], node[3])
     crossNodes[1] = node
+    newCross(node, { [best.di] = true })
   elseif best.kind == "new" then
-    for _, step in ipairs(best.path) do
+    local path = best.path
+    for i, step in ipairs(path) do
       take(step[1][1], step[1][2], step[1][3])
       crossNodes[#crossNodes + 1] = step[1]
+      local ref, used = step[2], {}
+      used[OPPOSITE[ref.kind == "port" and ref.port.di or ref.di]] = true
+      used[i > 1 and path[i - 1][2].di or best.di] = true
+      newCross(step[1], used)
     end
   end
+  local ownPorts = {}
+  for _, pt in ipairs(pose.ports) do
+    ownPorts[#ownPorts + 1] = { node[1] + pt.node[1], node[2] + pt.node[2], node[3] + pt.node[3], pt.di }
+  end
+  -- faceTaken as it reads once the placement is committed
+  local function faceBlocked(x, y, z, di)
+    if faceTaken(g, x, y, z, di) then return true end
+    local d = DIRS[di]
+    local mx, my, mz = x + d[1], y + d[2], z + d[3]
+    if mx >= 0 and mx < nx and mz >= 0 and mz < nz and my >= 0 then
+      local A = armsFree[key(g, mx, my, mz)]
+      if A and A[OPPOSITE[di]] then return true end
+    end
+    for _, p in ipairs(ownPorts) do
+      if (p[4] == di and p[1] == mx and p[2] == my and p[3] == mz) or (p[4] == OPPOSITE[di] and p[1] == x and p[2] == y and p[3] == z) then
+        return true
+      end
+    end
+    return false
+  end
+  -- the module's touched cells as commit marks them: no new cross may stand there either
+  local own, touched = {}, {}
+  for _, pt in ipairs(pose.ports) do own[key(g, node[1] + pt.node[1], node[2] + pt.node[2], node[3] + pt.node[3])] = true end
+  for x = math.max(0, node[1] + pose.tlo[1]), math.min(nx - 1, node[1] + pose.thi[1]) do
+    for y = math.max(0, node[2] + pose.tlo[2]), node[2] + pose.thi[2] do
+      for z = math.max(0, node[3] + pose.tlo[3]), math.min(nz - 1, node[3] + pose.thi[3]) do
+        local k = key(g, x, y, z)
+        if not own[k] then touched[k] = true end
+      end
+    end
+  end
+  -- the way up must be one distances can grow new crosses along
   local seen, queue, head = {}, {}, 1
-  local function push(x, y, z)
+  local function push(x, y, z, back)
     if x < 0 or x >= nx or z < 0 or z >= nz or y < 0 then return false end
     local k = key(g, x, y, z)
-    if g.occ[k] or taken[k] or seen[k] then return false end
+    if g.occ[k] or taken[k] or seen[k] or g.touched[k] or touched[k] then return false end
+    for di = 1, 6 do
+      if di ~= back and faceBlocked(x, y, z, di) then return false end
+    end
     if y > top then return true end
     seen[k] = true
     queue[#queue + 1] = { x, y, z }
@@ -496,27 +550,27 @@ local function keepsAccess(g, best)
   for _, X in pairs(g.crosses) do
     local n = X.node
     for di, d in ipairs(DIRS) do
-      if not X.arms[di] and push(n[1] + d[1], n[2] + d[2], n[3] + d[3]) then return true end
+      if not X.arms[di] and push(n[1] + d[1], n[2] + d[2], n[3] + d[3], OPPOSITE[di]) then return true end
     end
   end
   for _, n in ipairs(crossNodes) do
-    for _, d in ipairs(DIRS) do
-      if push(n[1] + d[1], n[2] + d[2], n[3] + d[3]) then return true end
+    for di, d in ipairs(DIRS) do
+      if push(n[1] + d[1], n[2] + d[2], n[3] + d[3], OPPOSITE[di]) then return true end
     end
   end
   for _, M in ipairs(g.modules) do
     for _, pt in ipairs(M.ports) do
-      if not pt.used and push(pt.node[1], pt.node[2], pt.node[3]) then return true end
+      if not pt.used and push(pt.node[1], pt.node[2], pt.node[3], OPPOSITE[pt.di]) then return true end
     end
   end
   for _, pt in ipairs(pose.ports) do
-    if push(node[1] + pt.node[1], node[2] + pt.node[2], node[3] + pt.node[3]) then return true end
+    if push(node[1] + pt.node[1], node[2] + pt.node[2], node[3] + pt.node[3], OPPOSITE[pt.di]) then return true end
   end
   while queue[head] do
     local q = queue[head]
     head = head + 1
-    for _, d in ipairs(DIRS) do
-      if push(q[1] + d[1], q[2] + d[2], q[3] + d[3]) then return true end
+    for di, d in ipairs(DIRS) do
+      if push(q[1] + d[1], q[2] + d[2], q[3] + d[3], OPPOSITE[di]) then return true end
     end
     work(g, 6)
   end
@@ -701,10 +755,19 @@ local function hit(a, b)
   return true
 end
 
+-- the editor refuses a body flush against an approach zone: a zone keeps this clearance
+local ZONE_MARGIN = 10
+local function nearZone(a, z)
+  for i = 1, 3 do
+    if a.min[i] >= z.max[i] + ZONE_MARGIN or a.max[i] <= z.min[i] - ZONE_MARGIN then return false end
+  end
+  return true
+end
+
 -- The body and approach zone boxes of a pose around the cross it hangs on.
 local function dockShape(macro, pose)
   local geo = sab.geo
-  pose.body = geo.worldBox(sab.sizes[macro], pose.pos, pose.rows)
+  pose.body = pose.box
   pose.zones = geo.zoneBoxes(macro, pose.pos, pose.rows)
   pose.down = 0
   for _, z in ipairs(pose.zones) do
@@ -768,8 +831,12 @@ local function dockState(g, kit)
   local sum = { 0, 0, 0 }
   local first, n = math.huge, 0
   for _, M in ipairs(g.modules) do
-    local p = { M.node[1] * u + M.pose.pos[1], M.node[2] * u + M.pose.pos[2], M.node[3] * u + M.pose.pos[3] }
-    M.box = geo.worldBox(sab.sizes[M.item.macro], p, M.pose.rows)
+    if M.pose.box then
+      M.box = shifted(M.pose.box, { M.node[1] * u, M.node[2] * u, M.node[3] * u })
+    else
+      local p = { M.node[1] * u + M.pose.pos[1], M.node[2] * u + M.pose.pos[2], M.node[3] * u + M.pose.pos[3] }
+      M.box = geo.worldBox(sab.sizes[M.item.macro], p, M.pose.rows)
+    end
     D.solid[#D.solid + 1] = M.box
     first = math.min(first, M.item.turn or 0)
   end
@@ -806,7 +873,7 @@ local function dockNode(g, D, n)
   if D.crosses[nkey(n)] then return false end
   local b = shifted(D.crossBox, { x * g.u, y * g.u, z * g.u })
   for _, o in ipairs(D.bodies) do if hit(b, o) then return false end end
-  for _, o in ipairs(D.zones) do if hit(b, o) then return false end end
+  for _, o in ipairs(D.zones) do if nearZone(b, o) then return false end end
   return true
 end
 
@@ -875,15 +942,16 @@ local function dockPlace(g, D, it)
   end
   local best = {}
   local function blocked(box, path, isZone)
-    if hit(box, D.hull) then
-      for _, s in ipairs(D.solid) do if hit(box, s) then return true end end
+    local touch = isZone and nearZone or hit
+    if touch(box, D.hull) then
+      for _, s in ipairs(D.solid) do if touch(box, s) then return true end end
     end
-    for _, b in ipairs(D.bodies) do if hit(box, b) then return true end end
+    for _, b in ipairs(D.bodies) do if touch(box, b) then return true end end
     if not isZone then
-      for _, z in ipairs(D.zones) do if hit(box, z) then return true end end
+      for _, z in ipairs(D.zones) do if nearZone(box, z) then return true end end
     end
     for _, n in ipairs(path) do
-      if hit(box, shifted(D.crossBox, { n[1] * u, n[2] * u, n[3] * u })) then return true end
+      if touch(box, shifted(D.crossBox, { n[1] * u, n[2] * u, n[3] * u })) then return true end
     end
     return false
   end
@@ -1048,17 +1116,58 @@ local function dockCommit(g, D, it, best)
   end
 end
 
+-- A detached grid's root pier hangs under the root cross, the pose with the most approach zones pointing down;
+-- emit places it first, free, and the root cross on it.
+local function rootUnder(g, D, it)
+  local u, X = g.u, g.root
+  if not X or X.arms[4] then return false end
+  local o = { X.node[1] * u, X.node[2] * u, X.node[3] * u }
+  local function blocked(box)
+    for _, s in ipairs(D.solid) do if hit(box, s) then return true end end
+    return false
+  end
+  local best
+  for _, pose in ipairs(poses(g, it.macro)) do
+    if pose.di == 4 then
+      dockShape(it.macro, pose)
+      local up = #pose.zones - pose.down
+      if not (best and up >= best.up) and not blocked(shifted(pose.body, o)) then
+        local ok = true
+        for _, z in ipairs(pose.zones) do
+          if blocked(shifted(z, o)) then ok = false break end
+        end
+        if ok then best = { pose = pose, up = up } end
+      end
+    end
+  end
+  if not best then
+    sab.Debug("grid: %s has no pose under the root cross, it docks as usual", it.macro)
+    return false
+  end
+  local body = shifted(best.pose.body, o)
+  D.bodies[#D.bodies + 1] = body
+  for _, z in ipairs(best.pose.zones) do D.zones[#D.zones + 1] = shifted(z, o) end
+  D.all = union(D.all, body)
+  D.piers = D.piers + 1
+  X.arms[4] = true
+  g.rootPier = { item = it, pose = best.pose, body = body }
+  sab.Debug("grid: root %s under the root cross, %d of %d approach zones down", it.macro, best.pose.down, #best.pose.zones)
+  return true
+end
+
 -- Build modules first, then piers, then dock areas, each in bill order.
 ---@async
 local function docks(g, run)
+  local D = dockState(g, run.kit)
+  g.rootPier = nil
+  if run.rootPier then rootUnder(g, D, run.rootPier) end
   local list = {}
   for pass = 1, 3 do
     for _, it in ipairs(run.items) do
       local kind = IsMacroClass(it.macro, "buildmodule") and 1 or it.column and (IsMacroClass(it.macro, "pier") and 2 or 3)
-      if kind == pass then list[#list + 1] = it end
+      if kind == pass and not (g.rootPier and g.rootPier.item == it) then list[#list + 1] = it end
     end
   end
-  local D = dockState(g, run.kit)
   if #list == 0 then return D end
   grid.lastDocks = D
   local placed, dropped, failed = 0, 0, 0
@@ -1114,8 +1223,18 @@ local function emit(g, run)
     local par, it = X.parent, nil
     if par.kind == "root" then
       local p, s = world(X.node), sab.sizes[kit.cross.macro]
-      it = { macro = kit.cross.macro, free = true, isConnector = true,
-        pos = { x = p[1] - (s and s.cX or 0), y = p[2] - (s and s.cY or 0), z = p[3] - (s and s.cZ or 0) } }
+      local R = X == g.root and g.rootPier
+      if R then
+        local pier, q = R.item, R.pose.pos
+        pier.pack, pier.free, pier.alone, pier.rows, pier.emitted = nil, true, true, R.pose.rows, true
+        pier.pos = { x = p[1] - (s and s.cX or 0) + q[1], y = p[2] - (s and s.cY or 0) + q[2], z = p[3] - (s and s.cZ or 0) + q[3] }
+        items[#items + 1] = pier
+        it = { macro = kit.cross.macro, pair = { entryIdx = pier, predecessorConnection = R.pose.conn, connection = armName(nil, 4) },
+          isConnector = true, after = pier }
+      else
+        it = { macro = kit.cross.macro, free = true, alone = run.detached, isConnector = true,
+          pos = { x = p[1] - (s and s.cX or 0), y = p[2] - (s and s.cY or 0), z = p[3] - (s and s.cZ or 0) } }
+      end
     else
       local base, conn, di
       if par.kind == "cross" then
@@ -1225,7 +1344,7 @@ function grid.Seed(run)
   local centres = {}
   for _, idx in ipairs(ids) do
     local pose = run.poses[idx]
-    if run.macros[idx] == kit.cross.macro and pose and axisAligned(pose.rows) then
+    if run.macros[idx] == kit.cross.macro and pose and axisAligned(pose.rows) and not (run.stacked and run.stackedIdx[idx]) then
       local c = geo.rotate(cc, pose.rows)
       centres[#centres + 1] = { idx = idx, c = { pose.x + c[1], pose.y + c[2], pose.z + c[3] } }
     end
@@ -1288,6 +1407,9 @@ function grid.Seed(run)
     S.crosses[#S.crosses + 1] = X
     block(m.r, m.r)
   end
+  -- on a stacked station only the lattice's own part sizes the block and offers ports; the stack is an obstacle
+  local ownPart = {}
+  for _, m in ipairs(members) do ownPart[run.comp[m.idx] or m.idx] = true end
   for _, idx in ipairs(ids) do
     local box, pose, macro = run.boxes[idx], run.poses[idx], run.macros[idx]
     if not lattice[idx] and box and pose then
@@ -1300,7 +1422,8 @@ function grid.Seed(run)
         local zlo, zhi = cellRange(z, c0, u, 1)
         E.zoneCells[#E.zoneCells + 1] = { zlo, zhi }
       end
-      for _, f in ipairs(byEntry[idx] or {}) do
+      local own = not run.stacked or ownPart[run.comp[idx] or idx]
+      for _, f in ipairs(own and byEntry[idx] or {}) do
         local di = not f.used and dirIndex(f.dir)
         local r = di and onLattice({ f.pos[1] + a * f.dir[1], f.pos[2] + a * f.dir[2], f.pos[3] + a * f.dir[3] }, c0)
         if r then
@@ -1308,7 +1431,7 @@ function grid.Seed(run)
           attach = attach + 1
         end
       end
-      if not (column or IsMacroClass(macro, "connectionmodule")) then block(lo, hi) end
+      if own and not (column or IsMacroClass(macro, "connectionmodule")) then block(lo, hi) end
       S.entries[#S.entries + 1] = E
     end
   end
@@ -1455,6 +1578,93 @@ local function better(a, b)
   return a.box < b.box
 end
 
+-- the editor's largest snap radius: a free drop nearer to a free connection snaps onto it
+local SNAP_REACH = 2000
+local AXIS_NAMES = { "x", "y", "z" }
+
+-- A detached layout moves out along an axis from the station: its bodies a cell off the station's and clear of
+-- its approach zones, its free root out of snap reach, its own zones clear of the station; the side growing the
+-- plot least wins.
+---@async
+local function detach(g, D, run)
+  local u, cap = g.u, sab.maxPlotKm * 1000
+  local st, zones, seen = nil, {}, {}
+  for _, b in pairs(run.boxes) do st = st and union(st, b) or b end
+  for _, list in pairs(run.zones) do
+    for _, z in ipairs(list) do
+      local k = string.format("%.0f %.0f %.0f %.0f %.0f %.0f", z.min[1], z.min[2], z.min[3], z.max[1], z.max[2], z.max[3])
+      if not seen[k] then
+        seen[k] = true
+        zones[#zones + 1] = z
+      end
+    end
+  end
+  if not st then return true end
+  local keep = { min = { st.min[1] - u, st.min[2] - u, st.min[3] - u }, max = { st.max[1] + u, st.max[2] + u, st.max[3] + u } }
+  local R = SNAP_REACH
+  local reach = { min = { st.min[1] - R, st.min[2] - R, st.min[3] - R }, max = { st.max[1] + R, st.max[2] + R, st.max[3] + R } }
+  local n = g.root and g.root.node
+  local root = g.rootPier and g.rootPier.body or n and shifted(D.crossBox, { n[1] * u, n[2] * u, n[3] * u })
+  local bodies, L = {}, nil
+  for _, list in ipairs({ D.solid, D.bodies }) do
+    for _, b in ipairs(list) do
+      bodies[#bodies + 1] = b
+      L = L and union(L, b) or b
+    end
+  end
+  ---@async
+  local function clear(o)
+    work(g, #bodies * (#zones + 1) + #D.zones)
+    if root and hit(shifted(root, o), reach) then return false, "the root in snap reach" end
+    for _, b in ipairs(bodies) do
+      local s = shifted(b, o)
+      if hit(s, keep) then return false, "a body at the station" end
+      for _, z in ipairs(zones) do if nearZone(s, z) then return false, "a body in a station zone" end end
+    end
+    for _, z in ipairs(D.zones) do if hit(shifted(z, o), keep) then return false, "an own zone at the station" end end
+    return true
+  end
+  local base = {}
+  for i = 1, 3 do base[i] = (st.min[i] + st.max[i]) / 2 - (L.min[i] + L.max[i]) / 2 end
+  local best
+  -- below or above: clear of approach lanes that block every side
+  for _, side in ipairs({ { 1, 1 }, { 1, -1 }, { 3, 1 }, { 3, -1 }, { 2, -1 }, { 2, 1 } }) do
+    local i, s = side[1], side[2]
+    -- from the boxes just apart on the axis, outward until clear
+    local t = (L.max[i] - L.min[i] + keep.max[i] - keep.min[i]) / 2
+    local o = { base[1], base[2], base[3] }
+    o[i] = base[i] + s * t
+    local ok, why = clear(o)
+    while t <= cap and not ok do
+      t = t + u / 4
+      o[i] = base[i] + s * t
+      ok, why = clear(o)
+    end
+    if t > cap then
+      sab.Debug("grid: detached layout %s%s blocked up to the plot cap: %s", s > 0 and "+" or "-", AXIS_NAMES[i], why)
+    else
+      local f = sab.PlotFaces(union(st, shifted(L, o)))
+      local km3 = f.uncapped[1] * f.uncapped[2] * f.uncapped[3]
+      local fits = f.uncapped[1] <= sab.maxPlotKm and f.uncapped[2] <= sab.maxPlotKm and f.uncapped[3] <= sab.maxPlotKm
+      if not best or (fits and not best.fits) or (fits == best.fits and km3 < best.km3) then
+        best = { o = o, km3 = km3, fits = fits, axis = i, side = s, t = t }
+      end
+    end
+  end
+  if not best then return false end
+  local delta = { best.o[1] - D.shift[1], best.o[2] - D.shift[2], best.o[3] - D.shift[3] }
+  for i = 1, 3 do
+    g.origin[i] = g.origin[i] + delta[i]
+    D.shift[i] = best.o[i]
+  end
+  for _, it in ipairs(run.items) do
+    if it.free and it.pos then it.pos = { x = it.pos.x + delta[1], y = it.pos.y + delta[2], z = it.pos.z + delta[3] } end
+  end
+  sab.Debug("grid: detached layout %s%s, %.1f km off the station's centre, plot %d km3", best.side > 0 and "+" or "-",
+    AXIS_NAMES[best.axis], best.t / 1000, best.km3)
+  return true
+end
+
 -- Packs once per new-cross cost in grid.costs and keeps the best layout.
 ---@async
 local function pack(run)
@@ -1531,9 +1741,11 @@ local function pack(run)
     local centre = C.GetBuildPlotCenterOffset(sab.menu.container)
     g.origin = { centre.x - (g.sx - 1) * g.u / 2, centre.y - (H - 1) * g.u / 2, centre.z - (g.sz - 1) * g.u / 2 }
   end
-  local box = layoutBox(docks(g, run))
+  local D = docks(g, run)
+  if run.detached and not detach(g, D, run) then error("no side of the stacked station keeps the layout clear within the plot cap", 0) end
+  local box = layoutBox(D)
   -- per axis, a shift under half a km that puts the layout's low face on a whole km when that saves a plot km
-  if box and not S then
+  if box and not S and not run.detached then
     local shift = {}
     for i = 1, 3 do shift[i] = -1000 * math.floor(-box.min[i] / 1000 + 0.5) - box.min[i] end
     local alt = shifted(box, shift)
