@@ -105,6 +105,10 @@ The manual route: pick a category and a module from your blueprints, set the cou
 
 In the game's Extension Options, the Station Architect page has a Debug Level setting (None, Debug, Trace) for the game log.
 
+## Videos
+
+- [Intro video](https://www.youtube.com/watch?v=I0ORUjMGBjQ)
+
 ## Credits
 
 - Author: Chem O`Dun, on [Nexus Mods](https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659) and [Steam Workshop](https://steamcommunity.com/id/chemodun/myworkshopfiles/?appid=392160)
