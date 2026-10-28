@@ -4,7 +4,7 @@
   <add sel="/language">
     <page id="1972092448" title="Station Architect" descr="" voice="no">
       <t id="1">Station Architect</t>
-      <t id="2">Plans and builds your station from a target, a ware to produce or ships to build: it works out every module the goal needs and places them in the build menu one at a time, with the game's own editor snapping each one into place.</t>
+      <t id="2">Tell the build menu what your station should produce or build: this extension works out every module needed and places them as one compact block. Nothing is bought until you press Confirm.</t>
 
       <!-- Panel in the build menu (100) -->
       <t id="100">Station Architect</t>

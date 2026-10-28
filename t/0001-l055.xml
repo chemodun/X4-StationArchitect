@@ -4,7 +4,7 @@
   <add sel="/language">
     <page id="1972092448" title="Station Architect" descr="" voice="no">
       <t id="1">Arquiteto de Estações</t>
-      <t id="2">Planeja e constrói sua estação a partir de um alvo, um produto a fabricar ou naves a construir: calcula todos os módulos de que a meta precisa e os coloca um por vez no menu de construção, com o próprio editor do jogo encaixando cada um no lugar.</t>
+      <t id="2">Diga ao menu de construção o que sua estação deve produzir ou construir: esta extensão calcula todos os módulos necessários e os coloca como um único bloco compacto. Nada é comprado até você pressionar Confirmar.</t>
 
       <!-- Panel in the build menu (100) -->
       <t id="100">Arquiteto de Estações</t>

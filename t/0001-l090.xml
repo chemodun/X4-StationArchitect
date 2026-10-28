@@ -4,7 +4,7 @@
   <add sel="/language">
     <page id="1972092448" title="Station Architect" descr="" voice="no">
       <t id="1">İstasyon Mimarı</t>
-      <t id="2">İstasyonunuzu bir hedeften, üretilecek bir maldan veya inşa edilecek gemilerden yola çıkarak planlar ve kurar: hedefin gerektirdiği her modülü hesaplar ve oyunun kendi düzenleyicisi her birini yerine oturturken bunları inşaat menüsünde tek tek yerleştirir.</t>
+      <t id="2">İnşaat menüsüne istasyonunuzun ne üretmesi veya inşa etmesi gerektiğini söyleyin: bu eklenti gereken her modülü hesaplar ve hepsini tek bir kompakt blok olarak yerleştirir. Onayla'ya basana kadar hiçbir şey satın alınmaz.</t>
 
       <!-- Panel in the build menu (100) -->
       <t id="100">İstasyon Mimarı</t>

@@ -4,7 +4,7 @@
   <add sel="/language">
     <page id="1972092448" title="Station Architect" descr="" voice="no">
       <t id="1">Architecte de station</t>
-      <t id="2">Planifie et construit votre station à partir d'une cible, une marchandise à produire ou des vaisseaux à construire : il détermine chaque module dont l'objectif a besoin et les place un par un dans le menu de construction, l'éditeur du jeu faisant s'aligner chaque module à sa place.</t>
+      <t id="2">Indiquez au menu de construction ce que votre station doit produire ou construire : cette extension détermine chaque module nécessaire et les place en un seul bloc compact. Rien n'est acheté avant que vous n'appuyiez sur Confirmer.</t>
 
       <!-- Panel in the build menu (100) -->
       <t id="100">Architecte de station</t>

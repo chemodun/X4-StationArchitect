@@ -9,54 +9,54 @@
   sync="false"
   enabled="true"
   lastupdate=""
-  description="Plans and builds your station from a target, a ware to produce or ships to build: it works out every module the goal needs and places them in the build menu one at a time, with the game's own editor snapping each one into place.">
+  description="Tell the build menu what your station should produce or build: this extension works out every module needed and places them as one compact block. Nothing is bought until you press Confirm.">
   <text language="7"
-    description="Plans and builds your station from a target, a ware to produce or ships to build: it works out every module the goal needs and places them in the build menu one at a time, with the game's own editor snapping each one into place."></text>
+    description="Tell the build menu what your station should produce or build: this extension works out every module needed and places them as one compact block. Nothing is bought until you press Confirm."></text>
   <!-- French -->
   <text language="33"
-    description="Planifie et construit votre station à partir d'une cible, une marchandise à produire ou des vaisseaux à construire : il détermine chaque module dont l'objectif a besoin et les place un par un dans le menu de construction, l'éditeur du jeu faisant s'aligner chaque module à sa place."></text>
+    description="Indiquez au menu de construction ce que votre station doit produire ou construire : cette extension détermine chaque module nécessaire et les place en un seul bloc compact. Rien n'est acheté avant que vous n'appuyiez sur Confirmer."></text>
   <!-- Spanish -->
   <text language="34"
-    description="Planifica y construye tu estación a partir de un objetivo, una mercancía a producir o naves a construir: calcula todos los módulos que la meta necesita y los coloca uno a uno en el menú de construcción, y el propio editor del juego encaja cada uno en su sitio."></text>
+    description="Indica al menú de construcción qué debe producir o construir tu estación: esta extensión calcula todos los módulos necesarios y los coloca como un único bloque compacto. No se compra nada hasta que pulses Confirmar."></text>
   <!-- Italian -->
   <text language="39"
-    description="Pianifica e costruisce la tua stazione a partire da un obiettivo, una merce da produrre o navi da costruire: calcola tutti i moduli che lo scopo richiede e li posiziona uno alla volta nel menu di costruzione, con l'editor stesso del gioco che incastra ciascuno al suo posto."></text>
+    description="Indica al menu di costruzione cosa deve produrre o costruire la tua stazione: questa estensione calcola tutti i moduli necessari e li posiziona in un unico blocco compatto. Non si acquista nulla finché non premi Conferma."></text>
   <!-- Czech -->
   <text language="42"
-    description="Naplánuje a postaví vaši stanici podle cíle, zboží k výrobě nebo lodí ke stavbě: spočítá všechny moduly, které cíl potřebuje, a umisťuje je v nabídce stavby jeden po druhém, přičemž vlastní editor hry každý z nich přichytí na místo."></text>
+    description="Řekněte nabídce stavby, co má vaše stanice vyrábět nebo stavět: toto rozšíření spočítá všechny potřebné moduly a umístí je jako jeden kompaktní blok. Nic se nekoupí, dokud nestisknete tlačítko Potvrďte."></text>
   <!-- English -->
   <text language="44"
-    description="Plans and builds your station from a target, a ware to produce or ships to build: it works out every module the goal needs and places them in the build menu one at a time, with the game's own editor snapping each one into place."></text>
+    description="Tell the build menu what your station should produce or build: this extension works out every module needed and places them as one compact block. Nothing is bought until you press Confirm."></text>
   <!-- Polish -->
   <text language="48"
-    description="Planuje i buduje twoją stację na podstawie celu, towaru do wyprodukowania lub statków do zbudowania: wylicza wszystkie moduły potrzebne do celu i umieszcza je w menu budowy jeden po drugim, a wbudowany edytor gry przyciąga każdy z nich na miejsce."></text>
+    description="Powiedz menu budowy, co twoja stacja ma produkować lub budować: to rozszerzenie wylicza wszystkie potrzebne moduły i umieszcza je jako jeden zwarty blok. Nic nie zostanie kupione, dopóki nie naciśniesz Potwierdź."></text>
   <!-- German -->
   <text language="49"
-    description="Plant und baut Ihre Station anhand eines Ziels, einer zu produzierenden Ware oder zu bauender Schiffe: Er ermittelt jedes Modul, das das Ziel benötigt, und platziert sie nacheinander im Baumenü, wobei der spieleigene Editor jedes Modul an seinen Platz einrasten lässt."></text>
+    description="Sagen Sie dem Baumenü, was Ihre Station produzieren oder bauen soll: Diese Erweiterung ermittelt jedes benötigte Modul und platziert alle als einen kompakten Block. Gekauft wird erst, wenn Sie auf Übernehmen klicken."></text>
   <!-- Portuguese -->
   <text language="55"
-    description="Planeja e constrói sua estação a partir de um alvo, um produto a fabricar ou naves a construir: calcula todos os módulos de que a meta precisa e os coloca um por vez no menu de construção, com o próprio editor do jogo encaixando cada um no lugar."></text>
+    description="Diga ao menu de construção o que sua estação deve produzir ou construir: esta extensão calcula todos os módulos necessários e os coloca como um único bloco compacto. Nada é comprado até você pressionar Confirmar."></text>
   <!-- Japanese -->
   <text language="81"
-    description="目標となる生産ウェアや建造する艦船からステーションを計画して建造します。目標に必要なすべてのモジュールを割り出し、建造メニューで1つずつ配置します。各モジュールはゲーム標準のエディターによって所定の位置にスナップされます。"></text>
+    description="ステーションで生産または建造したいものを建造メニューに指定すると、このエクステンションが必要なモジュールをすべて割り出し、1つのコンパクトなブロックとして配置します。「確定」を押すまで何も購入されません。"></text>
   <!-- Korean -->
   <text language="82"
-    description="생산할 물품이나 건조할 함선 같은 목표로부터 스테이션을 계획하고 건설합니다. 목표에 필요한 모든 모듈을 계산해 건설 메뉴에서 하나씩 배치하며, 각 모듈은 게임 자체 편집기가 제자리에 맞춰 줍니다."></text>
+    description="스테이션이 생산하거나 건조할 것을 건설 메뉴에 알려 주면, 이 확장이 필요한 모든 모듈을 계산해 하나의 컴팩트한 블록으로 배치합니다. '승인'을 누르기 전에는 아무것도 구매되지 않습니다."></text>
   <!-- Chinese Simplified -->
   <text language="86"
-    description="根据目标（要生产的货物或要建造的飞船）规划并建造你的空间站：计算目标所需的全部模块，并在建造菜单中逐个放置，每个模块都由游戏自带的编辑器吸附到位。"></text>
+    description="告诉建造菜单你的空间站要生产或建造什么：本扩展会算出所需的全部模块，并将它们布置成一个紧凑的整体。在你按下“确认”之前不会购买任何东西。"></text>
   <!-- Chinese Traditional -->
   <text language="88"
-    description="根據目標（要生產的貨物或要建造的飛船）規劃並建造你的空間站：計算目標所需的全部模塊，並在建造選單中逐個放置，每個模塊都由遊戲自帶的編輯器吸附到位。"></text>
+    description="告訴建造選單你的空間站要生產或建造什麼：本擴充會算出所需的全部模塊，並將它們佈置成一個緊湊的整體。在你按下「確認」之前不會購買任何東西。"></text>
   <!-- Turkish -->
   <text language="90"
-    description="İstasyonunuzu bir hedeften, üretilecek bir maldan veya inşa edilecek gemilerden yola çıkarak planlar ve kurar: hedefin gerektirdiği her modülü hesaplar ve oyunun kendi düzenleyicisi her birini yerine oturturken bunları inşaat menüsünde tek tek yerleştirir."></text>
+    description="İnşaat menüsüne istasyonunuzun ne üretmesi veya inşa etmesi gerektiğini söyleyin: bu eklenti gereken her modülü hesaplar ve hepsini tek bir kompakt blok olarak yerleştirir. Onayla'ya basana kadar hiçbir şey satın alınmaz."></text>
   <!-- Bulgarian -->
   <text language="359"
-    description="Планира и изгражда вашата станция по цел, стока за производство или кораби за строеж: изчислява всеки модул, нужен за целта, и ги поставя в менюто за строеж един по един, като собственият редактор на играта закача всеки на мястото му."></text>
+    description="Кажете на менюто за строеж какво да произвежда или строи вашата станция: това разширение изчислява всеки нужен модул и ги поставя като един компактен блок. Нищо не се купува, докато не натиснете Потвърди."></text>
   <!-- Ukrainian -->
   <text language="380"
-    description="Планує та будує вашу станцію за ціллю, товаром для виробництва або кораблями для будівництва: розраховує кожен модуль, потрібний для мети, і розміщує їх у меню будівництва по одному, а власний редактор гри прикріплює кожен на своє місце."></text>
+    description="Скажіть меню будівництва, що має виробляти або будувати ваша станція: це розширення розраховує кожен потрібний модуль і розміщує їх як один компактний блок. Нічого не купується, доки ви не натиснете Підтвердити."></text>
   <dependency version="800"></dependency>
   <dependency id="ws_2042901274" optional="false" name="SirNukes Mod Support APIs" version="195"></dependency>
   <dependency id="ws_3715253556" optional="false" name="Options Helper" version="110"></dependency>

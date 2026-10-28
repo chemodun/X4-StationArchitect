@@ -1,20 +1,19 @@
 # Station Architect
 
-This extension plans and builds your station inside the build menu. Tell it what the station should produce or build, and it works out every module the goal needs, then places them one at a time while the game's own editor snaps each one into place. Nothing is bought or built until you press the usual Apply.
+Tell the build menu what your station should produce or build: this extension works out every module needed and places them as one compact block. Nothing is bought until you press **Confirm**.
 
 ## Features
 
-- **Target planner**: choose what the station should do, not which modules it needs. A target is a ware to produce (a number of its production modules) or ships to build or maintain (a number of build modules); several targets fit in one plan.
-- **Full cycle**: every intermediate ware down to the raw resources and the energy cells, with the storage to hold them. Without it, only the target's own modules and their storage.
-- **Workforce**: habitats for the workforce the planned modules need; **Self-sufficient workforce** adds the food and medical supplies that workforce eats. The workforce race and the race of all other modules are separate choices; "Any" picks the best of your blueprints for each module.
-- **Read from the game, not from tables**: production rates with the workforce and sunlight bonuses of each production method, module sizes, connections, docking bays and approach zones, ship build times at the station's workforce. Docks and piers are sized for the station's planned traffic.
-- **A preview before anything is placed**: the planned modules, each ware's net per hour now and after the plan, workforce, trade volume in and out, and warnings.
-- **Existing stations**: the planner reads what a station already makes as its current targets, ticks Full cycle and Workforce when the station looks like it, and adds the modules for any shortfall it finds (a missing resource, habitats short of the workforce).
-- **Compact layout**: production, storage and habitats are packed in a tight block linked by connection modules; ship build modules sit on the sides with their approach corridors clear; docks and piers go outward.
-- **A new station from the map**: right-click empty space in a sector, choose **Plan a station here**, set the target, and OK hands you the game's own plot box; click where it may go, and the build menu opens with the run started.
-- **Bill route**: the manual alternative, a list of modules and counts from your blueprints, placed the same way.
-- **Plot licence**: where the plot costs money, the run shows the plot size it needs and the price, and places nothing until you buy the licence. **Optimize plot** shrinks the plot to the planned modules afterwards.
-- **The plan stays yours**: move, add or remove modules by hand, save or load plans, and press Apply to pay as usual; the build menu's Cancel discards the whole unconfirmed plan.
+- **Target planner**: say what the station should make (a ware, or ships to build or repair), not which modules; several targets in one plan.
+- **Compact layout**: production, storage and habitats packed tight on connection modules; build modules on the sides with clear approach lanes; docks and piers outward.
+- **Full cycle and workforce**: optionally every intermediate ware down to raw resources and energy, habitats for the workforce, and its food and medicine.
+- **Read from the game**: production rates, sunlight and workforce bonuses, module sizes, docking bays and ship build times; docks sized for the planned traffic.
+- **Preview first**: modules, each ware's balance per hour, workforce and warnings before anything is placed.
+- **Existing stations**: reads what a station makes and fills any shortfall.
+- **From the map**: right-click empty space, **Plan a station here**, and the build menu opens with the run started.
+- **Bill route**: a manual list of modules and counts, placed the same way.
+- **Plot licence**: shows the plot size and price where the plot costs money; **Optimize plot** shrinks it afterwards.
+- **The plan stays yours**: edit, save or load it by hand; **Confirm module changes** pays as usual, **Cancel module changes** discards it.
 
 ## Limitations
 
@@ -76,7 +75,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 
 ![The build menu during a run: the new modules appear on the station one by one](docs/images/build_menu_run.png)
 
-6. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press Apply as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has.
+6. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press **Confirm module changes** as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has.
 
 ### From the map
 
@@ -92,7 +91,7 @@ OK closes the dialog and puts the game's own plot box on your cursor, as the Plo
 
 ![The plot box on the cursor after OK](docs/images/map_plot_placement.png)
 
-The build menu then opens and the run starts. The plot starts at 1 km and grows with the modules; Apply stays your click.
+The build menu then opens and the run starts. The plot starts at 1 km and grows with the modules; **Confirm module changes** stays your click.
 
 ### Bill
 

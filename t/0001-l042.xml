@@ -4,7 +4,7 @@
   <add sel="/language">
     <page id="1972092448" title="Station Architect" descr="" voice="no">
       <t id="1">Architekt stanic</t>
-      <t id="2">Naplánuje a postaví vaši stanici podle cíle, zboží k výrobě nebo lodí ke stavbě: spočítá všechny moduly, které cíl potřebuje, a umisťuje je v nabídce stavby jeden po druhém, přičemž vlastní editor hry každý z nich přichytí na místo.</t>
+      <t id="2">Řekněte nabídce stavby, co má vaše stanice vyrábět nebo stavět: toto rozšíření spočítá všechny potřebné moduly a umístí je jako jeden kompaktní blok. Nic se nekoupí, dokud nestisknete tlačítko Potvrďte.</t>
 
       <!-- Panel in the build menu (100) -->
       <t id="100">Architekt stanic</t>

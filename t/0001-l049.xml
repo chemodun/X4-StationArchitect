@@ -4,7 +4,7 @@
   <add sel="/language">
     <page id="1972092448" title="Station Architect" descr="" voice="no">
       <t id="1">Stationsarchitekt</t>
-      <t id="2">Plant und baut Ihre Station anhand eines Ziels, einer zu produzierenden Ware oder zu bauender Schiffe: Er ermittelt jedes Modul, das das Ziel benötigt, und platziert sie nacheinander im Baumenü, wobei der spieleigene Editor jedes Modul an seinen Platz einrasten lässt.</t>
+      <t id="2">Sagen Sie dem Baumenü, was Ihre Station produzieren oder bauen soll: Diese Erweiterung ermittelt jedes benötigte Modul und platziert alle als einen kompakten Block. Gekauft wird erst, wenn Sie auf Übernehmen klicken.</t>
 
       <!-- Panel in the build menu (100) -->
       <t id="100">Stationsarchitekt</t>
