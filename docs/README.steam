@@ -80,7 +80,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 [/list]
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_licence.png[/img]
 [list=1]
-[*] The run places the modules one after another; the panel shows the progress, and [b]Stop[/b] halts it after the current module. [b]Modules per frame[/b] sets how many modules are placed per frame. [b]Fast placement[/b] rebuilds the menu's lists only when the run ends instead of after every module, five to ten times faster on a large plan; the slider is not used while it is on.
+[*] The run places the modules one after another; the panel shows the progress, and [b]Stop[/b] halts it after the current module. The menu's lists are rebuilt once when the run ends, not after every module.
 [/list]
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_running.png[/img]
 
