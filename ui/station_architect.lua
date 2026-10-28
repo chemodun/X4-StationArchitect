@@ -2078,14 +2078,7 @@ local function targetChoices(cat)
   end
   -- one kind of target per station: the first added goal fixes it
   if t.goals[1] then new.kind = t.goals[1].kind end
-  -- the workforce race: argon first, else the race with the most owned habitats
-  if not habitats[t.race] then
-    local best, most = nil, 0
-    for race, n in pairs(habitats) do
-      if n > most then best, most = race, n end
-    end
-    t.race = habitats.argon and "argon" or best
-  end
+  if not habitats[t.race] then t.race = sab.planner.WorkforceRace(cat) end
   if not makers[t.moduleRace] then t.moduleRace = "any" end
   return { wares = free, builds = builds, races = races, moduleRaces = moduleRaces }
 end

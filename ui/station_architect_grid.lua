@@ -1380,12 +1380,15 @@ function grid.Seed(run)
     return false
   end
   local c0 = ref.c
+  -- modules, ports and zones count from where the arms meet (the cross's origin), as poses() does
+  local p0 = run.poses[ref.idx]
+  local o0 = { p0.x, p0.y, p0.z }
   local byEntry = {}
   for _, f in ipairs(run.conns) do
     byEntry[f.entryIdx] = byEntry[f.entryIdx] or {}
     table.insert(byEntry[f.entryIdx], f)
   end
-  local S = { c0 = c0, cc = cc, crosses = {}, entries = {}, lo = { math.huge, math.huge, math.huge }, hi = { -math.huge, -math.huge, -math.huge } }
+  local S = { c0 = c0, o0 = o0, cc = cc, crosses = {}, entries = {}, lo = { math.huge, math.huge, math.huge }, hi = { -math.huge, -math.huge, -math.huge } }
   local attach, cells = 0, {}
   local function block(lo, hi)
     for x = lo[1], hi[1] do
@@ -1423,17 +1426,17 @@ function grid.Seed(run)
     if not lattice[idx] and box and pose then
       -- docks and their approach zones are kept clear to the metre, as the dock stage keeps them
       local column = geo.column(macro)
-      local lo, hi = cellRange(box, c0, u, column and 1 or nil)
-      local tlo, thi = cellRange(box, c0, u, 1)
+      local lo, hi = cellRange(box, o0, u, column and 1 or nil)
+      local tlo, thi = cellRange(box, o0, u, 1)
       local E = { idx = idx, macro = macro, pos = { pose.x, pose.y, pose.z }, rows = pose.rows, lo = lo, hi = hi, tlo = tlo, thi = thi, box = box, zones = run.zones[idx], ports = {}, zoneCells = {} }
       for _, z in ipairs(E.zones or {}) do
-        local zlo, zhi = cellRange(z, c0, u, 1)
+        local zlo, zhi = cellRange(z, o0, u, 1)
         E.zoneCells[#E.zoneCells + 1] = { zlo, zhi }
       end
       local own = not run.stacked or ownPart[run.comp[idx] or idx]
       for _, f in ipairs(own and byEntry[idx] or {}) do
         local di = not f.used and dirIndex(f.dir)
-        local r = di and onLattice({ f.pos[1] + a[1] * f.dir[1], f.pos[2] + a[2] * f.dir[2], f.pos[3] + a[3] * f.dir[3] }, c0)
+        local r = di and onLattice({ f.pos[1] + a[1] * f.dir[1], f.pos[2] + a[2] * f.dir[2], f.pos[3] + a[3] * f.dir[3] }, o0)
         if r then
           E.ports[#E.ports + 1] = { name = f.name, r = r, di = di }
           attach = attach + 1
@@ -1488,8 +1491,8 @@ local function seedGrid(g, S)
     -- the box in grid metres: node 0 at 0
     M.box = { min = {}, max = {} }
     for i = 1, 3 do
-      M.box.min[i] = E.box.min[i] - S.c0[i] + d[i] * u[i]
-      M.box.max[i] = E.box.max[i] - S.c0[i] + d[i] * u[i]
+      M.box.min[i] = E.box.min[i] - S.o0[i] + d[i] * u[i]
+      M.box.max[i] = E.box.max[i] - S.o0[i] + d[i] * u[i]
     end
     mark(E.lo, E.hi, M)
     for _, zc in ipairs(E.zoneCells) do mark(zc[1], zc[2], M) end

@@ -658,10 +658,20 @@ local function goalsOf(target)
   return target.goals or { target }
 end
 
+-- The race with the most owned habitats in cat; a tie goes to the lower race id.
+function planner.WorkforceRace(cat)
+  local counts, best = {}, nil
+  for _, e in ipairs(cat.habitation) do counts[e.race] = (counts[e.race] or 0) + 1 end
+  for race, n in pairs(counts) do
+    if not best or n > counts[best] or (n == counts[best] and race < best) then best = race end
+  end
+  return best
+end
+
 -- target = { set, station, goals, fullCycle, workforce, race, moduleRace, selfSufficient, sunlight, storageHours },
 --   each goal { kind = "ware", ware, rate (net ware amount per hour) or modules } or { kind = "ship", buildMacro,
 --   count (build modules to add), bays (the station's total after the plan, supplied as a whole) }. race: the
---   workforce's (habitats and the producers of what they eat), argon when nil; moduleRace: preferred for every
+--   workforce's (habitats and the producers of what they eat), WorkforceRace when nil; moduleRace: preferred for every
 --   other module and the ship hulls, any when nil. A fabrication bay builds the ship sizes its builder classes
 --   name (shipSize overrides), a maintenance bay none (repair forces that); plan.shipRates and plan.shipHours
 --   per goal index.
@@ -672,7 +682,7 @@ end
 function planner.Plan(target)
   local set = target.set or "factory"
   local cat = planner.Catalogue(set, true)
-  local race, moduleRace = target.race or "argon", target.moduleRace
+  local race, moduleRace = target.race or planner.WorkforceRace(cat), target.moduleRace
   local sunlight = target.sunlight
   if not sunlight and target.station then
     sunlight = GetComponentData(GetComponentData(target.station, "sectorid"), "sunlight")
