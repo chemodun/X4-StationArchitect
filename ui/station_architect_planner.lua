@@ -750,9 +750,9 @@ function planner.Plan(target)
   end
   plan.surplus = surplus
 
-  -- what the station's and the planned habitats eat is made by the workforce race's producers
+  -- a self-sufficient plan makes what the station's and the planned habitats eat with the workforce race's producers
   local fed = target.station and stationProfile(target.station, set).habWares or {}
-  local function raceFor(w) return (fed[w] or habWares[w]) and race or moduleRace end
+  local function raceFor(w) return (target.selfSufficient and (fed[w] or habWares[w])) and race or moduleRace end
 
   local prodCounts, habCounts = {}, {}
   local missing = {}
@@ -1228,7 +1228,7 @@ function planner.Run(target)
   sab.Debug("planned:\n%s", planner.Print(plan))
   -- every goal is met already
   if not plan.adds then return nil, plan end
-  return sab.StartBill(planner.Turns(plan), { grid = true }), plan
+  return sab.StartBill(planner.Turns(plan), { grid = true, moduleRace = target.moduleRace }), plan
 end
 
 sab.planner = planner

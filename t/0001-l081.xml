@@ -52,6 +52,8 @@
       <t id="152">選択中の目標: %s</t>
       <t id="153">このゲームビルドでは Extra Data API がモジュールデータを読み取れません</t>
       <t id="154">停止しました。計画が手動で変更されました: 配置 %s、失敗 %s</t>
+      <t id="155">Fast placement</t>
+      <t id="156">The menu's lists refresh when the run ends instead of after every module</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">ステーション建築家</t>

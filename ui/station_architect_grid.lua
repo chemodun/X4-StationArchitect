@@ -55,6 +55,12 @@ local function dirIndex(v)
   return nil
 end
 
+-- the axis a DIRS index runs along; cells are u[axis] long there (a cross's arms differ per axis)
+local function axisOf(di)
+  local d = DIRS[di]
+  return d[1] ~= 0 and 1 or d[2] ~= 0 and 2 or 3
+end
+
 -- Every pose of a macro on a cross at the origin: the cells it fills and its other connections that end on a
 -- cross position of the grid (a port carries a cross or a module there).
 local function poses(g, macro)
@@ -62,26 +68,26 @@ local function poses(g, macro)
   local conns, size = sab.macroConns[macro], sab.sizes[macro]
   if not (conns and size) then return list end
   local u, a = g.u, g.a
-  local eps = EPS * u
   for _, c in ipairs(conns) do
     for di, d in ipairs(DIRS) do
       for _, roll in ipairs(ROLLS) do
-        local pose = sab.PoseForWorld({ a * d[1], a * d[2], a * d[3] }, d, c, roll)
+        local pose = sab.PoseForWorld({ a[1] * d[1], a[2] * d[2], a[3] * d[3] }, d, c, roll)
         local p = { pose.pos.x, pose.pos.y, pose.pos.z }
         local box = geo.worldBox(size, p, pose.rows)
         -- the body lies beyond the connection it hangs by: a box reaching back past it is loose (8.00 models)
         local flat = false
         for i = 1, 3 do
-          if d[i] > 0 and box.min[i] < a then box.min[i] = a elseif d[i] < 0 and box.max[i] > -a then box.max[i] = -a end
+          if d[i] > 0 and box.min[i] < a[i] then box.min[i] = a[i] elseif d[i] < 0 and box.max[i] > -a[i] then box.max[i] = -a[i] end
           if box.min[i] >= box.max[i] then flat = true end
         end
         local lo, hi, tlo, thi = {}, {}, {}, {}
         for i = 1, 3 do
-          lo[i] = math.floor((box.min[i] + eps) / u + 0.5)
-          hi[i] = math.floor((box.max[i] - eps) / u + 0.5)
+          local eps = EPS * u[i]
+          lo[i] = math.floor((box.min[i] + eps) / u[i] + 0.5)
+          hi[i] = math.floor((box.max[i] - eps) / u[i] + 0.5)
           -- cells the box enters past a metre: no cross may stand there
-          tlo[i] = math.floor((box.min[i] + 1) / u + 0.5)
-          thi[i] = math.floor((box.max[i] - 1) / u + 0.5)
+          tlo[i] = math.floor((box.min[i] + 1) / u[i] + 0.5)
+          thi[i] = math.floor((box.max[i] - 1) / u[i] + 0.5)
         end
         if not flat and not (lo[1] <= 0 and hi[1] >= 0 and lo[2] <= 0 and hi[2] >= 0 and lo[3] <= 0 and hi[3] >= 0) then
           local cells = {}
@@ -97,9 +103,9 @@ local function poses(g, macro)
               local pdi = dirIndex(dq)
               local n, aligned = {}, pdi ~= nil
               for i = 1, 3 do
-                local w = p[i] + q[i] + a * dq[i]
-                n[i] = math.floor(w / u + 0.5)
-                if math.abs(w - n[i] * u) > 1 then aligned = false end
+                local w = p[i] + q[i] + a[i] * dq[i]
+                n[i] = math.floor(w / u[i] + 0.5)
+                if math.abs(w - n[i] * u[i]) > 1 then aligned = false end
               end
               if aligned then ports[#ports + 1] = { name = c2.name, node = n, di = pdi } end
             end
@@ -328,9 +334,9 @@ local function evaluate(g, node, pose, cost, path, on)
   local leaning, leaned = boxSum(g, cx0, cx1, cy0, ty1, cz0, cz1) > crosses, boxSum(g, x0, x1, y0, y1, z0, z1, g.lsums) > 0
   if leaning or leaned then
     local b, u = pose.box, g.u
-    local bx0, bx1 = b.min[1] + node[1] * u + 1, b.max[1] + node[1] * u - 1
-    local by0, by1 = b.min[2] + node[2] * u + 1, b.max[2] + node[2] * u - 1
-    local bz0, bz1 = b.min[3] + node[3] * u + 1, b.max[3] + node[3] * u - 1
+    local bx0, bx1 = b.min[1] + node[1] * u[1] + 1, b.max[1] + node[1] * u[1] - 1
+    local by0, by1 = b.min[2] + node[2] * u[2] + 1, b.max[2] + node[2] * u[2] - 1
+    local bz0, bz1 = b.min[3] + node[3] * u[3] + 1, b.max[3] + node[3] * u[3] - 1
     if leaning then
       for x = cx0, cx1 do
         for y = cy0, math.min(ty1, g.sumH - 1) do
@@ -448,8 +454,8 @@ local function commit(g, rec, best)
   end
   rec.attach, rec.pose, rec.node = attach, pose, node
   local u = g.u
-  rec.box = { min = { pose.box.min[1] + node[1] * u, pose.box.min[2] + node[2] * u, pose.box.min[3] + node[3] * u },
-    max = { pose.box.max[1] + node[1] * u, pose.box.max[2] + node[2] * u, pose.box.max[3] + node[3] * u } }
+  rec.box = { min = { pose.box.min[1] + node[1] * u[1], pose.box.min[2] + node[2] * u[2], pose.box.min[3] + node[3] * u[3] },
+    max = { pose.box.max[1] + node[1] * u[1], pose.box.max[2] + node[2] * u[2], pose.box.max[3] + node[3] * u[3] } }
   -- ports out of the footprint are kept apart: docks hang there after the pack
   rec.ports, rec.outPorts = {}, {}
   for _, pt in ipairs(pose.ports) do
@@ -710,7 +716,7 @@ local function compress(g, kit)
       end
       -- P anchors the run; run[#run] hangs on it, run[1] carries X
       for j = #run, 1, -1 do
-        local lengths = exactSpan(kit.lengths, j * g.u)
+        local lengths = exactSpan(kit.lengths, j * g.u[axisOf(di)])
         if lengths and #lengths < j then
           for i = #run - j + 1, #run do run[i].removed = true end
           local child = (j < #run) and run[#run - j] or X
@@ -811,11 +817,11 @@ local function union(a, b)
 end
 
 local function dockState(g, kit)
-  local u, geo = g.u, sab.geo
+  local u, a, geo = g.u, g.a, sab.geo
   local cs = sab.sizes[kit.cross.macro]
   local D = { solid = {}, bodies = {}, zones = {}, crosses = {}, poses = {}, piers = 0, areas = 0,
-    crossBox = cs and geo.worldBox(cs, { 0, 0, 0 }, IDENTITY) or { min = { -g.a, -g.a, -g.a }, max = { g.a, g.a, g.a } },
-    F = { min = { -g.a, -g.a, -g.a }, max = { (g.sx - 1) * u + g.a, g.top * u + g.a, (g.sz - 1) * u + g.a } },
+    crossBox = cs and geo.worldBox(cs, { 0, 0, 0 }, IDENTITY) or { min = { -a[1], -a[2], -a[3] }, max = { a[1], a[2], a[3] } },
+    F = { min = { -a[1], -a[2], -a[3] }, max = { (g.sx - 1) * u[1] + a[1], g.top * u[2] + a[2], (g.sz - 1) * u[3] + a[3] } },
     maxPlot = sab.maxPlotKm }
   -- grid frame to station frame: the root cross's origin sits at g.origin less its centre offset
   D.shift = { g.origin[1] - (cs and cs.cX or 0), g.origin[2] - (cs and cs.cY or 0), g.origin[3] - (cs and cs.cZ or 0) }
@@ -824,7 +830,7 @@ local function dockState(g, kit)
     -- crosses, those a strut replaced included
     if v.arms and not seen[v] then
       seen[v] = true
-      D.solid[#D.solid + 1] = shifted(D.crossBox, { v.node[1] * u, v.node[2] * u, v.node[3] * u })
+      D.solid[#D.solid + 1] = shifted(D.crossBox, { v.node[1] * u[1], v.node[2] * u[2], v.node[3] * u[3] })
     end
   end
   ---@type number[]
@@ -832,9 +838,9 @@ local function dockState(g, kit)
   local first, n = math.huge, 0
   for _, M in ipairs(g.modules) do
     if M.pose.box then
-      M.box = shifted(M.pose.box, { M.node[1] * u, M.node[2] * u, M.node[3] * u })
+      M.box = shifted(M.pose.box, { M.node[1] * u[1], M.node[2] * u[2], M.node[3] * u[3] })
     else
-      local p = { M.node[1] * u + M.pose.pos[1], M.node[2] * u + M.pose.pos[2], M.node[3] * u + M.pose.pos[3] }
+      local p = { M.node[1] * u[1] + M.pose.pos[1], M.node[2] * u[2] + M.pose.pos[2], M.node[3] * u[3] + M.pose.pos[3] }
       M.box = geo.worldBox(sab.sizes[M.item.macro], p, M.pose.rows)
     end
     D.solid[#D.solid + 1] = M.box
@@ -871,7 +877,7 @@ local function dockNode(g, D, n)
     if not past then return false end
   end
   if D.crosses[nkey(n)] then return false end
-  local b = shifted(D.crossBox, { x * g.u, y * g.u, z * g.u })
+  local b = shifted(D.crossBox, { x * g.u[1], y * g.u[2], z * g.u[3] })
   for _, o in ipairs(D.bodies) do if hit(b, o) then return false end end
   for _, o in ipairs(D.zones) do if nearZone(b, o) then return false end end
   return true
@@ -919,6 +925,7 @@ end
 ---@async
 local function dockPlace(g, D, it)
   local u, F = g.u, D.F
+  local uMean = (u[1] + u[2] + u[3]) / 3
   local byDi = D.poses[it.macro]
   if not byDi then
     byDi = { {}, {}, {}, {}, {}, {} }
@@ -951,13 +958,13 @@ local function dockPlace(g, D, it)
       for _, z in ipairs(D.zones) do if nearZone(box, z) then return true end end
     end
     for _, n in ipairs(path) do
-      if touch(box, shifted(D.crossBox, { n[1] * u, n[2] * u, n[3] * u })) then return true end
+      if touch(box, shifted(D.crossBox, { n[1] * u[1], n[2] * u[2], n[3] * u[3] })) then return true end
     end
     return false
   end
   ---@async
   local function try(node, di, cost, extra)
-    local ox, oy, oz = node[1] * u, node[2] * u, node[3] * u
+    local ox, oy, oz = node[1] * u[1], node[2] * u[2], node[3] * u[3]
     local o
     for _, pose in ipairs(byDi[di]) do
       work(g, 40)
@@ -1012,7 +1019,7 @@ local function dockPlace(g, D, it)
         elseif isBuild then
           order[2] = off
         end
-        local near = math.sqrt((bx - D.firstAt[1]) ^ 2 + (by - D.firstAt[2]) ^ 2 + (bz - D.firstAt[3]) ^ 2) / u
+        local near = math.sqrt((bx - D.firstAt[1]) ^ 2 + (by - D.firstAt[2]) ^ 2 + (bz - D.firstAt[3]) ^ 2) / uMean
         if firstOfKind then order[#order + 1] = near; order[#order + 1] = cost else order[#order + 1] = cost; order[#order + 1] = near end
         if not cur or less(order, cur.order) then
           o = o or { ox, oy, oz }
@@ -1096,11 +1103,11 @@ local function dockCommit(g, D, it, best)
       X = { node = n, key = "dock:" .. nkey(n), arms = { [OPPOSITE[ref.di]] = true }, parent = parent, modules = 0 }
       g.crosses[X.key] = X
       D.crosses[nkey(n)] = X
-      D.bodies[#D.bodies + 1] = shifted(D.crossBox, { n[1] * u, n[2] * u, n[3] * u })
+      D.bodies[#D.bodies + 1] = shifted(D.crossBox, { n[1] * u[1], n[2] * u[2], n[3] * u[3] })
     end
     D.newCrosses = (D.newCrosses or 0) + #best.path
   end
-  local o = { best.node[1] * u, best.node[2] * u, best.node[3] * u }
+  local o = { best.node[1] * u[1], best.node[2] * u[2], best.node[3] * u[3] }
   local body = shifted(best.pose.body, o)
   D.bodies[#D.bodies + 1] = body
   for _, z in ipairs(best.pose.zones) do D.zones[#D.zones + 1] = shifted(z, o) end
@@ -1121,7 +1128,7 @@ end
 local function rootUnder(g, D, it)
   local u, X = g.u, g.root
   if not X or X.arms[4] then return false end
-  local o = { X.node[1] * u, X.node[2] * u, X.node[3] * u }
+  local o = { X.node[1] * u[1], X.node[2] * u[2], X.node[3] * u[3] }
   local function blocked(box)
     for _, s in ipairs(D.solid) do if hit(box, s) then return true end end
     return false
@@ -1212,7 +1219,7 @@ local function emit(g, run)
   local items, crossItem = {}, {}
   local u = g.u
   local function world(n)
-    return { g.origin[1] + n[1] * u, g.origin[2] + n[2] * u, g.origin[3] + n[3] * u }
+    return { g.origin[1] + n[1] * u[1], g.origin[2] + n[2] * u[2], g.origin[3] + n[3] * u[3] }
   end
   -- a plan cross keeps its own arm names
   local function armName(X, di) return X and X.armNames and X.armNames[di] or geo.armOf(kit.cross.conns, DIRS[di]).name end
@@ -1321,12 +1328,13 @@ local function axisAligned(rows)
   return true
 end
 
--- Cells a world box reaches more than eps into, relative to the lattice cross at c0.
+-- Cells a world box reaches more than eps metres into (nil: EPS of the cell), relative to the lattice cross at c0.
 local function cellRange(box, c0, u, eps)
   local lo, hi = {}, {}
   for i = 1, 3 do
-    lo[i] = math.floor((box.min[i] - c0[i] + eps) / u + 0.5)
-    hi[i] = math.floor((box.max[i] - c0[i] - eps) / u + 0.5)
+    local e = eps or EPS * u[i]
+    lo[i] = math.floor((box.min[i] - c0[i] + e) / u[i] + 0.5)
+    hi[i] = math.floor((box.max[i] - c0[i] - e) / u[i] + 0.5)
   end
   return lo, hi
 end
@@ -1335,7 +1343,7 @@ end
 function grid.Seed(run)
   run.seed = nil
   local geo, kit = sab.geo, run.kit
-  local u, a = 2 * kit.arm, kit.arm
+  local u, a = kit.cell, kit.arms
   local cs = sab.sizes[kit.cross.macro]
   local cc = cs and { cs.cX, cs.cY, cs.cZ } or { 0, 0, 0 }
   local ids = {}
@@ -1352,9 +1360,9 @@ function grid.Seed(run)
   local function onLattice(p, c0)
     local r = {}
     for i = 1, 3 do
-      local f = (p[i] - c0[i]) / u
+      local f = (p[i] - c0[i]) / u[i]
       r[i] = math.floor(f + 0.5)
-      if math.abs(f - r[i]) * u > 1 then return nil end
+      if math.abs(f - r[i]) * u[i] > 1 then return nil end
     end
     return r
   end
@@ -1415,7 +1423,7 @@ function grid.Seed(run)
     if not lattice[idx] and box and pose then
       -- docks and their approach zones are kept clear to the metre, as the dock stage keeps them
       local column = geo.column(macro)
-      local lo, hi = cellRange(box, c0, u, column and 1 or EPS * u)
+      local lo, hi = cellRange(box, c0, u, column and 1 or nil)
       local tlo, thi = cellRange(box, c0, u, 1)
       local E = { idx = idx, macro = macro, pos = { pose.x, pose.y, pose.z }, rows = pose.rows, lo = lo, hi = hi, tlo = tlo, thi = thi, box = box, zones = run.zones[idx], ports = {}, zoneCells = {} }
       for _, z in ipairs(E.zones or {}) do
@@ -1425,7 +1433,7 @@ function grid.Seed(run)
       local own = not run.stacked or ownPart[run.comp[idx] or idx]
       for _, f in ipairs(own and byEntry[idx] or {}) do
         local di = not f.used and dirIndex(f.dir)
-        local r = di and onLattice({ f.pos[1] + a * f.dir[1], f.pos[2] + a * f.dir[2], f.pos[3] + a * f.dir[3] }, c0)
+        local r = di and onLattice({ f.pos[1] + a[1] * f.dir[1], f.pos[2] + a[2] * f.dir[2], f.pos[3] + a[3] * f.dir[3] }, c0)
         if r then
           E.ports[#E.ports + 1] = { name = f.name, r = r, di = di }
           attach = attach + 1
@@ -1452,7 +1460,7 @@ end
 local function seedGrid(g, S)
   local u = g.u
   local d = { math.floor((g.sx - S.size[1]) / 2) - S.lo[1], -S.lo[2], math.floor((g.sz - S.size[3]) / 2) - S.lo[3] }
-  g.origin = { S.c0[1] - d[1] * u, S.c0[2] - d[2] * u, S.c0[3] - d[3] * u }
+  g.origin = { S.c0[1] - d[1] * u[1], S.c0[2] - d[2] * u[2], S.c0[3] - d[3] * u[3] }
   g.existing, g.zones = {}, {}
   for _, E in ipairs(S.crosses) do
     local X = addCross(g, { E.r[1] + d[1], E.r[2] + d[2], E.r[3] + d[3] }, { kind = "existing" })
@@ -1480,8 +1488,8 @@ local function seedGrid(g, S)
     -- the box in grid metres: node 0 at 0
     M.box = { min = {}, max = {} }
     for i = 1, 3 do
-      M.box.min[i] = E.box.min[i] - S.c0[i] + d[i] * u
-      M.box.max[i] = E.box.max[i] - S.c0[i] + d[i] * u
+      M.box.min[i] = E.box.min[i] - S.c0[i] + d[i] * u[i]
+      M.box.max[i] = E.box.max[i] - S.c0[i] + d[i] * u[i]
     end
     mark(E.lo, E.hi, M)
     for _, zc in ipairs(E.zoneCells) do mark(zc[1], zc[2], M) end
@@ -1513,7 +1521,7 @@ end
 -- One layout of every module at the current weights; seed: the plan's entries (grid.Seed).
 ---@async
 local function layout(kit, base, sx, sz, tallest, progress, seed)
-  local g = { u = 2 * kit.arm, a = kit.arm, sx = sx, sz = sz, tallest = tallest, occ = {},
+  local g = { u = kit.cell, a = kit.arms, sx = sx, sz = sz, tallest = tallest, occ = {},
     crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {} }
   if seed then seedGrid(g, seed) end
   rebuildSums(g)
@@ -1565,7 +1573,7 @@ local function layout(kit, base, sx, sz, tallest, progress, seed)
   g.box = g.used[1] * g.used[2] * g.used[3]
   g.cost = W_COST
   sab.Debug("grid: footprint %d x %d, cost %g: %d placed, %d failed, connectors %d (%d crosses, %d saved by struts), used %.1f x %.1f x %.1f km, module cells %.0f%%, %d placements refused for closing the way up, %d frames",
-    g.sx, g.sz, W_COST, #g.modules, #g.failed, g.connectors, crosses, g.saved, g.used[1] * g.u / 1000, g.used[2] * g.u / 1000, g.used[3] * g.u / 1000,
+    g.sx, g.sz, W_COST, #g.modules, #g.failed, g.connectors, crosses, g.saved, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000,
     100 * modCells / g.box, g.banned, g.frames)
   return g
 end
@@ -1600,11 +1608,11 @@ local function detach(g, D, run)
     end
   end
   if not st then return true end
-  local keep = { min = { st.min[1] - u, st.min[2] - u, st.min[3] - u }, max = { st.max[1] + u, st.max[2] + u, st.max[3] + u } }
+  local keep = { min = { st.min[1] - u[1], st.min[2] - u[2], st.min[3] - u[3] }, max = { st.max[1] + u[1], st.max[2] + u[2], st.max[3] + u[3] } }
   local R = SNAP_REACH
   local reach = { min = { st.min[1] - R, st.min[2] - R, st.min[3] - R }, max = { st.max[1] + R, st.max[2] + R, st.max[3] + R } }
   local n = g.root and g.root.node
-  local root = g.rootPier and g.rootPier.body or n and shifted(D.crossBox, { n[1] * u, n[2] * u, n[3] * u })
+  local root = g.rootPier and g.rootPier.body or n and shifted(D.crossBox, { n[1] * u[1], n[2] * u[2], n[3] * u[3] })
   local bodies, L = {}, nil
   for _, list in ipairs({ D.solid, D.bodies }) do
     for _, b in ipairs(list) do
@@ -1636,7 +1644,7 @@ local function detach(g, D, run)
     o[i] = base[i] + s * t
     local ok, why = clear(o)
     while t <= cap and not ok do
-      t = t + u / 4
+      t = t + u[i] / 4
       o[i] = base[i] + s * t
       ok, why = clear(o)
     end
@@ -1669,7 +1677,7 @@ end
 ---@async
 local function pack(run)
   local kit = run.kit
-  local probe = { u = 2 * kit.arm, a = kit.arm }
+  local probe = { u = kit.cell, a = kit.arms }
   local base, cells, spanXZ, tallest, byMacro = {}, 0, 1, 1, {}
   for _, it in ipairs(run.items) do
     it.gridRec = nil
@@ -1718,7 +1726,7 @@ local function pack(run)
     end
   end
   local costs = grid.costs or { W_COST }
-  sab.Debug("grid: cell %.0f m, estimated footprint %d x %d cells, %d footprints, %d modules, %.0f module cells", probe.u, s, s, #shapes, #base, cells)
+  sab.Debug("grid: cell %.0f x %.0f x %.0f m, estimated footprint %d x %d cells, %d footprints, %d modules, %.0f module cells", probe.u[1], probe.u[2], probe.u[3], s, s, #shapes, #base, cells)
   ---@type table
   local keep
   local frames, packs, wCost = 0, 0, W_COST
@@ -1739,7 +1747,7 @@ local function pack(run)
   if not S then
     local H = g.top + 1
     local centre = C.GetBuildPlotCenterOffset(sab.menu.container)
-    g.origin = { centre.x - (g.sx - 1) * g.u / 2, centre.y - (H - 1) * g.u / 2, centre.z - (g.sz - 1) * g.u / 2 }
+    g.origin = { centre.x - (g.sx - 1) * g.u[1] / 2, centre.y - (H - 1) * g.u[2] / 2, centre.z - (g.sz - 1) * g.u[3] / 2 }
   end
   local D = docks(g, run)
   if run.detached and not detach(g, D, run) then error("no side of the stacked station keeps the layout clear within the plot cap", 0) end
@@ -1760,7 +1768,7 @@ local function pack(run)
   end
   run.plotBox = box
   sab.Debug("grid: kept footprint %d x %d, cost %g: %d modules, %d failed, %d connectors, %.1f x %.1f x %.1f km, %d frames for %d packs",
-    g.sx, g.sz, g.cost, #g.modules, #g.failed, g.connectors, g.used[1] * g.u / 1000, g.used[2] * g.u / 1000, g.used[3] * g.u / 1000, frames, packs)
+    g.sx, g.sz, g.cost, #g.modules, #g.failed, g.connectors, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000, frames, packs)
   run.grid = g
   grid.last = g
   run.items = emit(g, run)

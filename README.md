@@ -70,7 +70,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 
 ![A run waiting for the plot licence](docs/images/panel_licence.png)
 
-5. The run places the modules one after another; the panel shows the progress, and **Stop** halts it after the current module. **Modules per frame** sets how many modules are placed per frame.
+5. The run places the modules one after another; the panel shows the progress, and **Stop** halts it after the current module. **Modules per frame** sets how many modules are placed per frame. **Fast placement** rebuilds the menu's lists only when the run ends instead of after every module, five to ten times faster on a large plan; the slider is not used while it is on.
 
 ![A run in progress](docs/images/panel_running.png)
 

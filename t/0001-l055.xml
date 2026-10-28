@@ -52,6 +52,8 @@
       <t id="152">Alvos selecionados: %s</t>
       <t id="153">A API Extra Data não consegue ler os dados dos módulos nesta versão do jogo</t>
       <t id="154">Interrompido, o plano foi alterado manualmente: %s colocados, %s falhos</t>
+      <t id="155">Fast placement</t>
+      <t id="156">The menu's lists refresh when the run ends instead of after every module</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Arquiteto de Estações</t>

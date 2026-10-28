@@ -52,6 +52,8 @@
       <t id="152">Избрани цели: %s</t>
       <t id="153">Extra Data API не може да чете данните за модулите в тази версия на играта</t>
       <t id="154">Спряно, планът е променен ръчно: поставени %s, неуспешни %s</t>
+      <t id="155">Fast placement</t>
+      <t id="156">The menu's lists refresh when the run ends instead of after every module</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Архитект на станции</t>
