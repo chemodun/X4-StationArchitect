@@ -121,7 +121,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 
 ## Changelog
 
-### [1.00] - 2026-10-??
+### [1.00] - 2026-10-28
 
 - Added
   - Initial version

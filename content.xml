@@ -4,11 +4,11 @@
   name="Station Architect"
   author="Chem O`Dun"
   version="100"
-  date="2026-10-23"
+  date="2026-10-28"
   save="false"
   sync="false"
   enabled="true"
-  lastupdate=""
+  lastupdate="1793214057"
   description="Tell the build menu what your station should produce or build: this extension works out every module needed and places them as one compact block. Nothing is bought until you press Confirm.">
   <text language="7"
     description="Tell the build menu what your station should produce or build: this extension works out every module needed and places them as one compact block. Nothing is bought until you press Confirm."></text>
