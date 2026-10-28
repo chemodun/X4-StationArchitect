@@ -36,7 +36,6 @@
       <t id="132">Tur %s / %s</t>
       <t id="135">Plandaki modüller: %s / %s, başarısız %s</t>
       <t id="136">Yerleşim düzeni %s / %s: modül %s / %s</t>
-      <t id="138">Kare başına modül</t>
       <t id="139">Dok ve iskeleler için yer aranıyor: %s / %s</t>
       <t id="140">%s / %s /h</t>
       <t id="142">%s x %s x %s km arazi ruhsatı: %s</t>
@@ -52,8 +51,6 @@
       <t id="152">Seçilen hedefler: %s</t>
       <t id="153">Extra Data API bu oyun sürümünde modül verilerini okuyamıyor</t>
       <t id="154">Durduruldu, plan elle değiştirildi: yerleştirilen %s, başarısız %s</t>
-      <t id="155">Fast placement</t>
-      <t id="156">The menu's lists refresh when the run ends instead of after every module</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">İstasyon Mimarı</t>

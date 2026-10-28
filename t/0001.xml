@@ -36,7 +36,6 @@
       <t id="132">Turn %s of %s</t>
       <t id="135">Modules in the plan: %s of %s, failed %s</t>
       <t id="136">Packing layout %s of %s: module %s of %s</t>
-      <t id="138">Modules per frame</t>
       <t id="139">Finding places for docks and piers: %s of %s</t>
       <t id="140">%s / %s /h</t>
       <t id="142">Plot licence for %s x %s x %s km: %s</t>
@@ -52,8 +51,6 @@
       <t id="152">Selected targets: %s</t>
       <t id="153">The Extra Data API cannot read module data on this game build</t>
       <t id="154">Stopped, the plan was changed by hand: %s placed, %s failed</t>
-      <t id="155">Fast placement</t>
-      <t id="156">The menu's lists refresh when the run ends instead of after every module</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Station Architect</t>

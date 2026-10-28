@@ -36,7 +36,6 @@
       <t id="132">턴 %s / %s</t>
       <t id="135">계획 속 모듈: %s / %s, 실패 %s</t>
       <t id="136">배치 레이아웃 %s / %s: 모듈 %s / %s</t>
-      <t id="138">프레임당 모듈 수</t>
       <t id="139">도크와 부두 위치를 찾는 중: %s / %s</t>
       <t id="140">%s / %s /h</t>
       <t id="142">부지 면허 %s x %s x %s km: %s</t>
@@ -52,8 +51,6 @@
       <t id="152">선택된 목표: %s</t>
       <t id="153">이 게임 빌드에서는 Extra Data API가 모듈 데이터를 읽을 수 없습니다</t>
       <t id="154">중지됨, 계획이 수동으로 변경되었습니다: 배치 %s, 실패 %s</t>
-      <t id="155">Fast placement</t>
-      <t id="156">The menu's lists refresh when the run ends instead of after every module</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">스테이션 건축가</t>

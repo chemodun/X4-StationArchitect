@@ -660,13 +660,12 @@ local function samePlace(pose, pos, rows)
   return true
 end
 
--- fast placement floats undragged; the editor commits one drop a frame whatever the rate
-local FAST_PER_FRAME = 2
+-- above 1 the floats go undragged; the editor commits one drop a frame whatever the rate
+local PER_FRAME = 2
 
--- the slider's placements per frame (fast placement ignores the slider), under the run's cap after a failure
+-- placements per frame, under the run's cap after a failure
 local function perFrame(run)
-  local rate = sab.fastPlacement and FAST_PER_FRAME or sab.perFrame
-  return math.min(rate, run.cap or rate)
+  return math.min(PER_FRAME, run.cap or PER_FRAME)
 end
 
 local function beginPlacement(run, item)
@@ -1878,7 +1877,7 @@ local function registerEntry(run, item)
   notePlaced(run, item, added.idx, nil)
 end
 
--- chained: placements already made in this frame (up to sab.perFrame)
+-- chained: placements already made in this frame (up to perFrame)
 function sab.Tick(chained)
   local run = sab.run
   if not run then return end
@@ -1990,11 +1989,6 @@ local MAX_ADD_MODULES = 100
 local MAX_BAYS = 10
 -- storage per ware in hours of its flow; nil in a target keeps the planner's default
 local MAX_STORAGE_HOURS = 24
--- placements per frame; 1 keeps the dragged float, more drop undragged floats in the same frame
-local MAX_PER_FRAME = 10
-sab.perFrame = 1
--- fast placement: the menu's lists are rebuilt when the run ends, not after every module
-sab.fastPlacement = false
 
 function sab.ResetTarget()
   sab.target = defaultTarget()
@@ -2517,22 +2511,6 @@ local function addBillRows(ftable, idle, buttonHeight)
   return #catOptions > 0
 end
 
--- The fast-placement checkbox in a narrow last column as the form rows have theirs, then the rate slider (the
--- engine refuses a checkbox on a slider cell's row), read-only while fast placement is on; returns the next y.
-local function rateTable(frame, tabOrder, y, buttonHeight, dirty)
-  local rtable = frame:addTable(2, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = y })
-  rtable:setColWidth(2, Helper.scaleY(buttonHeight), false)
-  local row = rtable:addRow(true, {})
-  row[1]:createText(ReadText(PAGE, 155), { halign = "left", minRowHeight = buttonHeight, mouseOverText = ReadText(PAGE, 156) })
-  row[2]:createCheckBox(sab.fastPlacement, { height = buttonHeight, width = buttonHeight, mouseOverText = ReadText(PAGE, 156) })
-  row[2].handlers.onClick = function(_, value) sab.fastPlacement = value; dirty() end
-  row = rtable:addRow(true, {})
-  row[1]:setColSpan(2):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1,
-    max = MAX_PER_FRAME, start = sab.perFrame, step = 1, readOnly = sab.fastPlacement }):setText(ReadText(PAGE, 138))
-  row[1].handlers.onSliderCellChanged = function(_, value) sab.perFrame = value end
-  return rtable.properties.y + rtable:getVisibleHeight() + Helper.borderSize
-end
-
 function sab.DisplayPanel()
   local menu = sab.menu
   if not (menu.shown and menu.titleData and menu.titleData.width) then return end
@@ -2620,8 +2598,6 @@ function sab.DisplayPanel()
     tabOrder = tabOrder + 1
   end
   local canOptimize = idle and sab.CanOptimizePlot()
-  contentY = rateTable(frame, tabOrder, contentY, buttonHeight, function() sab.panelDirty = true end)
-  tabOrder = tabOrder + 1
   local btable = frame:addTable(4, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = contentY })
   local row
   local offer = sab.run and sab.run.phase == "confirm" and sab.run.offer
@@ -2715,8 +2691,8 @@ function sab.DisplayDialog()
   local title = ttable:addRow(false, { bgColor = Color["row_title_background"] })
   title[1]:createText(string.format(tostring(ReadText(PAGE, 130)), tostring(GetComponentData(d.sector, "name"))), Helper.headerRowCenteredProperties)
 
-  -- the rate rows and the button row below need five rows of the view
-  local bottom = Helper.viewHeight - y - Helper.frameBorder - Helper.scaleY(5 * buttonHeight)
+  -- the button row below needs three rows of the view
+  local bottom = Helper.viewHeight - y - Helper.frameBorder - Helper.scaleY(3 * buttonHeight)
   local plan, tabOrder, nextY = addTargetTables(frame, 2, ttable.properties.y + ttable:getVisibleHeight() + Helper.borderSize, bottom, true,
     buttonHeight, dialogContext(d), dirty, function(kit)
       local loadouts = {}
@@ -2724,8 +2700,6 @@ function sab.DisplayDialog()
       kit.dropdown(kit.input(ReadText(1001, 7967)), loadouts, d.loadout, function(id) d.loadout = tonumber(id) end)
     end, "dialog")
 
-  nextY = rateTable(frame, tabOrder, nextY, buttonHeight, dirty)
-  tabOrder = tabOrder + 1
   local btable = frame:addTable(2, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = nextY })
   local row = btable:addRow(true, {})
   row[1]:createButton({ height = buttonHeight, active = plan ~= nil and plan.adds }):setText(ReadText(1001, 14), { halign = "center" })
@@ -2910,7 +2884,7 @@ local function hookMenu()
         if not stopped then sab.Error("stop after a failed tick failed: %s", tostring(why)) end
         sab.run = nil
       end
-      if sab.planRefresh and menu.shown and not (sab.fastPlacement and sab.run) then
+      if sab.planRefresh and menu.shown and not sab.run then
         sab.planRefresh = nil
         refreshPlanTable(true)
       end

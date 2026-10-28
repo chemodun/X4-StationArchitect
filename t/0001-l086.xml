@@ -36,7 +36,6 @@
       <t id="132">第 %s 轮，共 %s 轮</t>
       <t id="135">规划中的模块：%s / %s，失败 %s</t>
       <t id="136">布局方案 %s / %s：模块 %s / %s</t>
-      <t id="138">每帧模块数</t>
       <t id="139">正在为船坞和码头寻找位置：%s / %s</t>
       <t id="140">%s / %s /h</t>
       <t id="142">%s x %s x %s km 规划区的规划许可证：%s</t>
@@ -52,8 +51,6 @@
       <t id="152">已选目标：%s</t>
       <t id="153">此游戏版本下，Extra Data API 无法读取模块数据</t>
       <t id="154">已停止，规划被手动更改：已放置 %s，失败 %s</t>
-      <t id="155">Fast placement</t>
-      <t id="156">The menu's lists refresh when the run ends instead of after every module</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">空间站建筑师</t>
