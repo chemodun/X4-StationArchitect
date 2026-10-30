@@ -51,6 +51,9 @@
       <t id="152">Vybrané cíle: %s</t>
       <t id="153">Extra Data API nemůže na této verzi hry číst data modulů</t>
       <t id="154">Zastaveno, plán byl změněn ručně: umístěno %s, selhalo %s</t>
+      <t id="155">Moduly speciálních surovin: %s</t>
+      <t id="156">Přidat modul</t>
+      <t id="157">Uvolněte na nejnižší hodnotě pro odebrání tohoto modulu</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architekt stanic</t>

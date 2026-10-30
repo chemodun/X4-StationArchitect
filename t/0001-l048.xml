@@ -51,6 +51,9 @@
       <t id="152">Wybrane cele: %s</t>
       <t id="153">Extra Data API nie może odczytać danych modułów w tej wersji gry</t>
       <t id="154">Zatrzymano, plan został zmieniony ręcznie: umieszczono %s, nieudane %s</t>
+      <t id="155">Moduły zasobów specjalnych: %s</t>
+      <t id="156">Dodaj moduł</t>
+      <t id="157">Zwolnij przy najniższej wartości, aby usunąć ten moduł</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architekt stacji</t>

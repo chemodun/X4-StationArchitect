@@ -51,6 +51,9 @@
       <t id="152">Cibles sélectionnées : %s</t>
       <t id="153">L'API Extra Data ne peut pas lire les données des modules sur cette version du jeu</t>
       <t id="154">Arrêté, le plan a été modifié à la main : %s placés, %s échoués</t>
+      <t id="155">Modules de ressources spéciales : %s</t>
+      <t id="156">Ajouter un module</t>
+      <t id="157">Relâcher à la valeur minimale pour retirer ce module</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architecte de station</t>

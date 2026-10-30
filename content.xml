@@ -3,12 +3,12 @@
   id="ws_3827769999"
   name="Station Architect"
   author="Chem O`Dun"
-  version="100"
-  date="2026-10-28"
+  version="110"
+  date="2026-10-30"
   save="false"
   sync="false"
   enabled="true"
-  lastupdate="1793214057"
+  lastupdate="1793388848"
   description="Tell the build menu what your station should produce or build: this extension works out every module needed and places them as one compact block. Nothing is bought until you press Confirm.">
   <text language="7"
     description="Tell the build menu what your station should produce or build: this extension works out every module needed and places them as one compact block. Nothing is bought until you press Confirm."></text>

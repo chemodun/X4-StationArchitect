@@ -60,7 +60,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 ### Target
 
 1. Pick the kind of target (**Produce a ware** or **Build or maintain ships**), then the ware or the build module, and press **Add a target**. Each added target gets a slider for its number of production or build modules; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target.
-   **Special resource modules** (Scrap Processors, fed by tugs rather than by trade): pick one and press **Add a module**; its slider sets how many the station has. With **Full cycle** their scrap metal feeds scrap recycling modules that make your target wares, and only the rest comes from regular production modules (a surplus is sold); without it the scrap metal is sold.
+   **Special resource modules** (Scrap Processors, fed by tugs rather than by trade): pick one and press **Add a module**; its slider sets how many the station has. With **Full cycle** their scrap metal feeds scrap recycling modules that make your target wares, and only the rest comes from regular production modules (a surplus is sold); without it the scrap metal is sold. Tugs bring their raw scrap straight to them, so it adds no docks, piers or storage.
 2. Set the options: **Modules race**, **Full cycle**, **Workforce**, **Self-sufficient workforce**, **Workforce race** and **Storage, hours of flow** (how many hours of each ware's flow the storage holds).
 3. Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning.
 
@@ -122,15 +122,12 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 
 ## Changelog
 
-### [1.01] - 2026-11-??
+### [1.10] - 2026-10-30
 
 - Added
-  - Special resource modules on the Target tab: add Scrap Processors by count; with Full cycle their scrap metal feeds scrap recyclers for the target wares, and regular modules make only the rest
+  - **Special resource modules** on the Target tab: Scrap Processors whose scrap metal feeds the target wares
 - Fixed
-  - Raw scrap no longer counts toward docks, piers and storage: tugs deliver it straight to the scrap processing module
-  - Scrap processing modules are planned only through the special resource modules; the ones on the station count toward its production, so no extra one is added for their scrap metal
-  - On a station with scrap recyclers, a target ware's module count is no longer inflated by the recyclers' share
-  - Scrap processing modules were missing from the planned modules list
+  - Raw scrap added docks, piers and storage to the plan
 
 ### [1.00] - 2026-10-28
 

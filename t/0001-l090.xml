@@ -51,6 +51,9 @@
       <t id="152">Seçilen hedefler: %s</t>
       <t id="153">Extra Data API bu oyun sürümünde modül verilerini okuyamıyor</t>
       <t id="154">Durduruldu, plan elle değiştirildi: yerleştirilen %s, başarısız %s</t>
+      <t id="155">Özel kaynak modülleri: %s</t>
+      <t id="156">Modül ekle</t>
+      <t id="157">Bu modülü kaldırmak için en düşük değerde bırakın</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">İstasyon Mimarı</t>
