@@ -1975,18 +1975,21 @@ sab.tab = "target"
 -- the panel opens as its title bar only
 sab.expanded = false
 -- goals: the added targets; new: the editor of the next one. Its ware and build module and the race are
--- filled from the catalogue on the first panel build (targetChoices). station: the station it was derived for.
+-- filled from the catalogue on the first panel build (targetChoices). special: the special resource modules
+-- { macro, count }, newSpecial the editor's module. station: the station it was derived for.
 local function defaultTarget()
-  return { goals = {}, new = { kind = "ware" }, fullCycle = false, workforce = true, selfSufficient = false, moduleRace = "any" }
+  return { goals = {}, new = { kind = "ware" }, special = {}, fullCycle = false, workforce = true, selfSufficient = false, moduleRace = "any" }
 end
 sab.target = defaultTarget()
 -- the goal list shows at most this many rows before it scrolls
 local MAX_GOAL_ROWS = 5
 -- top rows of the scrolling target tables per form, kept over rebuilds
 sab.topRows = {}
--- slider tops above what the station has: producer modules of a ware target, build modules of a ship target
+-- slider tops above what the station has: producer modules of a ware target, build modules of a ship target,
+-- special resource modules
 local MAX_ADD_MODULES = 100
 local MAX_BAYS = 10
+local MAX_SPECIAL = 10
 -- storage per ware in hours of its flow; nil in a target keeps the planner's default
 local MAX_STORAGE_HOURS = 24
 
@@ -2028,10 +2031,13 @@ end
 -- The Target tab's choice lists from the owned blueprints; an unset or no longer owned choice takes the default.
 local function targetChoices(cat)
   local t = sab.target
-  local wares, seen = {}, {}
+  -- special modules' products are no ware goal: those modules have their own section
+  local wares, seen, specials, added = {}, {}, {}, {}
+  for _, s in ipairs(t.special) do added[s.macro] = true end
   for _, group in ipairs({ "production", "processing" }) do
     for _, e in ipairs(cat[group]) do
-      for _, p in ipairs(e.products or {}) do
+      if e.byHand and not added[e.macro] then specials[#specials + 1] = option(e.macro, e.name) end
+      for _, p in ipairs(not e.byHand and e.products or {}) do
         if not seen[p.ware] then
           seen[p.ware] = true
           wares[#wares + 1] = option(p.ware, sab.planner.Ware(p.ware).name)
@@ -2039,6 +2045,8 @@ local function targetChoices(cat)
       end
     end
   end
+  sortedByText(specials)
+  if not (t.newSpecial and cat.byMacro[t.newSpecial] and not added[t.newSpecial]) then t.newSpecial = specials[1] and specials[1].id end
   local builds = {}
   for _, e in ipairs(cat.build) do
     if not goalTaken({ kind = "ship", buildMacro = e.macro }) then builds[#builds + 1] = option(e.macro, e.name) end
@@ -2074,7 +2082,7 @@ local function targetChoices(cat)
   if t.goals[1] then new.kind = t.goals[1].kind end
   if not habitats[t.race] then t.race = sab.planner.WorkforceRace(cat) end
   if not makers[t.moduleRace] then t.moduleRace = "any" end
-  return { wares = free, builds = builds, races = races, moduleRaces = moduleRaces }
+  return { wares = free, builds = builds, specials = specials, races = races, moduleRaces = moduleRaces }
 end
 
 -- Where a target is planned: the build menu's station, or a sector spot before the station exists.
@@ -2085,14 +2093,13 @@ end
 
 -- The ware's modules and production on the panel's station now; none on a spot before the station exists.
 local function currentOf(ctx, ware)
-  if not (ctx.station and ware) then return { modules = 0, production = 0, net = 0 } end
+  if not (ctx.station and ware) then return { modules = 0, production = 0, net = 0, extra = 0 } end
   return sab.planner.Current(ctx.station, ware)
 end
 
--- The ware's net output now in modules of its current output: the modules beyond the station's own use.
+-- The ware's net output now in modules of its regular producers' output: the modules beyond the station's own use.
 local function extraModules(current)
-  if current.modules == 0 or current.production <= 0 then return current.modules end
-  return current.net * current.modules / current.production
+  return current.extra
 end
 
 -- The build modules of a macro the station has, planned ones included.
@@ -2110,17 +2117,18 @@ local function formTarget(ctx)
   t.station, t.planRead = ctx.station, planRead
   if ctx.station then
     local d = sab.planner.Derive(ctx.station, ctx.set)
-    t.goals, t.fullCycle, t.workforce, t.selfSufficient, t.race = d.goals, d.fullCycle, d.workforce, d.selfSufficient, d.race
+    t.goals, t.special, t.fullCycle, t.workforce, t.selfSufficient, t.race = d.goals, d.special, d.fullCycle, d.workforce, d.selfSufficient, d.race
     if d.goals[1] then t.new.kind = d.goals[1].kind end
-    sab.Debug("target derived for %s: %d goals, full cycle %s, workforce %s, self-sufficient %s, race %s", tostring(ctx.station), #d.goals,
-      tostring(d.fullCycle), tostring(d.workforce), tostring(d.selfSufficient), tostring(d.race))
+    sab.Debug("target derived for %s: %d goals, %d special, full cycle %s, workforce %s, self-sufficient %s, race %s", tostring(ctx.station), #d.goals,
+      #d.special, tostring(d.fullCycle), tostring(d.workforce), tostring(d.selfSufficient), tostring(d.race))
   end
   sab.target = t
   return t
 end
 
 -- A ware goal's modules are modules of net output, beyond what the station and the other goals consume; a
--- ship goal's bays count the station's own. The plan adds the difference; the spec keeps the form's order.
+-- ship goal's bays and the special modules count the station's own. The plan adds the difference; the spec
+-- keeps the form's order.
 function sab.TargetSpec(ctx)
   local t = formTarget(ctx)
   -- a run before the form was ever built (eval, a collapsed panel) still needs the race
@@ -2134,7 +2142,11 @@ function sab.TargetSpec(ctx)
       goals[#goals + 1] = { kind = "ship", buildMacro = g.buildMacro, count = math.max(0, (g.bays or 1) - have), bays = math.max(g.bays or 1, have) }
     end
   end
-  return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals,
+  local special = {}
+  for _, s in ipairs(t.special) do
+    special[#special + 1] = { macro = s.macro, count = math.max(0, s.count - sab.planner.ModuleCount(ctx.station, s.macro)) }
+  end
+  return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals, special = special,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
     race = t.race, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, storageHours = t.storageHours }
 end
@@ -2398,6 +2410,49 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
     end
     tables.goals = gtable
     y = gtable.properties.y + gtable:getVisibleHeight() + Helper.borderSize
+  end
+
+  -- the special resource modules: the editor with its Add button, one slider row per module (from the station's
+  -- count up, released there it is removed), its text the module's total output
+  if #choices.specials > 0 or #t.special > 0 then
+    local xtable = formTable(frame, tabOrder, y, buttonHeight)
+    tabOrder = tabOrder + 1
+    local header = xtable:addRow(false, {})
+    header[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 155)), #t.special), Helper.subHeaderTextProperties)
+    row = xtable:addRow(true, {})
+    row[1]:setColSpan(4):createDropDown(choices.specials, { startOption = t.newSpecial or "", height = buttonHeight, active = idle and #choices.specials > 0 })
+    row[1].handlers.onDropDownConfirmed = function(_, id)
+      if id ~= t.newSpecial then t.newSpecial = id; dirty() end
+    end
+    row = xtable:addRow(true, {})
+    row[1]:setColSpan(4):createButton({ height = buttonHeight, active = idle and t.newSpecial ~= nil }):setText(ReadText(PAGE, 156), { halign = "center" })
+    row[1].handlers.onClick = function()
+      table.insert(t.special, { macro = t.newSpecial, count = sab.planner.ModuleCount(ctx.station, t.newSpecial) + 1 })
+      dirty()
+    end
+    for _, s in ipairs(t.special) do
+      local e = cat.byMacro[s.macro] or { name = tostring(s.macro), products = {} }
+      local low = sab.planner.ModuleCount(ctx.station, s.macro)
+      s.count = math.max(low, math.min(low + MAX_SPECIAL, s.count))
+      local outputs = {}
+      for _, p in ipairs(e.products or {}) do
+        outputs[#outputs + 1] = sab.planner.Ware(p.ware).name .. " " .. string.format(tostring(ReadText(PAGE, 123)), math.floor(p.rate * s.count + 0.5))
+      end
+      row = xtable:addRow(true, {})
+      row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low, max = low + MAX_SPECIAL,
+        start = s.count, step = 1, hideMaxValue = true, readOnly = not idle, mouseOverText = ReadText(PAGE, 157) })
+          :setText(e.name .. ": " .. table.concat(outputs, ", "))
+      row[1].handlers.onSliderCellChanged = function(_, value) s.count = value end
+      row[1].handlers.onSliderCellConfirm = function()
+        if s.count <= low then
+          for j, h in ipairs(t.special) do
+            if h == s then table.remove(t.special, j); break end
+          end
+        end
+        dirty()
+      end
+    end
+    y = xtable.properties.y + xtable:getVisibleHeight() + Helper.borderSize
   end
 
   local stable = formTable(frame, tabOrder, y, buttonHeight)

@@ -51,6 +51,9 @@
       <t id="152">Selected targets: %s</t>
       <t id="153">The Extra Data API cannot read module data on this game build</t>
       <t id="154">Stopped, the plan was changed by hand: %s placed, %s failed</t>
+      <t id="155">Special resource modules: %s</t>
+      <t id="156">Add a module</t>
+      <t id="157">Release at the lowest value to remove this module</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Station Architect</t>
