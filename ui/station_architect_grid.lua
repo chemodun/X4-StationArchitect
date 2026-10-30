@@ -1124,14 +1124,14 @@ local function dockCommit(g, D, it, best)
   D.bodies[#D.bodies + 1] = body
   for _, z in ipairs(best.pose.zones) do D.zones[#D.zones + 1] = shifted(z, o) end
   D.all = union(D.all, body)
+  -- the item takes it only if this layout is kept (applyDocks)
   if best.free then
     local p = best.pose.pos
-    it.pack, it.free, it.rows = nil, true, best.pose.rows
-    it.pos = { x = o[1] + p[1] + D.shift[1], y = o[2] + p[2] + D.shift[2], z = o[3] + p[3] + D.shift[3] }
+    g.dockOut[it] = { rows = best.pose.rows, pos = { o[1] + p[1], o[2] + p[2], o[3] + p[3] } }
   else
     X.arms[best.di] = true
     X.modules = X.modules + 1
-    it.gridRec = { item = it, attach = { kind = "cross", cross = X, di = best.di }, pose = best.pose, node = best.node, dock = true }
+    g.dockOut[it] = { gridRec = { item = it, attach = { kind = "cross", cross = X, di = best.di }, pose = best.pose, node = best.node, dock = true } }
   end
 end
 
@@ -1174,11 +1174,12 @@ local function rootUnder(g, D, it)
   return true
 end
 
--- Build modules first, then piers, then dock areas, each in bill order.
+-- Build modules first, then piers, then dock areas, each in bill order. g.dockFailed and g.dockFree count the
+-- docks without a place and those dropped free.
 ---@async
 local function docks(g, run)
   local D = dockState(g, run.kit)
-  g.rootPier = nil
+  g.rootPier, g.dockOut, g.dockFailed, g.dockFree = nil, {}, 0, 0
   if run.rootPier then rootUnder(g, D, run.rootPier) end
   local list = {}
   for pass = 1, 3 do
@@ -1188,7 +1189,6 @@ local function docks(g, run)
     end
   end
   if #list == 0 then return D end
-  grid.lastDocks = D
   local placed, dropped, failed = 0, 0, 0
   local progress = run.packProgress
   progress.docks = #list
@@ -1212,8 +1212,21 @@ local function docks(g, run)
   end
   local saved = compress(g, run.kit)
   g.connectors = g.connectors + (D.newCrosses or 0) - saved
-  sab.Debug("grid: docking %d hung, %d free, %d without a place, %d new crosses, %d saved by struts", placed, dropped, failed, D.newCrosses or 0, saved)
+  g.dockFailed, g.dockFree = failed, dropped
+  sab.Debug("grid: footprint %d x %d docking %d hung, %d free, %d without a place, %d new crosses, %d saved by struts", g.sx, g.sz, placed, dropped, failed, D.newCrosses or 0, saved)
   return D
+end
+
+-- The kept layout's docks onto their items: a hung dock its grid record, a free one its pose in the station frame.
+local function applyDocks(g, D)
+  for it, r in pairs(g.dockOut or {}) do
+    if r.gridRec then
+      it.gridRec = r.gridRec
+    else
+      it.pack, it.free, it.rows = nil, true, r.rows
+      it.pos = { x = r.pos[1] + D.shift[1], y = r.pos[2] + D.shift[2], z = r.pos[3] + D.shift[3] }
+    end
+  end
 end
 
 -- Every body of the layout (crosses, modules, docks) in one station-frame box.
@@ -1749,9 +1762,10 @@ local function pack(run)
   end
   local costs = grid.costs or { W_COST }
   sab.Debug("grid: cell %.0f x %.0f x %.0f m, estimated footprint %d x %d cells, %d footprints, %d modules, %.0f module cells", probe.u[1], probe.u[2], probe.u[3], s, s, #shapes, #base, cells)
-  ---@type table
-  local keep
+  -- the layouts with the fewest failed modules
+  local cands = {}
   local frames, packs, wCost = 0, 0, W_COST
+  local centre = C.GetBuildPlotCenterOffset(sab.menu.container)
   run.packProgress = { pack = 0, packs = #shapes * #costs, module = 0, modules = #base }
   for _, shape in ipairs(shapes) do
     for _, cost in ipairs(costs) do
@@ -1759,20 +1773,34 @@ local function pack(run)
       run.packProgress.pack = packs + 1
       local g = layout(kit, base, shape[1], shape[2], tallest, run.packProgress, S)
       frames, packs = frames + g.frames, packs + 1
-      if better(g, keep) then keep = g end
+      -- a seeded grid keeps the lattice's origin
+      if not S then
+        local H = g.top + 1
+        g.origin = { centre.x - (g.sx - 1) * g.u[1] / 2, centre.y - (H - 1) * g.u[2] / 2, centre.z - (g.sz - 1) * g.u[3] / 2 }
+      end
+      if not cands[1] or #g.failed < #cands[1].failed then
+        cands = { g }
+      elseif #g.failed == #cands[1].failed then
+        cands[#cands + 1] = g
+      end
     end
   end
   W_COST = wCost
-  local g = keep
-  for _, M in ipairs(g.modules) do M.item.gridRec = M end
-  -- a seeded grid keeps the lattice's origin
-  if not S then
-    local H = g.top + 1
-    local centre = C.GetBuildPlotCenterOffset(sab.menu.container)
-    g.origin = { centre.x - (g.sx - 1) * g.u[1] / 2, centre.y - (H - 1) * g.u[2] / 2, centre.z - (g.sz - 1) * g.u[3] / 2 }
+  -- best first, each with its docks until one hangs every dock: fewest docks without a place, then fewest free
+  table.sort(cands, better)
+  ---@type table
+  local g
+  ---@type table
+  local D
+  for _, c in ipairs(cands) do
+    local cD = docks(c, run)
+    if not g or c.dockFailed < g.dockFailed or (c.dockFailed == g.dockFailed and c.dockFree < g.dockFree) then g, D = c, cD end
+    if c.dockFailed == 0 and c.dockFree == 0 then break end
   end
-  local D = docks(g, run)
+  grid.lastDocks = D
+  for _, M in ipairs(g.modules) do M.item.gridRec = M end
   if run.detached and not detach(g, D, run) then error("no side of the stacked station keeps the layout clear within the plot cap", 0) end
+  applyDocks(g, D)
   local box = layoutBox(D)
   -- per axis, a shift under half a km that puts the layout's low face on a whole km when that saves a plot km
   if box and not S and not run.detached then
@@ -1784,6 +1812,9 @@ local function pack(run)
       if f1.uncapped[i] < f0.uncapped[i] then
         g.origin[i] = g.origin[i] + shift[i]
         box.min[i], box.max[i] = alt.min[i], alt.max[i]
+        for it in pairs(g.dockOut or {}) do
+          if it.free and it.pos then it.pos[AXIS_NAMES[i]] = it.pos[AXIS_NAMES[i]] + shift[i] end
+        end
         sab.Debug("grid: shifted %.0f m on axis %d to save a plot km", shift[i], i)
       end
     end

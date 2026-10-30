@@ -1437,7 +1437,16 @@ end
 -- the plot centre.
 local function finishLayout(run)
   local menu = sab.menu
-  run.kit = connectorKit(run.moduleRace or (run.items[1] and raceOf(run.items[1].macro)) or nil)
+  -- the kit's race: the one holding most of the block's volume (docks hang outside it), whatever the order
+  local lead, volumes = nil, {}
+  for _, it in ipairs(run.items) do
+    local race = not it.column and raceOf(it.macro)
+    if race then
+      volumes[race] = (volumes[race] or 0) + (it.volume or 0)
+      if not lead or volumes[race] > volumes[lead] then lead = race end
+    end
+  end
+  run.kit = connectorKit(run.moduleRace or lead or (run.items[1] and raceOf(run.items[1].macro)) or nil)
   if not run.kit.cross then run.kit = nil end
   if not run.gridRoute then
     run.phase = "begin"
