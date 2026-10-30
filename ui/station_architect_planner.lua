@@ -64,6 +64,7 @@ local planner = {
   basePierDocks = 3,          -- a station without docks gets at least this, as vanilla's smallest prefabs
   baseDockAreas = 1,
   bigPier = 3,               -- piers with more docks: one per station at most, at the bottom
+  livingStart = 0.4,          -- share of the turns done before the habitats and what only feeds them
   -- set -> catalogue of owned module blueprints
   catalogue = {},
   -- ware -> { name, transport, volume }
@@ -347,6 +348,18 @@ local function ladder(cands, need, counts)
     end
     counts[pick.macro] = (counts[pick.macro] or 0) + 1
   end
+end
+
+-- Storage: one unit of the smallest class that holds the whole need, else enough of the largest.
+local function storageUnits(cands, need, counts)
+  if need <= 0 or #cands == 0 then return end
+  for i = #cands, 1, -1 do
+    if cands[i].capacity >= need - 1e-6 then
+      counts[cands[i].macro] = (counts[cands[i].macro] or 0) + 1
+      return
+    end
+  end
+  counts[cands[1].macro] = (counts[cands[1].macro] or 0) + ceil(need / cands[1].capacity)
 end
 
 -- *** targets ***
@@ -805,7 +818,7 @@ function planner.Plan(target)
     end
   end
   local lack = stationLacks(target)
-  plan.lacks = lack
+  plan.lacks, plan.use = lack, use
   if lack.any then plan.adds = true end
   -- no goal, every goal met and no shortfall: nothing to plan, not even the base docks
   if not plan.adds then return plan end
@@ -947,15 +960,23 @@ function planner.Plan(target)
     plan.workforceCapacity = plan.workforceCapacity + cat.byMacro[macro].capacity * n
   end
 
-  -- storage per transport type, docks and piers from the trade volume
+  -- the wares the planned and the station's habitats eat, for the turns
+  plan.habWares = {}
+  for _, list in ipairs({ habWares, fed }) do
+    for w in pairs(list) do plan.habWares[w] = true end
+  end
+
+  -- storage per ware and per transport type, docks and piers from the trade volume
   local m3 = {}
+  plan.wareStorage = {}
   for w in pairs(base) do plan.consumed[w] = plan.consumed[w] or 0 end
   for w, r in pairs(plan.produced) do plan.consumed[w] = plan.consumed[w] or 0; plan.produced[w] = r end
   for w, c in pairs(plan.consumed) do
     local p = plan.produced[w] or 0
     local ware = planner.Ware(w)
     if not ware.processed then
-      m3[ware.transport] = (m3[ware.transport] or 0) + (target.storageHours or planner.storageHours) * math.max(p, c) * ware.volume
+      plan.wareStorage[w] = (target.storageHours or planner.storageHours) * math.max(p, c) * ware.volume
+      m3[ware.transport] = (m3[ware.transport] or 0) + plan.wareStorage[w]
       local net = p - c
       if net > 0 then plan.flow.export = plan.flow.export + net * ware.volume end
       if net < 0 then plan.flow.import = plan.flow.import - net * ware.volume end
@@ -964,7 +985,7 @@ function planner.Plan(target)
   plan.storage = m3
   for transport, volume in pairs(m3) do
     local cands = candidates(cat.storage, moduleRace, function(e) return e.tags[transport] end)
-    if #cands > 0 then ladder(cands, volume, counts) else warn("no owned %s storage", tostring(transport)) end
+    if #cands > 0 then storageUnits(cands, volume, counts) else warn("no owned %s storage", tostring(transport)) end
   end
   -- docks for the station's whole trade after the plan, less those it has; the base only while it has none
   local flow = plan.flow.import + plan.flow.export
@@ -1129,11 +1150,15 @@ function planner.Bill(plan)
 end
 
 -- *** turns ***
--- The bill in build order, so the station works from its first final module on: turn t adds one final
--- module (a producer of the target ware, or the build module; without one a producer of a shortfall ware, or
--- a habitat for a workforce shortfall) behind the storage, dock, pier and habitat
--- units the need of t turns exceeds (largest units first, one big unit serves several turns) and the
--- upstream producers t final modules need, deepest first.
+-- The bill in build order, bottom up, so the station works from its first turn on and each turn adds output:
+-- turn t of N opens with the dock areas and piers the trade of t turns needs (one of each at least), then the
+-- storage of the imports, the upstream producers t final modules need, deepest first, each level's storage
+-- behind it, and ends with one final module (a producer of the target ware, or the build module; without one
+-- a producer of a shortfall ware, or a habitat for a workforce shortfall) and its storage. The living part
+-- (habitats, the producers only they or other living producers take, the imports only those take, and the
+-- modules of no chain) starts after livingStart of the turns and spreads evenly over the rest. Storage is due
+-- from a ware's first producer on (an import's from the start), its units placed while what stands is below
+-- the due share.
 
 local function unitsOf(cat, counts, group)
   local list = {}
@@ -1156,11 +1181,10 @@ function planner.Turns(plan)
   local cat = planner.Catalogue(plan.set)
   local counts = plan.counts
   if not next(counts) then return {} end
-  local goalWares, goalBuilds, ships = {}, {}, false
+  local goalWares, goalBuilds = {}, {}
   for _, goal in ipairs(goalsOf(plan.target)) do
     if goal.kind == "ship" then
       if goal.buildMacro then goalBuilds[goal.buildMacro] = true end
-      ships = true
     elseif goal.ware then
       goalWares[goal.ware] = true
     end
@@ -1175,7 +1199,7 @@ function planner.Turns(plan)
     local e = cat.byMacro[macro]
     if not e then
       others[#others + 1] = { macro = macro, name = macro }
-    elseif e.group == "production" or e.group == "build" then
+    elseif e.group == "production" or e.group == "processing" or e.group == "build" then
       if isFinal(e) then finals[#finals + 1] = e else upstream[#upstream + 1] = e end
     elseif e.group ~= "habitation" and e.group ~= "storage" and e.group ~= "dock" and e.group ~= "pier" then
       others[#others + 1] = e
@@ -1238,33 +1262,52 @@ function planner.Turns(plan)
     end
     if not changed then break end
   end
-  -- a producer nothing in the chain consumes (food, medical for the habitats) goes after the chain
-  local deepest, inChain = 0, {}
-  for _, e in ipairs(upstream) do
-    for _, p in ipairs(e.products or {}) do
-      for _, m in ipairs(consumers[p.ware] or {}) do if m ~= e.macro then inChain[e.macro] = true end end
-    end
-    if inChain[e.macro] and level[e.macro] > deepest then deepest = level[e.macro] end
-  end
-  for _, e in ipairs(upstream) do
-    if not inChain[e.macro] then level[e.macro] = deepest + 1 end
-  end
-  -- shallow first: a final module's direct inputs come before their own inputs, imports fill the gap meanwhile
+  -- deepest first: what feeds the chain stands before what it feeds, the final module's direct inputs last
   table.sort(upstream, function(a, b)
-    if level[a.macro] ~= level[b.macro] then return level[a.macro] < level[b.macro] end
+    if level[a.macro] ~= level[b.macro] then return level[a.macro] > level[b.macro] end
     return a.name < b.name
   end)
-  -- the transport types of what a final module makes and takes: its storage comes right after it
-  local finalTransports = {}
-  for _, e in ipairs(finals) do
-    for _, p in ipairs(e.products or {}) do
-      finalTransports[planner.Ware(p.ware).transport] = true
-      for w in pairs(p.resources) do finalTransports[planner.Ware(w).transport] = true end
+  -- the living part: a ware only the habitats or living producers take (never a goal, a shortfall the
+  -- habitats do not eat, or a ship build's use); a producer is living when every product of it is
+  local habWares, use, producerOf, living = plan.habWares or {}, plan.use or {}, {}, {}
+  for _, list in ipairs({ finals, upstream }) do
+    for _, e in ipairs(list) do
+      for _, p in ipairs(e.products or {}) do producerOf[p.ware] = true end
     end
   end
-  if ships then
-    for w in pairs(plan.consumed) do finalTransports[planner.Ware(w).transport] = true end
+  local function livingWare(w, self)
+    if nFinal == 0 or goalWares[w] or use[w] or (lacks.wares[w] and not habWares[w]) then return false end
+    local taken = false
+    for _, m in ipairs(consumers[w] or {}) do
+      if m ~= self then
+        if not living[m] then return false end
+        taken = true
+      end
+    end
+    return taken or habWares[w] or false
   end
+  for _ = 1, #upstream + 1 do
+    local changed = false
+    for _, e in ipairs(upstream) do
+      if not living[e.macro] and e.products and #e.products > 0 then
+        local all = true
+        for _, p in ipairs(e.products) do
+          if not livingWare(p.ware, e.macro) then all = false end
+        end
+        if all then living[e.macro], changed = true, true end
+      end
+    end
+    if not changed then break end
+  end
+  local main, supporters = {}, {}
+  for _, e in ipairs(upstream) do
+    if living[e.macro] then supporters[#supporters + 1] = e else main[#main + 1] = e end
+  end
+  local imports = {}
+  for w in pairs(plan.wareStorage or {}) do
+    if not producerOf[w] then imports[#imports + 1] = w end
+  end
+  table.sort(imports)
   -- the unit lists, largest first; a storage unit goes to the first transport type it serves
   local habitats, piers, areas = unitsOf(cat, counts, "habitation"), unitsOf(cat, counts, "pier"), unitsOf(cat, counts, "dock")
   local transports, storages = {}, {}
@@ -1282,9 +1325,21 @@ function planner.Turns(plan)
 
   -- no final at all: one turn per habitat the missing workforce needs
   local nTurns = math.max(1, nFinal > 0 and nFinal or (lacks.workforce > 0 and #habitats or 1))
+  -- the living part from the turn after livingStart of the turns; without a final module it is the plan itself
+  local firstLiving = nFinal > 0 and math.min(nTurns, ceil(planner.livingStart * nTurns) + 1) or 1
   local flow = plan.flow.import + plan.flow.export
   local turns, cum = {}, {}
-  local placedWorkforce, placedHabitat, placedDocks, placedAreas, placedStorage = 0, 0, 0, 0, {}
+  local placedHabitat, placedDocks, placedAreas, placedStorage = 0, 0, 0, {}
+  -- storage due per transport type, the living part's apart
+  local due, dueLiving, counted = {}, {}, {}
+  local function addDue(w, isLiving)
+    local need = plan.wareStorage and plan.wareStorage[w]
+    if counted[w] or not need then return end
+    counted[w] = true
+    local list = isLiving and dueLiving or due
+    local transport = planner.Ware(w).transport
+    list[transport] = (list[transport] or 0) + need
+  end
   -- the final macro furthest behind its count, so every goal grows in step
   local function nextFinal()
     local pick, behind
@@ -1304,60 +1359,79 @@ function planner.Turns(plan)
   end
   for t = 1, nTurns do
     local turn, share = {}, t / nTurns
-    local producers = {}
-    for _, e in ipairs(upstream) do
-      while (cum[e.macro] or 0) < ceil(counts[e.macro] * share) do
-        cum[e.macro] = (cum[e.macro] or 0) + 1
-        producers[#producers + 1] = e
-      end
-    end
-    local f = nextFinal()
-    if f then cum[f.macro] = (cum[f.macro] or 0) + 1 end
-    for _, e in ipairs(producers) do placedWorkforce = placedWorkforce + e.workforce end
-    if f then placedWorkforce = placedWorkforce + f.workforce end
-    -- the final module first, so it runs on imports while the rest is built; then what it trades through. A
-    -- build module is the final stage: last in its turn
-    local buildLast = f and f.group == "build"
-    if f and not buildLast then turn[#turn + 1] = f.macro end
-    local function emitStorage(ofFinal)
+    local livingShare = t >= firstLiving and (t - firstLiving + 1) / (nTurns - firstLiving + 1) or 0
+    local function emitStorage()
       for _, transport in ipairs(transports) do
-        if (finalTransports[transport] or false) == ofFinal then
-          placedStorage[transport] = emitWhile(turn, storages[transport] or {}, placedStorage[transport] or 0, (plan.storage[transport] or 0) * share)
-        end
+        local need = (due[transport] or 0) * share + (dueLiving[transport] or 0) * livingShare
+        placedStorage[transport] = emitWhile(turn, storages[transport] or {}, placedStorage[transport] or 0, need)
       end
     end
-    emitStorage(true)
+    local function emitProducer(e)
+      turn[#turn + 1] = e.macro
+      for _, p in ipairs(e.products or {}) do addDue(p.ware, living[e.macro]) end
+    end
+    -- the units due by the share, level by level, each level's storage behind it
+    local function emitLevels(list, s)
+      local i = 1
+      while list[i] do
+        local lv = level[list[i].macro]
+        while list[i] and level[list[i].macro] == lv do
+          local e = list[i]
+          while (cum[e.macro] or 0) < ceil(counts[e.macro] * s) do
+            cum[e.macro] = (cum[e.macro] or 0) + 1
+            emitProducer(e)
+          end
+          i = i + 1
+        end
+        emitStorage()
+      end
+    end
     local needDocks, needAreas = dockNeed(plan, flow * share)
     placedAreas = emitWhile(turn, areas, placedAreas, math.max(1, needAreas), 1)
     placedDocks = emitWhile(turn, piers, placedDocks, math.max(1, needDocks))
-    if t == 1 then
+    for _, w in ipairs(imports) do
+      local isLiving = livingWare(w)
+      if not isLiving or livingShare > 0 then addDue(w, isLiving) end
+    end
+    emitStorage()
+    emitLevels(main, share)
+    if t == firstLiving then
       for _, e in ipairs(others) do
         for _ = 1, counts[e.macro] do turn[#turn + 1] = e.macro end
       end
     end
-    for _, e in ipairs(producers) do turn[#turn + 1] = e.macro end
-    emitStorage(false)
-    if nFinal > 0 then
-      placedHabitat = emitWhile(turn, habitats, placedHabitat, placedWorkforce + lacks.workforce * share)
-    else
+    if nFinal == 0 then
       placedHabitat = emitWhile(turn, habitats, placedHabitat, t, 1)
+    elseif livingShare > 0 then
+      emitLevels(supporters, livingShare)
+      placedHabitat = emitWhile(turn, habitats, placedHabitat, ((plan.workforce or 0) + lacks.workforce) * livingShare)
     end
-    if f and buildLast then turn[#turn + 1] = f.macro end
+    -- the last turn: what rounding left over, before its final module
+    if t == nTurns then
+      for _, list in ipairs({ areas, piers, habitats }) do
+        for _, u in ipairs(list) do turn[#turn + 1] = u.macro end
+      end
+      for _, list in ipairs({ main, supporters }) do
+        for _, e in ipairs(list) do
+          for _ = (cum[e.macro] or 0) + 1, counts[e.macro] do emitProducer(e) end
+        end
+      end
+    end
+    local f = nextFinal()
+    if f then
+      cum[f.macro] = (cum[f.macro] or 0) + 1
+      emitProducer(f)
+      emitStorage()
+    end
     turns[t] = turn
   end
-  -- whatever rounding left over goes with the last turn
+  -- the last turn ends with the final modules and the storage still unplaced
   local last = turns[#turns]
-  for _, list in ipairs({ habitats, piers, areas }) do
-    for _, u in ipairs(list) do last[#last + 1] = u.macro end
+  for _, e in ipairs(finals) do
+    for _ = (cum[e.macro] or 0) + 1, counts[e.macro] do last[#last + 1] = e.macro end
   end
   for _, transport in ipairs(transports) do
     for _, u in ipairs(storages[transport] or {}) do last[#last + 1] = u.macro end
-  end
-  for _, e in ipairs(upstream) do
-    for _ = (cum[e.macro] or 0) + 1, counts[e.macro] do last[#last + 1] = e.macro end
-  end
-  for _, e in ipairs(finals) do
-    for _ = (cum[e.macro] or 0) + 1, counts[e.macro] do last[#last + 1] = e.macro end
   end
 
   local bill = {}

@@ -865,11 +865,14 @@ local function overlaps(a, b, margin)
   return true
 end
 
--- A box entering a placed approach zone deeper than a metre.
+-- the editor refuses a body flush against an approach zone: a zone keeps this clearance
+local ZONE_MARGIN = 10
+
+-- A box within the clearance of a placed approach zone.
 local function inZone(run, box)
   for _, zones in pairs(run.zones) do
     for _, z in ipairs(zones) do
-      if overlaps(box, z, -1) then return true end
+      if overlaps(box, z, ZONE_MARGIN) then return true end
     end
   end
   return false
@@ -1262,7 +1265,7 @@ end
 
 -- for the grid layout (station_architect_grid.lua)
 sab.geo = { rotate = rotate, unit = unit, mulRows = mulRows, worldBox = worldBox, zoneBoxes = zoneBoxes, armOf = armOf, strutFor = strutFor,
-  column = columnClass }
+  column = columnClass, zoneMargin = ZONE_MARGIN }
 
 -- The shortest combination of at most four struts spanning need or more: lengths, longest first.
 local function spanWith(lengths, need)
@@ -1418,6 +1421,18 @@ local function rootPier(run)
   return it
 end
 
+-- The greedy route keeps the turns but places a turn's outer modules after its inner ones, so an early pier's
+-- lanes cannot cover the connections the core grows on.
+local function innerFirst(items)
+  local index = {}
+  for i, it in ipairs(items) do index[it] = i end
+  table.sort(items, function(a, b)
+    if (a.turn or 0) ~= (b.turn or 0) then return (a.turn or 0) < (b.turn or 0) end
+    if (a.outer ~= nil) ~= (b.outer ~= nil) then return a.outer == nil end
+    return index[a] < index[b]
+  end)
+end
+
 -- The connector kit for spurs, then the grid packer, or the plain packer with the first item dropped free at
 -- the plot centre.
 local function finishLayout(run)
@@ -1440,11 +1455,13 @@ local function finishLayout(run)
       return
     end
     run.gridRoute = false
+    if run.turns then innerFirst(run.items) end
     run.phase = "begin"
     return
   end
   if not run.kit then
     local centre = C.GetBuildPlotCenterOffset(menu.container)
+    if run.turns then innerFirst(run.items) end
     local first = run.items[1]
     first.pack, first.free, first.pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
     sab.Debug("grid off: no cross blueprint")
@@ -1531,7 +1548,7 @@ local function boxOk(run, item, cand)
   if item.column then
     for _, z in ipairs(zoneBoxes(item.macro, { cand.pose.pos.x, cand.pose.pos.y, cand.pose.pos.z }, cand.pose.rows)) do
       for _, b in pairs(run.boxes) do
-        if overlaps(z, b, -1) then return false, "block" end
+        if overlaps(z, b, ZONE_MARGIN) then return false, "block" end
       end
     end
   end
@@ -1765,18 +1782,20 @@ function sab.StartBill(bill, opts)
       turns = math.max(turns, b.turn or 0)
     end
   end
+  local gridRoute = opts and opts.grid or false
   if turns == 0 then
     table.sort(items, function(a, b)
       if (a.outer ~= nil) ~= (b.outer ~= nil) then return a.outer == nil end
       return a.volume > b.volume
     end)
+  elseif not gridRoute then
+    innerFirst(items)
   end
   if not connector and items[1] then
     local macro = defaultConnector(opts and opts.moduleRace, items[1].macro)
     if macro then connector = { macro = macro } end
   end
   local empty = items[1] and tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) == 0
-  local gridRoute = opts and opts.grid or false
   if empty and not gridRoute then
     local centre = C.GetBuildPlotCenterOffset(menu.container)
     items[1].pack, items[1].free, items[1].pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
@@ -2239,7 +2258,7 @@ local function progressDetail()
   -- grid and pair items snap to a planned connection: no candidate list to count
   local name = GetMacroData(item.macro, "name")
   local text = item.candidates and string.format(tostring(ReadText(PAGE, 131)), name, item.cursor - 1, #item.candidates) or tostring(name)
-  if item.turn and run.turns and not run.gridRoute then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
+  if item.turn and run.turns then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
   return text
 end
 
