@@ -70,7 +70,8 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 [size=125][u]Target[/u][/size]
 [list=1]
 [*] Pick the kind of target ([b]Produce a ware[/b] or [b]Build or maintain ships[/b]), then the ware or the build module, and press [b]Add a target[/b]. Each added target gets a slider for its number of production or build modules; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target.
-[*] Set the options: [b]Modules race[/b], [b]Full cycle[/b], [b]Workforce[/b], [b]Self-sufficient workforce[/b], [b]Workforce race[/b] and [b]Storage, hours of flow[/b] (how many hours of each ware's flow the storage holds).
+[/list]   [b]Special resource modules[/b] (Scrap Processors, fed by tugs rather than by trade): pick one and press [b]Add a module[/b]; its slider sets how many the station has. With [b]Full cycle[/b] their scrap metal feeds scrap recycling modules that make your target wares, and only the rest comes from regular production modules (a surplus is sold); without it the scrap metal is sold.
+[list=1][*] Set the options: [b]Modules race[/b], [b]Full cycle[/b], [b]Workforce[/b], [b]Self-sufficient workforce[/b], [b]Workforce race[/b] and [b]Storage, hours of flow[/b] (how many hours of each ware's flow the storage holds).
 [*] Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning.
 [/list]
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_target.png[/img][/spoiler]
@@ -131,6 +132,20 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [/list]
 [size=130][u]Changelog[/u][/size]
 
+[size=125][u][1.01] - 2026-11-??[/u][/size]
+[list]
+[*] Added
+[list]
+[*] Special resource modules on the Target tab: add Scrap Processors by count; with Full cycle their scrap metal feeds scrap recyclers for the target wares, and regular modules make only the rest
+[/list]
+[*] Fixed
+[list]
+[*] Raw scrap no longer counts toward docks, piers and storage: tugs deliver it straight to the scrap processing module
+[*] Scrap processing modules are planned only through the special resource modules; the ones on the station count toward its production, so no extra one is added for their scrap metal
+[*] On a station with scrap recyclers, a target ware's module count is no longer inflated by the recyclers' share
+[*] Scrap processing modules were missing from the planned modules list
+[/list]
+[/list]
 [size=125][u][1.00] - 2026-10-28[/u][/size]
 [list]
 [*] Added
