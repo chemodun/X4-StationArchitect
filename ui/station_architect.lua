@@ -2412,23 +2412,25 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
     y = gtable.properties.y + gtable:getVisibleHeight() + Helper.borderSize
   end
 
-  -- the special resource modules: the editor with its Add button, one slider row per module (from the station's
-  -- count up, released there it is removed), its text the module's total output
+  -- the special resource modules: the editor with its Add button while a module is left to add, one slider row
+  -- per module (from the station's count up, released there it is removed), its text the module's total output
   if #choices.specials > 0 or #t.special > 0 then
     local xtable = formTable(frame, tabOrder, y, buttonHeight)
     tabOrder = tabOrder + 1
     local header = xtable:addRow(false, {})
     header[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 155)), #t.special), Helper.subHeaderTextProperties)
-    row = xtable:addRow(true, {})
-    row[1]:setColSpan(4):createDropDown(choices.specials, { startOption = t.newSpecial or "", height = buttonHeight, active = idle and #choices.specials > 0 })
-    row[1].handlers.onDropDownConfirmed = function(_, id)
-      if id ~= t.newSpecial then t.newSpecial = id; dirty() end
-    end
-    row = xtable:addRow(true, {})
-    row[1]:setColSpan(4):createButton({ height = buttonHeight, active = idle and t.newSpecial ~= nil }):setText(ReadText(PAGE, 156), { halign = "center" })
-    row[1].handlers.onClick = function()
-      table.insert(t.special, { macro = t.newSpecial, count = sab.planner.ModuleCount(ctx.station, t.newSpecial) + 1 })
-      dirty()
+    if #choices.specials > 0 then
+      row = xtable:addRow(true, {})
+      row[1]:setColSpan(4):createDropDown(choices.specials, { startOption = t.newSpecial or "", height = buttonHeight, active = idle })
+      row[1].handlers.onDropDownConfirmed = function(_, id)
+        if id ~= t.newSpecial then t.newSpecial = id; dirty() end
+      end
+      row = xtable:addRow(true, {})
+      row[1]:setColSpan(4):createButton({ height = buttonHeight, active = idle and t.newSpecial ~= nil }):setText(ReadText(PAGE, 156), { halign = "center" })
+      row[1].handlers.onClick = function()
+        table.insert(t.special, { macro = t.newSpecial, count = sab.planner.ModuleCount(ctx.station, t.newSpecial) + 1 })
+        dirty()
+      end
     end
     for _, s in ipairs(t.special) do
       local e = cat.byMacro[s.macro] or { name = tostring(s.macro), products = {} }
@@ -2503,8 +2505,9 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   y = ptable.properties.y + ptable:getVisibleHeight() + Helper.borderSize
 
   local wares = {}
+  -- processed wares (raw scrap) come by tug, never by trade
   for w in pairs(plan.consumed) do
-    if math.abs((plan.produced[w] or 0) - plan.consumed[w]) >= 1 then wares[#wares + 1] = w end
+    if math.abs((plan.produced[w] or 0) - plan.consumed[w]) >= 1 and not sab.planner.Ware(w).processed then wares[#wares + 1] = w end
   end
   if #wares == 0 and not plan.adds and #plan.warnings == 0 then return plan, tabOrder, y end
   table.sort(wares, function(a, b) return sab.planner.Ware(a).name < sab.planner.Ware(b).name end)
