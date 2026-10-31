@@ -1135,14 +1135,15 @@ local function dockCommit(g, D, it, best)
   end
 end
 
--- A detached grid's root pier hangs under the root cross, the pose with the most approach zones pointing down;
--- emit places it first, free, and the root cross on it.
+-- A root pier (a new station's first, a detached grid's) hangs under the root cross, the pose with the most
+-- approach zones pointing down; emit places it first, free, and the root cross on it.
 local function rootUnder(g, D, it)
   local u, X = g.u, g.root
   if not X or X.arms[4] then return false end
   local o = { X.node[1] * u[1], X.node[2] * u[2], X.node[3] * u[3] }
-  local function blocked(box)
-    for _, s in ipairs(D.solid) do if hit(box, s) then return true end end
+  local function blocked(box, isZone)
+    local touch = isZone and nearZone or hit
+    for _, s in ipairs(D.solid) do if touch(box, s) then return true end end
     return false
   end
   local best
@@ -1153,7 +1154,7 @@ local function rootUnder(g, D, it)
       if not (best and up >= best.up) and not blocked(shifted(pose.body, o)) then
         local ok = true
         for _, z in ipairs(pose.zones) do
-          if blocked(shifted(z, o)) then ok = false break end
+          if blocked(shifted(z, o), true) then ok = false break end
         end
         if ok then best = { pose = pose, up = up } end
       end

@@ -819,6 +819,8 @@ function planner.Plan(target)
   end
   local lack = stationLacks(target)
   plan.lacks, plan.use = lack, use
+  -- a new station has nothing to trade through: its docks lead every turn; an upgrade's close them
+  plan.newStation = not target.station or #stationMacros(target.station) == 0
   if lack.any then plan.adds = true end
   -- no goal, every goal met and no shortfall: nothing to plan, not even the base docks
   if not plan.adds then return plan end
@@ -1151,10 +1153,11 @@ end
 
 -- *** turns ***
 -- The bill in build order, bottom up, so the station works from its first turn on and each turn adds output:
--- turn t of N opens with the dock areas and piers the trade of t turns needs (one of each at least), then the
--- storage of the imports, the upstream producers t final modules need, deepest first, each level's storage
+-- a new station's turn 1 opens with a pier and a dock area (an upgrade trades through its own); turn t of N opens
+-- with the storage of the imports, the upstream producers t final modules need, deepest first, each level's storage
 -- behind it, and ends with one final module (a producer of the target ware, or the build module; without one
--- a producer of a shortfall ware, or a habitat for a workforce shortfall) and its storage. The living part
+-- a producer of a shortfall ware, or a habitat for a workforce shortfall), its storage and the piers and dock
+-- areas the trade of t turns needs beyond those standing. The living part
 -- (habitats, the producers only they or other living producers take, the imports only those take, and the
 -- modules of no chain) starts after livingStart of the turns and spreads evenly over the rest. Storage is due
 -- from a ware's first producer on (an import's from the start), its units placed while what stands is below
@@ -1386,9 +1389,16 @@ function planner.Turns(plan)
         emitStorage()
       end
     end
-    local needDocks, needAreas = dockNeed(plan, flow * share)
-    placedAreas = emitWhile(turn, areas, placedAreas, math.max(1, needAreas), 1)
-    placedDocks = emitWhile(turn, piers, placedDocks, math.max(1, needDocks))
+    local function emitDocks()
+      local needDocks, needAreas = dockNeed(plan, flow * share)
+      placedDocks = emitWhile(turn, piers, placedDocks, math.max(1, needDocks))
+      placedAreas = emitWhile(turn, areas, placedAreas, math.max(1, needAreas), 1)
+    end
+    -- a new station starts from a pier and a dock area
+    if t == 1 and plan.newStation ~= false then
+      placedDocks = emitWhile(turn, piers, placedDocks, 1)
+      placedAreas = emitWhile(turn, areas, placedAreas, 1, 1)
+    end
     for _, w in ipairs(imports) do
       local isLiving = livingWare(w)
       if not isLiving or livingShare > 0 then addDue(w, isLiving) end
@@ -1408,9 +1418,7 @@ function planner.Turns(plan)
     end
     -- the last turn: what rounding left over, before its final module
     if t == nTurns then
-      for _, list in ipairs({ areas, piers, habitats }) do
-        for _, u in ipairs(list) do turn[#turn + 1] = u.macro end
-      end
+      for _, u in ipairs(habitats) do turn[#turn + 1] = u.macro end
       for _, list in ipairs({ main, supporters }) do
         for _, e in ipairs(list) do
           for _ = (cum[e.macro] or 0) + 1, counts[e.macro] do emitProducer(e) end
@@ -1422,6 +1430,13 @@ function planner.Turns(plan)
       cum[f.macro] = (cum[f.macro] or 0) + 1
       emitProducer(f)
       emitStorage()
+    end
+    -- the docks the trade of t turns needs close the turn, the last turn's leftovers with them
+    emitDocks()
+    if t == nTurns then
+      for _, list in ipairs({ piers, areas }) do
+        for _, u in ipairs(list) do turn[#turn + 1] = u.macro end
+      end
     end
     turns[t] = turn
   end

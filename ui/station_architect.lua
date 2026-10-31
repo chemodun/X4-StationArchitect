@@ -1477,6 +1477,16 @@ local function finishLayout(run)
     run.phase = "begin"
     return
   end
+  -- a new station grows from its first pier: placed first, the root cross on it
+  if run.fromEmpty then
+    for _, it in ipairs(run.items) do
+      if IsMacroClass(it.macro, "pier") then
+        run.rootPier = it
+        sab.Debug("new station: rooted on its first pier %s", it.macro)
+        break
+      end
+    end
+  end
   sab.grid.Start(run)
 end
 
