@@ -819,7 +819,7 @@ function planner.Plan(target)
   end
   local lack = stationLacks(target)
   plan.lacks, plan.use = lack, use
-  -- a new station has nothing to trade through: its docks lead every turn; an upgrade's close them
+  -- a new station has nothing to trade through: it starts from a pier and a dock area
   plan.newStation = not target.station or #stationMacros(target.station) == 0
   if lack.any then plan.adds = true end
   -- no goal, every goal met and no shortfall: nothing to plan, not even the base docks

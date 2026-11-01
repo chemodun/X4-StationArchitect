@@ -1574,11 +1574,28 @@ local function boxOk(run, item, cand)
   for idx, b in pairs(run.boxes) do
     if idx ~= cand.f.entryIdx and not item.relaxed and overlaps(box, b, -5) then return false, "overlap" end
   end
+  -- an item the grid left out, at its bill position: clear of what the grid still builds, relaxed or not
+  local R = item.early and run.reserve
+  if R then
+    for _, z in ipairs(R.zones) do
+      if overlaps(box, z, ZONE_MARGIN) then return false, "reserved" end
+    end
+    for _, b in ipairs(R.bodies) do
+      if overlaps(box, b, -5) then return false, "reserved" end
+    end
+    if item.column then
+      for _, z in ipairs(zoneBoxes(item.macro, { cand.pose.pos.x, cand.pose.pos.y, cand.pose.pos.z }, cand.pose.rows)) do
+        for _, b in ipairs(R.bodies) do
+          if overlaps(z, b, ZONE_MARGIN) then return false, "reserved" end
+        end
+      end
+    end
+  end
   return true
 end
 
 local function skip(item, reason)
-  item.skips = item.skips or { plot = 0, block = 0, overlap = 0, closes = 0, incompatible = 0, elsewhere = 0, rejected = 0, refused = 0 }
+  item.skips = item.skips or { plot = 0, block = 0, overlap = 0, reserved = 0, closes = 0, incompatible = 0, elsewhere = 0, rejected = 0, refused = 0 }
   item.skips[reason] = item.skips[reason] + 1
 end
 
@@ -1694,8 +1711,8 @@ local function packStep(run, item)
   end
   local s, total = item.skips or {}, #item.candidates
   local function skipsText()
-    return string.format("%d candidates: plot %d, block %d, overlap %d, closes %d, incompatible %d, elsewhere %d, rejected %d, refused %d", total,
-      s.plot or 0, s.block or 0, s.overlap or 0, s.closes or 0, s.incompatible or 0, s.elsewhere or 0, s.rejected or 0, s.refused or 0)
+    return string.format("%d candidates: plot %d, block %d, overlap %d, reserved %d, closes %d, incompatible %d, elsewhere %d, rejected %d, refused %d", total,
+      s.plot or 0, s.block or 0, s.overlap or 0, s.reserved or 0, s.closes or 0, s.incompatible or 0, s.elsewhere or 0, s.rejected or 0, s.refused or 0)
   end
   if not item.relaxed and (s.overlap or 0) > 0 then
     item.relaxed, item.cursor, item.relaxedTries = true, 1, 0
@@ -1708,6 +1725,15 @@ local function packStep(run, item)
   item.candidates, item.relaxed, item.plotNeed = nil, nil, nil
   if (s.plot or 0) > 0 and need and sab.FitPlot(need.box, false) then
     sab.Debug("%s: no place among %s; retrying in the grown plot", item.macro, skipsText())
+    run.phase = "begin"
+    return
+  end
+  -- no place clear of the grid's layout yet: after everything else, where the grid has no plans left
+  if item.early then
+    sab.Debug("%s: no place among %s; deferred to the end", item.macro, skipsText())
+    item.early = nil
+    table.remove(run.items, run.next)
+    run.items[#run.items + 1] = item
     run.phase = "begin"
     return
   end

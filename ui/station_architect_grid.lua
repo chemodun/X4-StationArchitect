@@ -830,8 +830,10 @@ end
 local function dockState(g, kit)
   local u, a, geo = g.u, g.a, sab.geo
   local cs = sab.sizes[kit.cross.macro]
-  local D = { solid = {}, bodies = {}, zones = {}, crosses = {}, poses = {}, piers = 0, areas = 0,
-    crossBox = cs and geo.worldBox(cs, { 0, 0, 0 }, IDENTITY) or { min = { -a[1], -a[2], -a[3] }, max = { a[1], a[2], a[3] } },
+  -- a cross keeps to its cell, its arms on every face: a model box reaching past them is loose (8.00), in any rotation
+  local cb = cs and geo.worldBox(cs, { 0, 0, 0 }, IDENTITY) or { min = { -a[1], -a[2], -a[3] }, max = { a[1], a[2], a[3] } }
+  for i = 1, 3 do cb.min[i], cb.max[i] = math.max(cb.min[i], -a[i]), math.min(cb.max[i], a[i]) end
+  local D = { solid = {}, bodies = {}, zones = {}, crosses = {}, poses = {}, piers = 0, areas = 0, crossBox = cb,
     F = { min = { -a[1], -a[2], -a[3] }, max = { (g.sx - 1) * u[1] + a[1], g.top * u[2] + a[2], (g.sz - 1) * u[3] + a[3] } },
     maxPlot = sab.maxPlotKm }
   -- grid frame to station frame: the root cross's origin sits at g.origin less its centre offset
@@ -1240,7 +1242,7 @@ local function layoutBox(D)
 end
 
 -- Run items in build order: the bill order, each module after the crosses and modules it hangs on.
-local function emit(g, run)
+local function emit(g, run, D)
   local geo, kit = sab.geo, run.kit
   local items, crossItem = {}, {}
   local u = g.u
@@ -1306,8 +1308,8 @@ local function emit(g, run)
     items[#items + 1] = it
     return it
   end
-  -- a dock dropped free keeps its turn; items outside the grid go last, so they cannot take an arm the grid planned
-  local outside = {}
+  -- a dock dropped free keeps its turn; an item outside the grid keeps its bill position, clear of the layout's
+  -- bodies and approach zones (run.reserve, station frame), else the placer defers it to the end
   if g.root then emitCross(g.root) end
   for _, it in ipairs(run.items) do
     if it.gridRec then
@@ -1316,11 +1318,19 @@ local function emit(g, run)
       it.emitted = true
       items[#items + 1] = it
     elseif not it.emitted then
-      outside[#outside + 1] = it
+      it.early = true
+      items[#items + 1] = it
     end
   end
-  for _, it in ipairs(outside) do items[#items + 1] = it end
   for _, st in ipairs(items) do st.turn = st.turn or (run.items[1] and run.items[1].turn) end
+  local cs = sab.sizes[kit.cross.macro]
+  local sh = { g.origin[1] - (cs and cs.cX or 0), g.origin[2] - (cs and cs.cY or 0), g.origin[3] - (cs and cs.cZ or 0) }
+  local bodies, zones = {}, {}
+  for _, list in ipairs({ D.solid, D.bodies }) do
+    for _, b in ipairs(list) do bodies[#bodies + 1] = shifted(b, sh) end
+  end
+  for _, z in ipairs(D.zones) do zones[#zones + 1] = shifted(z, sh) end
+  run.reserve = { bodies = bodies, zones = zones }
   return items
 end
 
@@ -1825,7 +1835,7 @@ local function pack(run)
     g.sx, g.sz, g.cost, #g.modules, #g.failed, g.connectors, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000, frames, packs)
   run.grid = g
   grid.last = g
-  run.items = emit(g, run)
+  run.items = emit(g, run, D)
   run.next = 1
 end
 
