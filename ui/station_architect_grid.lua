@@ -212,17 +212,17 @@ local function work(g, n)
   end
 end
 
--- The earliest turn a parent stands in: a module's, or that of what a cross chain hangs on; emit places a
--- module after its parent, so a module takes no parent of a later turn.
-local function parentTurn(parent)
-  if parent.kind == "cross" then return parent.cross.turn or 0 end
-  if parent.kind == "port" then return parent.module.turn or 0 end
+-- The bill position a parent stands at: a module's, or that of what a cross chain hangs on; emit places a
+-- module after its parent, so a module takes no parent later in the bill.
+local function parentSeq(parent)
+  if parent.kind == "cross" then return parent.cross.seq or 0 end
+  if parent.kind == "port" then return parent.module.seq or 0 end
   return 0
 end
 
 local function addCross(g, node, parent)
   local k = key(g, node[1], node[2], node[3])
-  local X = { node = node, key = k, arms = {}, parent = parent, modules = 0, turn = parentTurn(parent) }
+  local X = { node = node, key = k, arms = {}, parent = parent, modules = 0, seq = parentSeq(parent) }
   g.crosses[k] = X
   g.occ[k] = X
   local R = g.R
@@ -239,7 +239,7 @@ end
 
 -- Steps to the tree from every free cell within reach: crosses (through a free arm) and free ports are the sources.
 ---@async
-local function distances(g, ylo, yhi, turn)
+local function distances(g, ylo, yhi, seq)
   local dist, from, queue, head = {}, {}, {}, 1
   local function push(x, y, z, d, ref)
     if y < ylo or y > yhi or not free(g, x, y, z) then return end
@@ -255,14 +255,14 @@ local function distances(g, ylo, yhi, turn)
   end
   for _, X in pairs(g.crosses) do
     local n = X.node
-    if n[2] >= ylo - 1 and n[2] <= yhi + 1 and (X.turn or 0) <= turn then
+    if n[2] >= ylo - 1 and n[2] <= yhi + 1 and (X.seq or 0) <= seq then
       for di, d in ipairs(DIRS) do
         if not X.arms[di] then push(n[1] + d[1], n[2] + d[2], n[3] + d[3], 1, { kind = "cross", cross = X, di = di }) end
       end
     end
   end
   for _, M in ipairs(g.modules) do
-    if (M.turn or 0) <= turn then
+    if (M.seq or 0) <= seq then
       for _, pt in ipairs(M.ports) do
         if not pt.used then push(pt.node[1], pt.node[2], pt.node[3], 1, { kind = "port", module = M, port = pt }) end
       end
@@ -522,7 +522,7 @@ local function commit(g, rec, best)
     attach = { kind = "cross", cross = X, di = best.di }
   end
   rec.attach, rec.pose, rec.node = attach, pose, node
-  rec.turn = math.max(rec.item.turn or 0, parentTurn(attach))
+  rec.seq = math.max(rec.item.seq or 0, parentSeq(attach))
   local u = g.u
   rec.box = { min = { pose.box.min[1] + node[1] * u[1], pose.box.min[2] + node[2] * u[2], pose.box.min[3] + node[3] * u[3] },
     max = { pose.box.max[1] + node[1] * u[1], pose.box.max[2] + node[2] * u[2], pose.box.max[3] + node[3] * u[3] } }
@@ -667,7 +667,7 @@ local function place(g, rec)
   end
   local best
   local banned = rec.banned
-  local turn = rec.item.turn or math.huge
+  local seq = rec.item.seq or math.huge
   ---@async
   local function consider(kind, node, di, cost, extra)
     for _, pose in ipairs(rec.byDi[di]) do
@@ -692,14 +692,14 @@ local function place(g, rec)
   local ylo, yhi = math.max(0, g.floor - g.tallest), math.max(g.floor, g.free) + g.tallest
   for _, X in pairs(g.crosses) do
     local n = X.node
-    if n[2] >= ylo and n[2] <= yhi and (X.turn or 0) <= turn then
+    if n[2] >= ylo and n[2] <= yhi and (X.seq or 0) <= seq then
       for di = 1, 6 do
         if not X.arms[di] then consider("cross", n, di, 0, { cross = X }) end
       end
     end
   end
   for _, M in ipairs(g.modules) do
-    for _, pt in ipairs((M.turn or 0) <= turn and M.ports or NONE) do
+    for _, pt in ipairs((M.seq or 0) <= seq and M.ports or NONE) do
       if not pt.used and pt.node[2] >= ylo and pt.node[2] <= yhi then
         local d = DIRS[pt.di]
         consider("port", { pt.node[1] - d[1], pt.node[2] - d[2], pt.node[3] - d[3] }, pt.di, 0, { module = M, port = pt })
@@ -713,7 +713,7 @@ local function place(g, rec)
     yTop = room > 0 and math.min(yhi, math.floor(g.free - rec.minTop + room / W_TOP)) or -1
   end
   if yTop >= ylo then
-    local dist, from = distances(g, ylo, math.min(yhi, yTop + g.maxPath - 1), turn)
+    local dist, from = distances(g, ylo, math.min(yhi, yTop + g.maxPath - 1), seq)
     for k, d in pairs(dist) do
       local q = from[k]
       local n
@@ -957,7 +957,7 @@ end
 
 -- Nodes by steps from the tree: crosses' free arms and modules' outward ports are one step away.
 ---@async
-local function dockReach(g, D, turn)
+local function dockReach(g, D, seq)
   local levels, from = {}, {}
   local function push(n, d, ref)
     local k = nkey(n)
@@ -967,12 +967,12 @@ local function dockReach(g, D, turn)
     levels[d][#levels[d] + 1] = n
   end
   for _, X in pairs(g.crosses) do
-    for di, d in ipairs((X.turn or 0) <= turn and DIRS or NONE) do
+    for di, d in ipairs((X.seq or 0) <= seq and DIRS or NONE) do
       if not X.arms[di] then push({ X.node[1] + d[1], X.node[2] + d[2], X.node[3] + d[3] }, 1, { kind = "cross", cross = X, di = di }) end
     end
   end
   for _, M in ipairs(g.modules) do
-    for _, pt in ipairs((M.turn or 0) <= turn and M.outPorts or NONE) do
+    for _, pt in ipairs((M.seq or 0) <= seq and M.outPorts or NONE) do
       if not pt.used then push(pt.node, 1, { kind = "port", module = M, port = pt, di = pt.di }) end
     end
   end
@@ -1117,14 +1117,14 @@ local function dockPlace(g, D, it)
     if isPier or isBuild then return b.order[2] == 0 and b.order[3] < d end
     return b.order[2] < d
   end
-  local turn = it.turn or math.huge
+  local seq = it.seq or math.huge
   for _, X in pairs(g.crosses) do
-    for di = 1, (X.turn or 0) <= turn and 6 or 0 do
+    for di = 1, (X.seq or 0) <= seq and 6 or 0 do
       if not X.arms[di] then try(X.node, di, 0, { cross = X }) end
     end
   end
   local levels, from = {}, {}
-  if not settled(1) then levels, from = dockReach(g, D, turn) end
+  if not settled(1) then levels, from = dockReach(g, D, seq) end
   for d = 1, DOCK_REACH do
     if settled(d) then break end
     for _, n in ipairs(levels[d] or {}) do
@@ -1173,7 +1173,7 @@ local function dockCommit(g, D, it, best)
         P.arms[ref.di] = true
         parent = { kind = "cross", cross = P, di = ref.di }
       end
-      X = { node = n, key = "dock:" .. nkey(n), arms = { [OPPOSITE[ref.di]] = true }, parent = parent, modules = 0, turn = parentTurn(parent) }
+      X = { node = n, key = "dock:" .. nkey(n), arms = { [OPPOSITE[ref.di]] = true }, parent = parent, modules = 0, seq = parentSeq(parent) }
       g.crosses[X.key] = X
       D.crosses[nkey(n)] = X
       D.bodies[#D.bodies + 1] = shifted(D.crossBox, { n[1] * u[1], n[2] * u[2], n[3] * u[3] })
@@ -1810,8 +1810,8 @@ local function pack(run)
   local kit = run.kit
   local probe = { u = kit.cell, a = kit.arms, R = run.subdivide or grid.subdivide }
   local base, cells, spanXZ, tallest, byMacro = {}, 0, 1, 1, {}
-  for _, it in ipairs(run.items) do
-    it.gridRec = nil
+  for i, it in ipairs(run.items) do
+    it.gridRec, it.seq = nil, i
     if not it.isConnector and not it.column and not IsMacroClass(it.macro, "buildmodule") then
       local m = byMacro[it.macro]
       if not m then
