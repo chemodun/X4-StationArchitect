@@ -122,6 +122,17 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 
 ## Changelog
 
+### [1.11] - 2026-11-??
+
+- Changed
+  - Placement order, turn by turn from the bottom up, so the station works after its first turn and each turn adds output: storage and the production chain from energy up, the final product last
+  - A new station grows from its first pier: one pier and one dock area open the first turn; every turn ends with the piers and dock areas its trade needs
+  - Habitats and the modules that only feed them come after 40 % of the turns, spread evenly over the rest
+  - Storage: one module of the smallest size that holds the whole need, several only of the largest size
+  - The progress line shows the turn on the grid layout too
+- Fixed
+  - Game 8.00: piers and dock areas never hung under a connection structure
+
 ### [1.10] - 2026-10-30
 
 - Added

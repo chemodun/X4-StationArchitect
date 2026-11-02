@@ -33,6 +33,9 @@ ffi.cdef [[
   int64_t GetBuildPlotPrice(UniverseID sectorid, UIPosRot location, float x, float y, float z, const char* factionid);
   int64_t GetBuildPlotPayment(UniverseID stationid, bool* positionchanged);
   UIPosRot GetObjectPositionInSector(UniverseID objectid);
+  UIPosRot GetPositionalOffset(UniverseID positionalid, UniverseID spaceid);
+  const char* GetComponentName(UniverseID componentid);
+  const char* GetObjectIDCode(UniverseID objectid);
   UniverseID GetSectorControlStation(UniverseID sectorid);
   bool IsComponentClass(UniverseID componentid, const char* classname);
   bool ExtendBuildPlot(UniverseID stationid, Coord3D poschange, Coord3D negchange, bool allowreduction);
@@ -649,6 +652,40 @@ end
 -- to the written pose wins. The editor refuses a drop in the frame the module was floated.
 
 local VALID_RETRIES = 10
+-- a failed placement starts over from a new float this many times before the run stops
+local FLOAT_RETRIES = 3
+
+-- Ships of any owner within margin of a station-frame box.
+local function trafficNear(box, margin)
+  local station = sab.menu.container
+  local sector = GetComponentData(ConvertStringTo64Bit(tostring(station)), "sectorid")
+  local list, seen = {}, {}
+  for _, f in ipairs(GetLibrary("factions") or {}) do
+    local owner = f.id
+    for _, o in ipairs(GetContainedObjectsByOwner(owner, sector) or {}) do
+      local id = ConvertIDTo64Bit(o)
+      if id and not seen[tostring(id)] and C.IsComponentClass(id, "ship") then
+        seen[tostring(id)] = true
+        local p = C.GetPositionalOffset(id, station)
+        local v, gap = { p.x, p.y, p.z }, 0
+        for i = 1, 3 do gap = math.max(gap, box.min[i] - v[i], v[i] - box.max[i]) end
+        if gap <= margin then
+          list[#list + 1] = string.format("%s (%s) %s at %.0f %.0f %.0f, gap %.0f", ffi.string(C.GetComponentName(id)), ffi.string(C.GetObjectIDCode(id)),
+            owner, p.x, p.y, p.z, gap)
+        end
+      end
+    end
+  end
+  return list
+end
+
+local function traceTraffic(item, box)
+  if sab.debugLevel ~= "trace" or not box then return end
+  local list = trafficNear(box, 500)
+  sab.Trace("%s refused: valid per frame %s, box %.0f..%.0f x %.0f..%.0f x %.0f..%.0f, %d ships within 500 m", item.macro, item.validTrail or "-",
+    box.min[1], box.max[1], box.min[2], box.max[2], box.min[3], box.max[3], #list)
+  for _, s in ipairs(list) do sab.Trace("  %s", s) end
+end
 
 -- The snapped pose equals the planned one (within a metre and a near-identical rotation).
 local function samePlace(pose, pos, rows)
@@ -663,17 +700,12 @@ end
 -- above 1 the floats go undragged; the editor commits one drop a frame whatever the rate
 local PER_FRAME = 2
 
--- placements per frame, under the run's cap after a failure
-local function perFrame(run)
-  return math.min(PER_FRAME, run.cap or PER_FRAME)
-end
-
 local function beginPlacement(run, item)
   local menu = sab.menu
   run.countBefore = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
   -- dragged: the drop waits a frame; not dragged: the editor takes it in the frame of the float. A free drop
-  -- is never dragged: a dragged float follows the cursor.
-  item.dragged = perFrame(run) <= 1 and not item.free
+  -- is never dragged: a dragged float follows the cursor. The undragged add refuses some valid placements.
+  item.dragged = (PER_FRAME <= 1 or (item.floatRetries or 0) > 0) and not item.free
   C.AddMacroToConstructionMap(menu.holomap, item.macro, item.dragged)
   menu.floatingNewModule = item.macro
   run.phase = "drop"
@@ -720,9 +752,8 @@ local function finishPlacement(run, item)
   end
   -- a float drops only inside the plot
   local size = sab.sizes[item.macro]
-  if run.plot and size then
-    sab.FitPlot(sab.geo.worldBox(size, { pos.x, pos.y, pos.z }, rows or sab.ReadFloating(editor).rows), false)
-  end
+  local box = size and sab.geo.worldBox(size, { pos.x, pos.y, pos.z }, rows or sab.ReadFloating(editor).rows)
+  if run.plot and box then sab.FitPlot(box, false) end
   sab.WriteFloating(editor, pos, rows)
   local snap = sab.Snap(editor)
   -- alone: a free drop that must not snap (a detached grid's root)
@@ -740,9 +771,13 @@ local function finishPlacement(run, item)
   -- a snap to the wanted entry the editor calls invalid can be a passing state, so is a free drop not checked
   -- yet: stay floated, retry next frames
   local pending = (pair and snap.snapped and not wrongEntry) or (item.free and not snap.snapped and not snap.valid)
-  if count <= run.countBefore and pending and (item.validRetries or 0) < VALID_RETRIES then
-    item.validRetries = (item.validRetries or 0) + 1
-    return false, true
+  if count <= run.countBefore and pending then
+    if sab.debugLevel == "trace" then item.validTrail = (item.validTrail or "") .. (snap.valid and "1" or "0") end
+    if (item.validRetries or 0) < VALID_RETRIES then
+      item.validRetries = (item.validRetries or 0) + 1
+      return false, true
+    end
+    traceTraffic(item, box)
   end
   if (item.validRetries or 0) > 0 then sab.Debug("%s: %d retries for the editor's valid flag", item.macro, item.validRetries) end
   if count > run.countBefore then
@@ -865,11 +900,14 @@ local function overlaps(a, b, margin)
   return true
 end
 
--- A box entering a placed approach zone deeper than a metre.
+-- the editor refuses a body flush against an approach zone: a zone keeps this clearance
+local ZONE_MARGIN = 10
+
+-- A box within the clearance of a placed approach zone.
 local function inZone(run, box)
   for _, zones in pairs(run.zones) do
     for _, z in ipairs(zones) do
-      if overlaps(box, z, -1) then return true end
+      if overlaps(box, z, ZONE_MARGIN) then return true end
     end
   end
   return false
@@ -1262,7 +1300,7 @@ end
 
 -- for the grid layout (station_architect_grid.lua)
 sab.geo = { rotate = rotate, unit = unit, mulRows = mulRows, worldBox = worldBox, zoneBoxes = zoneBoxes, armOf = armOf, strutFor = strutFor,
-  column = columnClass }
+  column = columnClass, zoneMargin = ZONE_MARGIN }
 
 -- The shortest combination of at most four struts spanning need or more: lengths, longest first.
 local function spanWith(lengths, need)
@@ -1418,11 +1456,32 @@ local function rootPier(run)
   return it
 end
 
+-- The greedy route keeps the turns but places a turn's outer modules after its inner ones, so an early pier's
+-- lanes cannot cover the connections the core grows on.
+local function innerFirst(items)
+  local index = {}
+  for i, it in ipairs(items) do index[it] = i end
+  table.sort(items, function(a, b)
+    if (a.turn or 0) ~= (b.turn or 0) then return (a.turn or 0) < (b.turn or 0) end
+    if (a.outer ~= nil) ~= (b.outer ~= nil) then return a.outer == nil end
+    return index[a] < index[b]
+  end)
+end
+
 -- The connector kit for spurs, then the grid packer, or the plain packer with the first item dropped free at
 -- the plot centre.
 local function finishLayout(run)
   local menu = sab.menu
-  run.kit = connectorKit(run.moduleRace or (run.items[1] and raceOf(run.items[1].macro)) or nil)
+  -- the kit's race: the one holding most of the block's volume (docks hang outside it), whatever the order
+  local lead, volumes = nil, {}
+  for _, it in ipairs(run.items) do
+    local race = not it.column and raceOf(it.macro)
+    if race then
+      volumes[race] = (volumes[race] or 0) + (it.volume or 0)
+      if not lead or volumes[race] > volumes[lead] then lead = race end
+    end
+  end
+  run.kit = connectorKit(run.moduleRace or lead or (run.items[1] and raceOf(run.items[1].macro)) or nil)
   if not run.kit.cross then run.kit = nil end
   if not run.gridRoute then
     run.phase = "begin"
@@ -1440,16 +1499,28 @@ local function finishLayout(run)
       return
     end
     run.gridRoute = false
+    if run.turns then innerFirst(run.items) end
     run.phase = "begin"
     return
   end
   if not run.kit then
     local centre = C.GetBuildPlotCenterOffset(menu.container)
+    if run.turns then innerFirst(run.items) end
     local first = run.items[1]
     first.pack, first.free, first.pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
     sab.Debug("grid off: no cross blueprint")
     run.phase = "begin"
     return
+  end
+  -- a new station grows from its first pier: placed first, the root cross on it
+  if run.fromEmpty then
+    for _, it in ipairs(run.items) do
+      if IsMacroClass(it.macro, "pier") then
+        run.rootPier = it
+        sab.Debug("new station: rooted on its first pier %s", it.macro)
+        break
+      end
+    end
   end
   sab.grid.Start(run)
 end
@@ -1531,18 +1602,35 @@ local function boxOk(run, item, cand)
   if item.column then
     for _, z in ipairs(zoneBoxes(item.macro, { cand.pose.pos.x, cand.pose.pos.y, cand.pose.pos.z }, cand.pose.rows)) do
       for _, b in pairs(run.boxes) do
-        if overlaps(z, b, -1) then return false, "block" end
+        if overlaps(z, b, ZONE_MARGIN) then return false, "block" end
       end
     end
   end
   for idx, b in pairs(run.boxes) do
     if idx ~= cand.f.entryIdx and not item.relaxed and overlaps(box, b, -5) then return false, "overlap" end
   end
+  -- an item the grid left out, at its bill position: clear of what the grid still builds, relaxed or not
+  local R = item.early and run.reserve
+  if R then
+    for _, z in ipairs(R.zones) do
+      if overlaps(box, z, ZONE_MARGIN) then return false, "reserved" end
+    end
+    for _, b in ipairs(R.bodies) do
+      if overlaps(box, b, -5) then return false, "reserved" end
+    end
+    if item.column then
+      for _, z in ipairs(zoneBoxes(item.macro, { cand.pose.pos.x, cand.pose.pos.y, cand.pose.pos.z }, cand.pose.rows)) do
+        for _, b in ipairs(R.bodies) do
+          if overlaps(z, b, ZONE_MARGIN) then return false, "reserved" end
+        end
+      end
+    end
+  end
   return true
 end
 
 local function skip(item, reason)
-  item.skips = item.skips or { plot = 0, block = 0, overlap = 0, closes = 0, incompatible = 0, elsewhere = 0, rejected = 0, refused = 0 }
+  item.skips = item.skips or { plot = 0, block = 0, overlap = 0, reserved = 0, closes = 0, incompatible = 0, elsewhere = 0, rejected = 0, refused = 0 }
   item.skips[reason] = item.skips[reason] + 1
 end
 
@@ -1658,8 +1746,8 @@ local function packStep(run, item)
   end
   local s, total = item.skips or {}, #item.candidates
   local function skipsText()
-    return string.format("%d candidates: plot %d, block %d, overlap %d, closes %d, incompatible %d, elsewhere %d, rejected %d, refused %d", total,
-      s.plot or 0, s.block or 0, s.overlap or 0, s.closes or 0, s.incompatible or 0, s.elsewhere or 0, s.rejected or 0, s.refused or 0)
+    return string.format("%d candidates: plot %d, block %d, overlap %d, reserved %d, closes %d, incompatible %d, elsewhere %d, rejected %d, refused %d", total,
+      s.plot or 0, s.block or 0, s.overlap or 0, s.reserved or 0, s.closes or 0, s.incompatible or 0, s.elsewhere or 0, s.rejected or 0, s.refused or 0)
   end
   if not item.relaxed and (s.overlap or 0) > 0 then
     item.relaxed, item.cursor, item.relaxedTries = true, 1, 0
@@ -1672,6 +1760,15 @@ local function packStep(run, item)
   item.candidates, item.relaxed, item.plotNeed = nil, nil, nil
   if (s.plot or 0) > 0 and need and sab.FitPlot(need.box, false) then
     sab.Debug("%s: no place among %s; retrying in the grown plot", item.macro, skipsText())
+    run.phase = "begin"
+    return
+  end
+  -- no place clear of the grid's layout yet: after everything else, where the grid has no plans left
+  if item.early then
+    sab.Debug("%s: no place among %s; deferred to the end", item.macro, skipsText())
+    item.early = nil
+    table.remove(run.items, run.next)
+    run.items[#run.items + 1] = item
     run.phase = "begin"
     return
   end
@@ -1765,18 +1862,20 @@ function sab.StartBill(bill, opts)
       turns = math.max(turns, b.turn or 0)
     end
   end
+  local gridRoute = opts and opts.grid or false
   if turns == 0 then
     table.sort(items, function(a, b)
       if (a.outer ~= nil) ~= (b.outer ~= nil) then return a.outer == nil end
       return a.volume > b.volume
     end)
+  elseif not gridRoute then
+    innerFirst(items)
   end
   if not connector and items[1] then
     local macro = defaultConnector(opts and opts.moduleRace, items[1].macro)
     if macro then connector = { macro = macro } end
   end
   local empty = items[1] and tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) == 0
-  local gridRoute = opts and opts.grid or false
   if empty and not gridRoute then
     local centre = C.GetBuildPlotCenterOffset(menu.container)
     items[1].pack, items[1].free, items[1].pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
@@ -1877,7 +1976,7 @@ local function registerEntry(run, item)
   notePlaced(run, item, added.idx, nil)
 end
 
--- chained: placements already made in this frame (up to perFrame)
+-- chained: placements already made in this frame (up to PER_FRAME)
 function sab.Tick(chained)
   local run = sab.run
   if not run then return end
@@ -1925,25 +2024,22 @@ function sab.Tick(chained)
   local placed, retry = finishPlacement(run, item)
   if retry then return end
   if not placed then
-    local limit = perFrame(run)
-    if limit > 1 then
-      -- the same item again next frame at half the rate; what is placed stays
+    if (item.floatRetries or 0) < FLOAT_RETRIES then
+      -- the same item again next frame from a new float, dragged unless free; what is placed stays
       run.failed = run.failed - 1
-      run.cap = math.floor(limit / 2)
-      item.validRetries = nil
+      item.floatRetries, item.validRetries, item.validTrail = (item.floatRetries or 0) + 1, nil, nil
       run.phase = "begin"
-      sab.Debug("%s failed at %d per frame, again at %d", item.macro, limit, run.cap)
+      sab.Debug("%s failed, again from a new float (%d of %d)", item.macro, item.floatRetries, FLOAT_RETRIES)
       return
     end
-    sab.StopRun("stopped at a failure at one per frame")
+    sab.StopRun("stopped at a failure")
     return
   end
   registerEntry(run, item)
   advance(run)
   chained = (chained or 0) + 1
   -- one per frame: the next item floats in the frame of this drop
-  local limit = perFrame(run)
-  if sab.run == run and (limit <= 1 or chained < limit) then return sab.Tick(chained) end
+  if sab.run == run and (PER_FRAME <= 1 or chained < PER_FRAME) then return sab.Tick(chained) end
 end
 
 -- *** panel ***
@@ -2108,7 +2204,7 @@ local function baysOf(ctx, macro)
 end
 
 -- The form's target: derived from the panel's station when the panel first shows on it, again once the build
--- menu has loaded the station's plan; the empty one on a spot or after Reset without a station.
+-- menu has loaded the station's plan and on every expand; the empty one on a spot or after Reset without a station.
 local function formTarget(ctx)
   local t = sab.target
   local planRead = ctx.station ~= nil and sab.menu.holomap ~= 0
@@ -2239,7 +2335,7 @@ local function progressDetail()
   -- grid and pair items snap to a planned connection: no candidate list to count
   local name = GetMacroData(item.macro, "name")
   local text = item.candidates and string.format(tostring(ReadText(PAGE, 131)), name, item.cursor - 1, #item.candidates) or tostring(name)
-  if item.turn and run.turns and not run.gridRoute then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
+  if item.turn and run.turns then text = string.format(tostring(ReadText(PAGE, 132)), item.turn, run.turns) .. ", " .. text end
   return text
 end
 
@@ -2597,7 +2693,11 @@ function sab.DisplayPanel()
       :setIcon(sab.expanded and "widget_arrow_up_01" or "widget_arrow_down_01")
   title[3].handlers.onClick = function()
     sab.expanded = not sab.expanded
-    if sab.expanded then sab.lastRun = nil end
+    if sab.expanded then
+      sab.lastRun = nil
+      -- the form derives its target from the station's plan as it is now
+      sab.target.station = nil
+    end
     sab.panelDirty = true
   end
   if not sab.expanded then
