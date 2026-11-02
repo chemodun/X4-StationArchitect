@@ -2204,7 +2204,7 @@ local function baysOf(ctx, macro)
 end
 
 -- The form's target: derived from the panel's station when the panel first shows on it, again once the build
--- menu has loaded the station's plan; the empty one on a spot or after Reset without a station.
+-- menu has loaded the station's plan and on every expand; the empty one on a spot or after Reset without a station.
 local function formTarget(ctx)
   local t = sab.target
   local planRead = ctx.station ~= nil and sab.menu.holomap ~= 0
@@ -2693,7 +2693,11 @@ function sab.DisplayPanel()
       :setIcon(sab.expanded and "widget_arrow_up_01" or "widget_arrow_down_01")
   title[3].handlers.onClick = function()
     sab.expanded = not sab.expanded
-    if sab.expanded then sab.lastRun = nil end
+    if sab.expanded then
+      sab.lastRun = nil
+      -- the form derives its target from the station's plan as it is now
+      sab.target.station = nil
+    end
     sab.panelDirty = true
   end
   if not sab.expanded then
