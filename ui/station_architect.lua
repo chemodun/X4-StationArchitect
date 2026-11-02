@@ -33,6 +33,9 @@ ffi.cdef [[
   int64_t GetBuildPlotPrice(UniverseID sectorid, UIPosRot location, float x, float y, float z, const char* factionid);
   int64_t GetBuildPlotPayment(UniverseID stationid, bool* positionchanged);
   UIPosRot GetObjectPositionInSector(UniverseID objectid);
+  UIPosRot GetPositionalOffset(UniverseID positionalid, UniverseID spaceid);
+  const char* GetComponentName(UniverseID componentid);
+  const char* GetObjectIDCode(UniverseID objectid);
   UniverseID GetSectorControlStation(UniverseID sectorid);
   bool IsComponentClass(UniverseID componentid, const char* classname);
   bool ExtendBuildPlot(UniverseID stationid, Coord3D poschange, Coord3D negchange, bool allowreduction);
@@ -649,6 +652,40 @@ end
 -- to the written pose wins. The editor refuses a drop in the frame the module was floated.
 
 local VALID_RETRIES = 10
+-- a failed placement starts over from a new float this many times before the run stops
+local FLOAT_RETRIES = 3
+
+-- Ships of any owner within margin of a station-frame box.
+local function trafficNear(box, margin)
+  local station = sab.menu.container
+  local sector = GetComponentData(ConvertStringTo64Bit(tostring(station)), "sectorid")
+  local list, seen = {}, {}
+  for _, f in ipairs(GetLibrary("factions") or {}) do
+    local owner = f.id
+    for _, o in ipairs(GetContainedObjectsByOwner(owner, sector) or {}) do
+      local id = ConvertIDTo64Bit(o)
+      if id and not seen[tostring(id)] and C.IsComponentClass(id, "ship") then
+        seen[tostring(id)] = true
+        local p = C.GetPositionalOffset(id, station)
+        local v, gap = { p.x, p.y, p.z }, 0
+        for i = 1, 3 do gap = math.max(gap, box.min[i] - v[i], v[i] - box.max[i]) end
+        if gap <= margin then
+          list[#list + 1] = string.format("%s (%s) %s at %.0f %.0f %.0f, gap %.0f", ffi.string(C.GetComponentName(id)), ffi.string(C.GetObjectIDCode(id)),
+            owner, p.x, p.y, p.z, gap)
+        end
+      end
+    end
+  end
+  return list
+end
+
+local function traceTraffic(item, box)
+  if sab.debugLevel ~= "trace" or not box then return end
+  local list = trafficNear(box, 500)
+  sab.Trace("%s refused: valid per frame %s, box %.0f..%.0f x %.0f..%.0f x %.0f..%.0f, %d ships within 500 m", item.macro, item.validTrail or "-",
+    box.min[1], box.max[1], box.min[2], box.max[2], box.min[3], box.max[3], #list)
+  for _, s in ipairs(list) do sab.Trace("  %s", s) end
+end
 
 -- The snapped pose equals the planned one (within a metre and a near-identical rotation).
 local function samePlace(pose, pos, rows)
@@ -663,17 +700,12 @@ end
 -- above 1 the floats go undragged; the editor commits one drop a frame whatever the rate
 local PER_FRAME = 2
 
--- placements per frame, under the run's cap after a failure
-local function perFrame(run)
-  return math.min(PER_FRAME, run.cap or PER_FRAME)
-end
-
 local function beginPlacement(run, item)
   local menu = sab.menu
   run.countBefore = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
   -- dragged: the drop waits a frame; not dragged: the editor takes it in the frame of the float. A free drop
-  -- is never dragged: a dragged float follows the cursor.
-  item.dragged = perFrame(run) <= 1 and not item.free
+  -- is never dragged: a dragged float follows the cursor. The undragged add refuses some valid placements.
+  item.dragged = (PER_FRAME <= 1 or (item.floatRetries or 0) > 0) and not item.free
   C.AddMacroToConstructionMap(menu.holomap, item.macro, item.dragged)
   menu.floatingNewModule = item.macro
   run.phase = "drop"
@@ -720,9 +752,8 @@ local function finishPlacement(run, item)
   end
   -- a float drops only inside the plot
   local size = sab.sizes[item.macro]
-  if run.plot and size then
-    sab.FitPlot(sab.geo.worldBox(size, { pos.x, pos.y, pos.z }, rows or sab.ReadFloating(editor).rows), false)
-  end
+  local box = size and sab.geo.worldBox(size, { pos.x, pos.y, pos.z }, rows or sab.ReadFloating(editor).rows)
+  if run.plot and box then sab.FitPlot(box, false) end
   sab.WriteFloating(editor, pos, rows)
   local snap = sab.Snap(editor)
   -- alone: a free drop that must not snap (a detached grid's root)
@@ -740,9 +771,13 @@ local function finishPlacement(run, item)
   -- a snap to the wanted entry the editor calls invalid can be a passing state, so is a free drop not checked
   -- yet: stay floated, retry next frames
   local pending = (pair and snap.snapped and not wrongEntry) or (item.free and not snap.snapped and not snap.valid)
-  if count <= run.countBefore and pending and (item.validRetries or 0) < VALID_RETRIES then
-    item.validRetries = (item.validRetries or 0) + 1
-    return false, true
+  if count <= run.countBefore and pending then
+    if sab.debugLevel == "trace" then item.validTrail = (item.validTrail or "") .. (snap.valid and "1" or "0") end
+    if (item.validRetries or 0) < VALID_RETRIES then
+      item.validRetries = (item.validRetries or 0) + 1
+      return false, true
+    end
+    traceTraffic(item, box)
   end
   if (item.validRetries or 0) > 0 then sab.Debug("%s: %d retries for the editor's valid flag", item.macro, item.validRetries) end
   if count > run.countBefore then
@@ -1941,7 +1976,7 @@ local function registerEntry(run, item)
   notePlaced(run, item, added.idx, nil)
 end
 
--- chained: placements already made in this frame (up to perFrame)
+-- chained: placements already made in this frame (up to PER_FRAME)
 function sab.Tick(chained)
   local run = sab.run
   if not run then return end
@@ -1989,25 +2024,22 @@ function sab.Tick(chained)
   local placed, retry = finishPlacement(run, item)
   if retry then return end
   if not placed then
-    local limit = perFrame(run)
-    if limit > 1 then
-      -- the same item again next frame at half the rate; what is placed stays
+    if (item.floatRetries or 0) < FLOAT_RETRIES then
+      -- the same item again next frame from a new float, dragged unless free; what is placed stays
       run.failed = run.failed - 1
-      run.cap = math.floor(limit / 2)
-      item.validRetries = nil
+      item.floatRetries, item.validRetries, item.validTrail = (item.floatRetries or 0) + 1, nil, nil
       run.phase = "begin"
-      sab.Debug("%s failed at %d per frame, again at %d", item.macro, limit, run.cap)
+      sab.Debug("%s failed, again from a new float (%d of %d)", item.macro, item.floatRetries, FLOAT_RETRIES)
       return
     end
-    sab.StopRun("stopped at a failure at one per frame")
+    sab.StopRun("stopped at a failure")
     return
   end
   registerEntry(run, item)
   advance(run)
   chained = (chained or 0) + 1
   -- one per frame: the next item floats in the frame of this drop
-  local limit = perFrame(run)
-  if sab.run == run and (limit <= 1 or chained < limit) then return sab.Tick(chained) end
+  if sab.run == run and (PER_FRAME <= 1 or chained < PER_FRAME) then return sab.Tick(chained) end
 end
 
 -- *** panel ***
