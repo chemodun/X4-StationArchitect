@@ -54,6 +54,11 @@
       <t id="155">Moduły zasobów specjalnych: %s</t>
       <t id="156">Dodaj moduł</t>
       <t id="157">Zwolnij przy najniższej wartości, aby usunąć ten moduł</t>
+      <t id="158">Statki %s na godzinę \(teraz %s\)</t>
+      <t id="159">%s \(teraz %s\)</t>
+      <t id="160">Żaden posiadany moduł budowy nie buduje tego rozmiaru</t>
+      <t id="161">Doki serwisowe: %s</t>
+      <t id="162">Zaopatrzenia %s na godzinę \(teraz %s\)</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architekt stacji</t>

@@ -54,6 +54,11 @@
       <t id="155">Módulos de recursos especiales: %s</t>
       <t id="156">Añadir un módulo</t>
       <t id="157">Suelta en el valor mínimo para quitar este módulo</t>
+      <t id="158">Naves %s por hora \(ahora %s\)</t>
+      <t id="159">%s \(ahora %s\)</t>
+      <t id="160">Ningún módulo de construcción propio construye este tamaño</t>
+      <t id="161">Bahías de mantenimiento: %s</t>
+      <t id="162">Reabastecimientos %s por hora \(ahora %s\)</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Arquitecto de estaciones</t>

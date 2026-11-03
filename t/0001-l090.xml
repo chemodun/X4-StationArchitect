@@ -54,6 +54,11 @@
       <t id="155">Özel kaynak modülleri: %s</t>
       <t id="156">Modül ekle</t>
       <t id="157">Bu modülü kaldırmak için en düşük değerde bırakın</t>
+      <t id="158">Saat başına %s gemi \(şu an %s\)</t>
+      <t id="159">%s \(şu an %s\)</t>
+      <t id="160">Bu boyutu inşa eden sahip olunan inşaat modülü yok</t>
+      <t id="161">Bakım bölmeleri: %s</t>
+      <t id="162">Saat başına %s ikmal \(şu an %s\)</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">İstasyon Mimarı</t>

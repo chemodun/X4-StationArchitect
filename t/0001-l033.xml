@@ -54,6 +54,11 @@
       <t id="155">Modules de ressources spéciales : %s</t>
       <t id="156">Ajouter un module</t>
       <t id="157">Relâcher à la valeur minimale pour retirer ce module</t>
+      <t id="158">Vaisseaux %s par heure \(actuellement %s\)</t>
+      <t id="159">%s \(actuellement %s\)</t>
+      <t id="160">Aucun module de construction possédé ne construit cette taille</t>
+      <t id="161">Baies de maintenance : %s</t>
+      <t id="162">Ravitaillements %s par heure \(actuellement %s\)</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architecte de station</t>
