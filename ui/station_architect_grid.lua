@@ -810,9 +810,12 @@ end
 -- A candidate's body and approach zones (exclusionzones) are boxes in the grid frame; the body may touch no
 -- body or zone, a zone no body. Piers: least plot growth, then zones pointing outward; a big pier only under
 -- the block. Dock areas: under the block with every zone down, then least plot growth. The first of each sits
--- nearest the first built modules, the others take the fewest new crosses. No anchor: a free drop.
+-- nearest the first built modules, the others take the fewest new crosses. No anchor: crosses past the growth
+-- faces, else a free drop out of snap reach.
 
 local DOCK_REACH = 4
+-- the editor's largest snap radius: a free drop nearer to a free connection snaps onto it
+local SNAP_REACH = 2000
 -- one face per horizontal axis carries side piers, the opposite ones stay free for growth (DIRS indices)
 ---@type integer[]
 grid.pierFaces = { 1, 5 }
@@ -934,13 +937,14 @@ local function dockState(g, kit)
   return D
 end
 
--- New crosses go outside the block: under it, or past a pier face, within reach.
-local function dockNode(g, D, n)
+-- New crosses go outside the block: under it, or past a pier face, within reach; relaxed, past any face, clear
+-- of the solids the growth faces may lean.
+local function dockNode(g, D, n, relaxed)
   local x, y, z = n[1], n[2], n[3]
   if x < -DOCK_REACH or x >= g.sx + DOCK_REACH or z < -DOCK_REACH or z >= g.sz + DOCK_REACH or y < -DOCK_REACH or y > g.top then return false end
   local inside = x >= 0 and x < g.sx and z >= 0 and z < g.sz and y >= 0
   if inside then return false end
-  if y >= 0 then
+  if y >= 0 and not relaxed then
     local past = false
     for _, fi in ipairs(grid.pierFaces) do
       local d = DIRS[fi]
@@ -950,6 +954,9 @@ local function dockNode(g, D, n)
   end
   if D.crosses[nkey(n)] then return false end
   local b = shifted(D.crossBox, { x * g.u[1], y * g.u[2], z * g.u[3] })
+  if relaxed then
+    for _, s in ipairs(D.solid) do if hit(b, s) then return false end end
+  end
   for _, o in ipairs(D.bodies) do if hit(b, o) then return false end end
   for _, o in ipairs(D.zones) do if nearZone(b, o) then return false end end
   return true
@@ -957,11 +964,11 @@ end
 
 -- Nodes by steps from the tree: crosses' free arms and modules' outward ports are one step away.
 ---@async
-local function dockReach(g, D, seq)
+local function dockReach(g, D, seq, relaxed)
   local levels, from = {}, {}
   local function push(n, d, ref)
     local k = nkey(n)
-    if from[k] or not dockNode(g, D, n) then return end
+    if from[k] or not dockNode(g, D, n, relaxed) then return end
     from[k] = ref
     levels[d] = levels[d] or {}
     levels[d][#levels[d] + 1] = n
@@ -1057,6 +1064,7 @@ local function dockPlace(g, D, it)
       for _, fi in ipairs(otherFaces) do
         if beyond(fi, F, x0, z0, x1, z1) then away = true end
       end
+      if extra.clear and hit({ min = { x0, y0, z0 }, max = { x1, y1, z1 } }, extra.clear) then away = true end
       -- a build module's approach zones run level along a face it is past
       local off = 0
       if isBuild then
@@ -1123,31 +1131,41 @@ local function dockPlace(g, D, it)
       if not X.arms[di] then try(X.node, di, 0, { cross = X }) end
     end
   end
-  local levels, from = {}, {}
-  if not settled(1) then levels, from = dockReach(g, D, seq) end
-  for d = 1, DOCK_REACH do
-    if settled(d) then break end
-    for _, n in ipairs(levels[d] or {}) do
-      local path, m = {}, n
-      while true do
-        path[#path + 1] = m
-        local ref = from[nkey(m)]
-        if ref.kind ~= "new" then break end
-        m = ref.node
-      end
-      local back = OPPOSITE[from[nkey(n)].di]
-      for di = 1, 6 do
-        if di ~= back then try(n, di, d, { path = path, from = from }) end
+  ---@async
+  local function chains(relaxed)
+    local levels, from = {}, {}
+    if not settled(1) then levels, from = dockReach(g, D, seq, relaxed) end
+    for d = 1, DOCK_REACH do
+      if settled(d) then break end
+      for _, n in ipairs(levels[d] or {}) do
+        local path, m = {}, n
+        while true do
+          path[#path + 1] = m
+          local ref = from[nkey(m)]
+          if ref.kind ~= "new" then break end
+          m = ref.node
+        end
+        local back = OPPOSITE[from[nkey(n)].di]
+        for di = 1, 6 do
+          if di ~= back then try(n, di, d, { path = path, from = from }) end
+        end
       end
     end
   end
+  chains(false)
+  -- every chain kept off the growth faces: one may pass them, the dock itself still outside as above
+  if not (best[1] or best[2]) then chains(true) end
   if not (best[1] or best[2]) then
-    -- no anchor: a free drop anywhere a new cross could stand
-    for x = -DOCK_REACH, g.sx + DOCK_REACH - 1 do
-      for y = -DOCK_REACH, g.top do
-        for z = -DOCK_REACH, g.sz + DOCK_REACH - 1 do
-          if dockNode(g, D, { x, y, z }) then
-            for di = 1, 6 do try({ x, y, z }, di, 0, { free = true }) end
+    -- no chain at all: a free drop out of snap reach of everything standing (it is placed alone)
+    local L, R = D.hull, SNAP_REACH
+    for _, b in ipairs(D.bodies) do L = union(L, b) end
+    local clear = { min = { L.min[1] - R, L.min[2] - R, L.min[3] - R }, max = { L.max[1] + R, L.max[2] + R, L.max[3] + R } }
+    local far = DOCK_REACH + math.ceil(R / math.min(u[1], u[2], u[3]))
+    for x = -far, g.sx + far - 1 do
+      for y = -far, g.top do
+        for z = -far, g.sz + far - 1 do
+          if not hit(shifted(D.crossBox, { x * u[1], y * u[2], z * u[3] }), clear) then
+            for di = 1, 6 do try({ x, y, z }, di, 0, { free = true, clear = clear }) end
           end
         end
       end
@@ -1285,7 +1303,7 @@ local function applyDocks(g, D)
     if r.gridRec then
       it.gridRec = r.gridRec
     else
-      it.pack, it.free, it.rows = nil, true, r.rows
+      it.pack, it.free, it.alone, it.rows = nil, true, true, r.rows
       it.pos = { x = r.pos[1] + D.shift[1], y = r.pos[2] + D.shift[2], z = r.pos[3] + D.shift[3] }
     end
   end
@@ -1717,8 +1735,6 @@ local function better(a, b)
   return a.box < b.box
 end
 
--- the editor's largest snap radius: a free drop nearer to a free connection snaps onto it
-local SNAP_REACH = 2000
 local AXIS_NAMES = { "x", "y", "z" }
 
 -- A detached layout moves out along an axis from the station: its bodies a cell off the station's and clear of
