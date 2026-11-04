@@ -4,12 +4,13 @@ Tell the build menu what your station should produce or build: this extension wo
 
 [size=130][u]Features[/u][/size]
 [list]
-[*] [b]Target planner[/b]: say what the station should make (a ware, or ships to build or repair), not which modules; several targets in one plan.
+[*] [b]Target planner[/b]: say what the station should make, not which modules: wares on the [b]Wares[/b] tab, ships to build or resupply per hour on the [b]Ships[/b] tab; several targets in one plan.
 [*] [b]Compact layout[/b]: production, storage and habitats packed tight on connection modules; build modules on the sides with clear approach lanes; docks and piers outward.
 [*] [b]Full cycle and workforce[/b]: optionally every intermediate ware down to raw resources and energy, habitats for the workforce, and its food and medicine.
-[*] [b]Read from the game[/b]: production rates, sunlight and workforce bonuses, module sizes, docking bays and ship build times; docks sized for the planned traffic.
+[*] [b]Read from the game[/b]: production rates, sunlight and workforce bonuses, module sizes, docking bays, ship build times and the production lines of every build module; docks sized for the planned traffic.
+[*] [b]Docking[/b]: the dock areas and piers the planned trade needs, each count on a slider you can lower.
 [*] [b]Preview first[/b]: modules, each ware's balance per hour, workforce and warnings before anything is placed.
-[*] [b]Existing stations[/b]: reads what a station makes and fills any shortfall.
+[*] [b]Existing stations[/b]: reads what a station makes and fills any shortfall, its docks included.
 [*] [b]From the map[/b]: right-click empty space, [b]Plan a station here[/b], and the build menu opens with the run started.
 [*] [b]Bill route[/b]: a manual list of modules and counts, placed the same way.
 [*] [b]Plot licence[/b]: shows the plot size and price where the plot costs money; [b]Optimize plot[/b] shrinks it afterwards.
@@ -23,7 +24,7 @@ Tell the build menu what your station should produce or build: this extension wo
 [*] Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable and Run stays off; nothing else in the build menu changes.
 [*] The plot is limited to the game's 20 km: a layout that needs more is refused before anything is placed.
 [*] Ship build times assume the station has its build drones; a shipyard without them builds several times slower than planned.
-[*] A module that fits nowhere is reported as failed, never silently dropped.
+[*] A module the game's editor refuses is never dropped silently: the placement starts over once, and a second refusal removes every module placed.
 [/list]
 [size=130][u]Requirements[/u][/size]
 [list]
@@ -48,7 +49,7 @@ Tell the build menu what your station should produce or build: this extension wo
 [*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3823580916]Lua Log API[/url]
 [*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/2473]Lua Log API[/url]
 [/list]
-[*] [b]Extra Data API[/b]: Version [b]1.00[/b] or higher by [url=https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659]Chem O`Dun[/url].
+[*] [b]Extra Data API[/b]: Version [b]1.02[/b] or higher by [url=https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659]Chem O`Dun[/url].
 [list]
 [*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3825599643]Extra Data API[/url]
 [*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/2519]Extra Data API[/url]
@@ -65,27 +66,43 @@ Or you can do it via the Nexus Mods - [url=https://www.nexusmods.com/x4foundatio
 
 [size=130][u]Usage[/u][/size]
 
-Open the build menu of one of your stations. The Station Architect panel sits under the menu's title bar; expand it to plan. It has two tabs: [b]Target[/b] and [b]Bill[/b].
+Open the build menu of one of your stations. The Station Architect panel sits under the menu's title bar; expand it to plan. It has three tabs: [b]Wares[/b], [b]Ships[/b] and [b]Bill[/b]. Wares and Ships edit one target, so one plan can make wares and build ships; the options and the docking under them are shared.
 
-[size=125][u]Target[/u][/size]
+[size=125][u]Wares[/u][/size]
 [list=1]
-[*] Pick the kind of target ([b]Produce a ware[/b] or [b]Build or maintain ships[/b]), then the ware or the build module, and press [b]Add a target[/b]. Each added target gets a slider for its number of production or build modules; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target.
-[/list]   [b]Special resource modules[/b] (Scrap Processors, fed by tugs rather than by trade): pick one and press [b]Add a module[/b]; its slider sets how many the station has. With [b]Full cycle[/b] their scrap metal feeds scrap recycling modules that make your target wares, and only the rest comes from regular production modules (a surplus is sold); without it the scrap metal is sold. Tugs bring their raw scrap straight to them, so it adds no docks, piers or storage.
+[*] Pick a ware and press [b]Add a target[/b]. Each added target gets a slider for its number of production modules, with the ware's net per hour now and planned; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target.
+[/list]   [b]Special resource modules[/b] (Scrap Processors, fed by tugs rather than by trade) need [b]Full cycle[/b]: pick one and press [b]Add a module[/b]; its slider sets how many the station has. Their scrap metal feeds scrap recycling modules that make your target wares and your ships' wares, and only the rest comes from regular production modules (a surplus is sold). Tugs bring their raw scrap straight to them, so it adds no docks, piers or storage.
 [list=1][*] Set the options: [b]Modules race[/b], [b]Full cycle[/b], [b]Workforce[/b], [b]Self-sufficient workforce[/b], [b]Workforce race[/b] and [b]Storage, hours of flow[/b] (how many hours of each ware's flow the storage holds).
+[*] [b]Docking[/b] has one slider for dock areas and one for piers, from what the station has up to what the planned trade needs. Both start at the top; a lowered one scales along when the target changes, and back at the top it follows the need again. On an existing station they show without a target too, sized for the station's own trade.
 [*] Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning.
 [/list]
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_target.png[/img][/spoiler]
+
+[size=125][u]Ships[/u][/size]
+
+Pick a build module from your blueprints, a fabrication bay or a maintenance bay, and press [b]Add a module[/b]. Every build module kind the station has or you added gets a slider of its count, starting at what the station has; an added kind released at 0 is removed.
+[list]
+[*] Under a fabrication bay, one slider per ship size it builds sets the [b]ships per hour[/b], up to what those bays can build. It starts at that top, the bays' full capacity: lower it to the ships you expect to sell. Sizes that share a bay share its time, so lowering one raises the other's top.
+[*] Under a maintenance bay, one slider per ship size sets the [b]resupplies per hour[/b] (restocking a ship's ammunition and units). It starts at a tenth of what the bays manage.
+[*] [b]now[/b] on a slider is what the station's bays are working on at the moment, per hour.
+[/list]
+The plan adds the wares those ships and resupplies use, their production chain under [b]Full cycle[/b], and the storage and docks for that flow. The options and the Docking sliders are the ones of the Wares tab.
+
+[spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_ships.png[/img][/spoiler]
+
+[size=125][u]Run[/u][/size]
 [list=1]
 [*] Press [b]Run[/b]. The run first finds a layout. Where the plot costs money, it then shows the plot size it needs and the licence price, and places nothing until you press [b]Buy licence[/b]; [b]Cancel[/b] ends the run.
 [/list]
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_licence.png[/img][/spoiler]
 [list=1]
-[*] The run places the modules one after another; the panel shows the progress, and [b]Stop[/b] halts it after the current module. The menu's lists are rebuilt once when the run ends, not after every module.
+[*] The run places the modules one after another, in turns from the bottom up: the station works after its first turn and every turn adds output, its storage and production chain from energy up, the final product last, then the dock areas and piers its trade needs. The panel shows the progress and the turn, and [b]Stop[/b] halts the run after the current module. The menu's lists are rebuilt once when the run ends, not after every module.
 [/list]
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_running.png[/img][/spoiler]
 
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/build_menu_run.png[/img][/spoiler]
 [list=1]
+[*] If the game's editor still refuses a module after a few retries, the run removes every module it placed and starts the placement over, once. A second refusal removes everything again, and the folded panel names the module.
 [*] When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press [b]Confirm module changes[/b] as usual. [b]Optimize plot[/b] fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. [b]Reset[/b] starts the target over from what the station has.
 [/list]
 [size=125][u]From the map[/u][/size]
@@ -94,7 +111,7 @@ Right-click empty space in a sector on the map and choose [b]Plan a station here
 
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/map_context_menu.png[/img][/spoiler]
 
-The dialog shows the same target form, plus [b]Preset for all station modules[/b] (the loadout of the new modules).
+The dialog has the same [b]Wares[/b] and [b]Ships[/b] tabs, plus [b]Preset for all station modules[/b] (the loadout of the new modules).
 
 [spoiler][img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/map_dialog.png[/img][/spoiler]
 
@@ -132,10 +149,22 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [/list]
 [size=130][u]Changelog[/u][/size]
 
-[size=125][u][1.11] - 2026-11-??[/u][/size]
+[size=125][u][1.20] - 2026-11-??[/u][/size]
 [list]
+[*] Added
+[list]
+[*] [b]Ships[/b] tab: any build module with its count slider, and per ship size a ships per hour or resupplies per hour slider
+[*] [b]Docking[/b] section: dock area and pier count sliders
+[*] A module the editor keeps refusing restarts the placement once; a second refusal removes every placed module
+[/list]
 [*] Changed
 [list]
+[*] The Target tab is now the [b]Wares[/b] tab, in the map dialog too
+[*] Ship builds and their supply chain follow the ships per hour, not the build modules' full capacity
+[*] Ship build times from each hull's High loadout, with one ship per production line of a build module
+[*] Special resource modules only with [b]Full cycle[/b], and their scrap metal feeds the ships' wares too
+[*] An existing station without a target gets the docks its own trade needs
+[*] Faster layout search
 [*] Placement order, turn by turn from the bottom up, so the station works after its first turn and each turn adds output: storage and the production chain from energy up, the final product last
 [*] A new station grows from its first pier: one pier and one dock area open the first turn; every turn ends with the piers and dock areas its trade needs
 [*] Habitats and the modules that only feed them come after 40 % of the turns, spread evenly over the rest
