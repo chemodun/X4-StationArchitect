@@ -1737,7 +1737,10 @@ local function packStep(run, item)
     advance(run)
     return
   end
-  if not item.candidates then buildCandidates(run, item) end
+  if not item.candidates then
+    buildCandidates(run, item)
+    run.searches = run.searches + 1
+  end
   local result = tryCandidates(run, item, editor)
   if result == "more" or result == "changed" then return end
   if result == "placed" then
@@ -1906,7 +1909,8 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
     return false
   end
   local run = { items = items, next = 1, phase = "begin", placed = 0, failed = 0, connector = connector, turns = turns,
-    stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, moduleRace = opts and opts.moduleRace }
+    stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, moduleRace = opts and opts.moduleRace,
+    started = getElapsedTime(), frames = 0, searchFrames = 0, searches = 0 }
   readPlanState(run, editor)
   if engine == false then return false end
   run.planCount = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
@@ -1922,6 +1926,7 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
   if gridRoute then
     for _, it in ipairs(items) do want(it.macro) end
   end
+  run.probed = getElapsedTime()
   finishLayout(run)
   sab.run = run
   sab.panelDirty = true
@@ -1944,6 +1949,9 @@ function sab.StopRun(reason)
   -- the player's module overlap setting again
   menu.applySettings()
   sab.Debug("run %s: %d placed, %d failed", reason or "finished", run.placed, run.failed)
+  local now = getElapsedTime()
+  sab.Debug("run times: probe %.1f s, pack %.1f s, placement %.1f s in %d frames, %d of them in %d editor searches", run.probed - run.started,
+    run.packed and run.packed - run.probed or 0, run.placing and now - run.placing or 0, run.frames, run.searchFrames, run.searches)
   -- a plan this run started from nothing gets a plot fitted to it on each side
   if run.fromEmpty and run.placed > 0 then
     local box = sab.PlanBox()
@@ -2007,6 +2015,8 @@ function sab.Tick(chained)
     return
   end
   if run.phase == "confirm" then return end
+  run.placing = run.placing or getElapsedTime()
+  if not chained then run.frames = run.frames + 1 end
   if run.phase == "begin" then
     local item = run.items[run.next]
     if not item then
@@ -2018,6 +2028,7 @@ function sab.Tick(chained)
   end
   local item = run.items[run.next]
   if item.pack then
+    run.searchFrames = run.searchFrames + 1
     packStep(run, item)
     return
   end

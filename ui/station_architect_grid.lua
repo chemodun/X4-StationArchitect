@@ -656,7 +656,7 @@ end
 -- The best place for one module: on a free cross arm, on a free port of a placed module, or on a new cross
 -- a short path away; lowest floor first, then fewest new crosses, most contact, nearest the footprint centre.
 ---@async
-local function place(g, rec)
+local function place(g, rec, wide)
   if not rec.byDi then
     rec.byDi, rec.bound, rec.minTop, rec.banned = { {}, {}, {}, {}, {}, {} }, math.huge, math.huge, {}
     for _, pose in ipairs(rec.poses) do
@@ -690,6 +690,8 @@ local function place(g, rec)
     return best
   end
   local ylo, yhi = math.max(0, g.floor - g.tallest), math.max(g.floor, g.free) + g.tallest
+  -- wide: every band the floor loop of findPlace reaches, in one pass
+  if wide then yhi = math.max(yhi, math.max(g.top + g.tallest + 1, g.free) + g.tallest) end
   for _, X in pairs(g.crosses) do
     local n = X.node
     if n[2] >= ylo and n[2] <= yhi and (X.seq or 0) <= seq then
@@ -1000,9 +1002,9 @@ local function less(a, b)
   return false
 end
 
--- The best place for one dock item, or nil.
+-- The best place for one dock item, or nil; defer: nil, nil, true when only a free drop is left.
 ---@async
-local function dockPlace(g, D, it)
+local function dockPlace(g, D, it, defer)
   local u, F = g.u, D.F
   local uMean = (u[1] + u[2] + u[3]) / 3
   local byDi = D.poses[it.macro]
@@ -1155,6 +1157,7 @@ local function dockPlace(g, D, it)
   chains(false)
   -- every chain kept off the growth faces: one may pass them, the dock itself still outside as above
   if not (best[1] or best[2]) then chains(true) end
+  if not (best[1] or best[2]) and defer then return nil, nil, true end
   if not (best[1] or best[2]) then
     -- no chain at all: a free drop out of snap reach of everything standing (it is placed alone)
     local L, R = D.hull, SNAP_REACH
@@ -1255,26 +1258,39 @@ local function rootUnder(g, D, it)
 end
 
 -- Build modules first, then piers, then dock areas, each in bill order. g.dockFailed and g.dockFree count the
--- docks without a place and those dropped free.
+-- docks without a place and those dropped free. defer: the stage stops at a dock with no chain, before its
+-- free drop (g.dockStage); the next call goes on from that dock.
 ---@async
-local function docks(g, run)
-  local D = dockState(g, run.kit)
-  g.rootPier, g.dockOut, g.dockFailed, g.dockFree = nil, {}, 0, 0
-  if run.rootPier then rootUnder(g, D, run.rootPier) end
-  local list = {}
-  for pass = 1, 3 do
-    for _, it in ipairs(run.items) do
-      local kind = IsMacroClass(it.macro, "buildmodule") and 1 or it.column and (IsMacroClass(it.macro, "pier") and 2 or 3)
-      if kind == pass and not (g.rootPier and g.rootPier.item == it) then list[#list + 1] = it end
+local function docks(g, run, defer)
+  local S = g.dockStage
+  if not S then
+    local D = dockState(g, run.kit)
+    g.rootPier, g.dockOut, g.dockFailed, g.dockFree = nil, {}, 0, 0
+    if run.rootPier then rootUnder(g, D, run.rootPier) end
+    local list = {}
+    for pass = 1, 3 do
+      for _, it in ipairs(run.items) do
+        local kind = IsMacroClass(it.macro, "buildmodule") and 1 or it.column and (IsMacroClass(it.macro, "pier") and 2 or 3)
+        if kind == pass and not (g.rootPier and g.rootPier.item == it) then list[#list + 1] = it end
+      end
     end
+    if #list == 0 then return D end
+    S = { D = D, list = list, next = 1, placed = 0, dropped = 0, failed = 0, frames = 0, seconds = 0 }
+    g.dockStage = S
   end
-  if #list == 0 then return D end
-  local placed, dropped, failed = 0, 0, 0
+  local D, list = S.D, S.list
+  local started, frames = getElapsedTime(), g.frames
   local progress = run.packProgress
   progress.docks = #list
-  for i, it in ipairs(list) do
+  for i = S.next, #list do
+    local it = list[i]
     progress.dock = i
-    local best, wanted = dockPlace(g, D, it)
+    local best, wanted, deferred = dockPlace(g, D, it, defer)
+    if deferred then
+      S.next, S.frames, S.seconds = i, S.frames + g.frames - frames, S.seconds + getElapsedTime() - started
+      sab.Debug("grid: footprint %d x %d docking: %s has no chain, its free drop waits", g.sx, g.sz, it.macro)
+      return D
+    end
     if best then
       dockCommit(g, D, it, best)
       if IsMacroClass(it.macro, "pier") then
@@ -1282,18 +1298,20 @@ local function docks(g, run)
       elseif IsMacroClass(it.macro, "dockarea") then
         D.areas = D.areas + 1
       end
-      if best.free then dropped = dropped + 1 else placed = placed + 1 end
+      if best.free then S.dropped = S.dropped + 1 else S.placed = S.placed + 1 end
       sab.Debug("grid: %s %s at %d %d %d arm %d, %d new crosses, plot +%d km3%s", it.macro, best.free and "free" or "hangs", best.node[1], best.node[2], best.node[3],
         best.di, best.cost, best.order[1], wanted and "" or ", not the wanted place")
     else
-      failed = failed + 1
+      S.failed = S.failed + 1
       sab.Debug("grid: no place for %s outside the block", it.macro)
     end
   end
+  g.dockStage = nil
   local saved = compress(g, run.kit)
   g.connectors = g.connectors + (D.newCrosses or 0) - saved
-  g.dockFailed, g.dockFree = failed, dropped
-  sab.Debug("grid: footprint %d x %d docking %d hung, %d free, %d without a place, %d new crosses, %d saved by struts", g.sx, g.sz, placed, dropped, failed, D.newCrosses or 0, saved)
+  g.dockFailed, g.dockFree = S.failed, S.dropped
+  sab.Debug("grid: footprint %d x %d docking %d hung, %d free, %d without a place, %d new crosses, %d saved by struts, %d frames, %.1f s", g.sx, g.sz, S.placed, S.dropped,
+    S.failed, D.newCrosses or 0, saved, S.frames + g.frames - frames, S.seconds + getElapsedTime() - started)
   return D
 end
 
@@ -1416,6 +1434,7 @@ end
 ---@async
 local function findPlace(g, rec)
   local floor = g.floor
+  local checked = false
   while true do
     local best = place(g, rec)
     if best then
@@ -1424,7 +1443,12 @@ local function findPlace(g, rec)
       rec.banned[best.pose] = rec.banned[best.pose] or {}
       rec.banned[best.pose][k] = true
       g.banned = g.banned + 1
+    elseif not checked and not place(g, rec, true) then
+      -- no place in any band the loop would reach
+      g.floor = floor
+      return nil
     elseif g.floor <= g.top + g.tallest then
+      checked = true
       g.floor = g.floor + 1
     else
       g.floor = floor
@@ -1671,7 +1695,8 @@ end
 ---@async
 local function layout(kit, base, sx, sz, tallest, progress, seed, R)
   local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, occ = {}, focc = {}, dirty = {},
-    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {} }
+    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {},
+    started = getElapsedTime() }
   if seed then seedGrid(g, seed) end
   rebuildSums(g)
   for i, b in ipairs(base) do
@@ -1721,9 +1746,9 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R)
   g.used = { (hi[1] - lo[1] + 1) / R, (hi[2] - lo[2] + 1) / R, (hi[3] - lo[3] + 1) / R }
   g.box = g.used[1] * g.used[2] * g.used[3]
   g.cost = W_COST
-  sab.Debug("grid: footprint %d x %d, cost %g: %d placed, %d failed, connectors %d (%d crosses, %d saved by struts), used %.1f x %.1f x %.1f km, module cells %.0f%%, %d placements refused for closing the way up, %d frames",
+  sab.Debug("grid: footprint %d x %d, cost %g: %d placed, %d failed, connectors %d (%d crosses, %d saved by struts), used %.1f x %.1f x %.1f km, module cells %.0f%%, %d placements refused for closing the way up, %d frames, %.1f s",
     g.sx, g.sz, W_COST, #g.modules, #g.failed, g.connectors, crosses, g.saved, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000,
-    100 * modCells / g.box, g.banned, g.frames)
+    100 * modCells / g.box, g.banned, g.frames, getElapsedTime() - g.started)
   return g
 end
 
@@ -1853,9 +1878,12 @@ local function pack(run)
   end
   local S = run.seed
   local s, minSide = math.ceil((cells * FILL + (S and S.cells or 0)) ^ (1 / 3)), spanXZ + 2
+  -- turn by turn, largest first: the early turns' small modules find the low lattice still theirs
   table.sort(base, function(a, b)
+    if (a.item.turn or 0) ~= (b.item.turn or 0) then return (a.item.turn or 0) < (b.item.turn or 0) end
     if a.volume ~= b.volume then return a.volume > b.volume end
-    return a.item.macro < b.item.macro
+    if a.item.macro ~= b.item.macro then return a.item.macro < b.item.macro end
+    return a.item.seq < b.item.seq
   end)
   -- footprints: the estimated side changed by each step, then stretched to each long-to-short ratio at the same area
   local shapes, seen = {}, {}
@@ -1899,16 +1927,25 @@ local function pack(run)
     end
   end
   W_COST = wCost
-  -- best first, each with its docks until one hangs every dock: fewest docks without a place, then fewest free
+  -- best first, each with its docks until one hangs every dock: fewest docks without a place, then fewest free;
+  -- the free drops wait until no layout hangs every dock
   table.sort(cands, better)
   ---@type table
   local g
   ---@type table
   local D
   for _, c in ipairs(cands) do
-    local cD = docks(c, run)
-    if not g or c.dockFailed < g.dockFailed or (c.dockFailed == g.dockFailed and c.dockFree < g.dockFree) then g, D = c, cD end
-    if c.dockFailed == 0 and c.dockFree == 0 then break end
+    c.docked = docks(c, run, true)
+    if not c.dockStage then
+      g, D = c, c.docked
+      break
+    end
+  end
+  if not g then
+    for _, c in ipairs(cands) do
+      if c.dockStage then c.docked = docks(c, run, false) end
+      if not g or c.dockFailed < g.dockFailed or (c.dockFailed == g.dockFailed and c.dockFree < g.dockFree) then g, D = c, c.docked end
+    end
   end
   grid.lastDocks = D
   for _, M in ipairs(g.modules) do M.item.gridRec = M end
@@ -1954,6 +1991,7 @@ function grid.Step(run)
     sab.StopRun("grid layout failed")
     return
   end
+  if coroutine.status(run.packer) == "dead" then run.packed = getElapsedTime() end
   if coroutine.status(run.packer) == "dead" and run.packOnly then
     run.packer = nil
     sab.StopRun("packed only")
