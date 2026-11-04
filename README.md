@@ -9,6 +9,7 @@ Tell the build menu what your station should produce or build: this extension wo
 - **Full cycle and workforce**: optionally every intermediate ware down to raw resources and energy, habitats for the workforce, and its food and medicine.
 - **Read from the game**: production rates, sunlight and workforce bonuses, module sizes, docking bays, ship build times and the production lines of every build module; docks sized for the planned traffic.
 - **Docking**: the dock areas and piers the planned trade needs, each count on a slider you can lower.
+- **Special resource modules**: Scrap Processors fed by tugs; with **Full cycle** their scrap metal goes into your target wares and your ships' wares before any regular production.
 - **Preview first**: modules, each ware's balance per hour, workforce and warnings before anything is placed.
 - **Existing stations**: reads what a station makes and fills any shortfall, its docks included.
 - **From the map**: right-click empty space, **Plan a station here**, and the build menu opens with the run started.
@@ -21,7 +22,7 @@ Tell the build menu what your station should produce or build: this extension wo
 - Works only inside the open build menu of a station you own, with your own blueprints.
 - This mod requires `Protected UI Mode` in the game's Extensions settings to be disabled.
 - Windows version of the game only: the placement route reads the game's own editor in memory, which the native Linux build does not expose the same way. The Windows game running on Linux through Proton or Wine should work.
-- Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable and Run stays off; nothing else in the build menu changes.
+- Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable, or that the Extra Data API cannot read module data, and Run stays off; nothing else in the build menu changes.
 - The plot is limited to the game's 20 km: a layout that needs more is refused before anything is placed.
 - Ship build times assume the station has its build drones; a shipyard without them builds several times slower than planned.
 - A module the game's editor refuses is never dropped silently: the placement starts over once, and a second refusal removes every module placed.
@@ -56,15 +57,20 @@ Or you can do it via the Nexus Mods - [Station Architect](https://www.nexusmods.
 
 ## Usage
 
-Open the build menu of one of your stations. The Station Architect panel sits under the menu's title bar; expand it to plan. It has three tabs: **Wares**, **Ships** and **Bill**. Wares and Ships edit one target, so one plan can make wares and build ships; the options and the docking under them are shared.
+Open the build menu of one of your stations. The Station Architect panel sits under the menu's title bar; expand it to plan. It has three tabs: **Wares**, **Ships** and **Bill**. Wares and Ships edit one target, so one plan can make wares and build ships; the special resource modules, the options and the docking under them are shared. What a station has counts its built modules and those already planned in the open menu; expanding the panel reads them again.
 
 ### Wares
 
 1. Pick a ware and press **Add a target**. Each added target gets a slider for its number of production modules, with the ware's net per hour now and planned; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target.
-   **Special resource modules** (Scrap Processors, fed by tugs rather than by trade) need **Full cycle**: pick one and press **Add a module**; its slider sets how many the station has. Their scrap metal feeds scrap recycling modules that make your target wares and your ships' wares, and only the rest comes from regular production modules (a surplus is sold). Tugs bring their raw scrap straight to them, so it adds no docks, piers or storage.
-2. Set the options: **Modules race**, **Full cycle**, **Workforce**, **Self-sufficient workforce**, **Workforce race** and **Storage, hours of flow** (how many hours of each ware's flow the storage holds).
+2. Set the options:
+   - **Modules race**: the race whose modules and ship hulls the plan prefers; **Any** chooses from all your blueprints. Habitats, and under **Self-sufficient workforce** the modules that feed them, follow **Workforce race**.
+   - **Full cycle**: every intermediate ware down to raw resources and energy.
+   - **Workforce**: habitats for the workforce of the planned modules.
+   - **Self-sufficient workforce**: with **Full cycle** and **Workforce**, the food and medicine of that workforce too.
+   - **Workforce race**: the race of the habitats, and so of what the workforce eats.
+   - **Storage, hours of flow**: how many hours of each ware's flow the storage holds, 1 to 24, 4 by default. Each ware gets one module of the smallest size that holds it, several only of the largest size.
 3. **Docking** has one slider for dock areas and one for piers, from what the station has up to what the planned trade needs. Both start at the top; a lowered one scales along when the target changes, and back at the top it follows the need again. On an existing station they show without a target too, sized for the station's own trade.
-4. Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning.
+4. Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning. On an existing station a line under the planned modules names the shortfalls the plan covers: wares the station makes that run short (under **Full cycle** also the wares it uses) and missing housing.
 
 ![The Wares tab: two Hull Part Production modules with the full cycle and the workforce](docs/images/panel_target.png)
 
@@ -72,13 +78,19 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 
 Pick a build module from your blueprints, a fabrication bay or a maintenance bay, and press **Add a module**. Every build module kind the station has or you added gets a slider of its count, starting at what the station has; an added kind released at 0 is removed.
 
-- Under a fabrication bay, one slider per ship size it builds sets the **ships per hour**, up to what those bays can build. It starts at that top, the bays' full capacity: lower it to the ships you expect to sell. Sizes that share a bay share its time, so lowering one raises the other's top.
+- Under a fabrication bay, one slider per ship size it builds sets the **ships per hour**, up to what those bays can build. It starts at that top, the bays' full capacity: lower it to the ships you expect to sell. An existing yard's bays start there too, so its first plan sizes docks and storage for full capacity. Sizes that share a bay share its time, so lowering one raises the other's top.
 - Under a maintenance bay, one slider per ship size sets the **resupplies per hour** (restocking a ship's ammunition and units). It starts at a tenth of what the bays manage.
 - **now** on a slider is what the station's bays are working on at the moment, per hour.
 
-The plan adds the wares those ships and resupplies use, their production chain under **Full cycle**, and the storage and docks for that flow. The options and the Docking sliders are the ones of the Wares tab.
+The plan adds the wares those ships and resupplies use, their production chain under **Full cycle**, and the storage and docks for that flow. The special resource modules, the options and the Docking sliders are the ones of the Wares tab.
 
 ![The Ships tab: an S/M Ship Fabrication Bay at 10 S and 5 M ships per hour, and an L Ship Maintenance Bay](docs/images/panel_ships.png)
+
+### Special resource modules
+
+Both tabs have this section. It works with **Full cycle** only and is greyed out without it. Special resource modules (Scrap Processors) are fed by tugs rather than by trade. Pick one and press **Add a module**: its slider sets how many the station has, from its own count up to 10 more, and shows the module's output per hour; released at the station's count it is removed. On an existing station the section starts with the modules it has.
+
+Their scrap metal feeds the scrap recycling modules that make your target wares and your ships' wares; only the rest comes from regular production modules, and a surplus is sold. Tugs bring the raw scrap straight to them, so it adds no docks, piers or storage.
 
 ### Run
 
@@ -86,14 +98,14 @@ The plan adds the wares those ships and resupplies use, their production chain u
 
 ![A run waiting for the plot licence](docs/images/panel_licence.png)
 
-2. The run places the modules one after another, in turns from the bottom up: the station works after its first turn and every turn adds output, its storage and production chain from energy up, the final product last, then the dock areas and piers its trade needs. The panel shows the progress and the turn, and **Stop** halts the run after the current module. The menu's lists are rebuilt once when the run ends, not after every module.
+2. The run places the modules one after another, in turns from the bottom up: the station works after its first turn and every turn adds output, its storage and production chain from energy up, the final product last, then the dock areas and piers its trade needs. A new station opens its first turn with one pier and one dock area and grows from that pier; habitats and the modules that only feed them come after 40 % of the turns, spread evenly over the rest. The panel shows the progress and the turn, and **Stop** halts the run after the current module. Changing the plan by hand stops the run too, and closing the build menu ends it. The menu's lists are rebuilt once when the run ends, not after every module.
 
 ![A run in progress](docs/images/panel_running.png)
 
 ![The build menu during a run: the new modules appear on the station one by one](docs/images/build_menu_run.png)
 
 3. If the game's editor still refuses a module after a few retries, the run removes every module it placed and starts the placement over, once. A second refusal removes everything again, and the folded panel names the module.
-4. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press **Confirm module changes** as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has.
+4. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press **Confirm module changes** as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has. While a plot's licence is still due (a new plot before its run, or after a **Bill** run, which grows the plot without asking), the panel shows the fee with its own **Buy licence**.
 
 ### From the map
 
@@ -113,7 +125,7 @@ The build menu then opens and the run starts. The plot starts at 1 km and grows 
 
 ### Bill
 
-The manual route: pick a category and a module from your blueprints, set the count, press **Add**. Repeat for every module type; a row's X removes it, **Clear** empties the bill.
+The manual route: **Add** puts a row in the bill, with the category of the row above; pick its category and a module from your blueprints and type the count, 1 to 99. Repeat for every module type; a row's X removes it, **Clear** empties the bill.
 
 ![The Bill tab with a connector, three storage modules and a dock area](docs/images/panel_bill.png)
 
@@ -146,6 +158,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
   - **Docking** section: dock area and pier count sliders
   - A module the editor keeps refusing restarts the placement once; a second refusal removes every placed module
 - Changed
+  - A refused module is retried from a new float; the run no longer slows to one module per frame
   - The Target tab is now the **Wares** tab, in the map dialog too
   - Ship builds and their supply chain follow the ships per hour, not the build modules' full capacity
   - Ship build times from each hull's High loadout, with one ship per production line of a build module
@@ -159,6 +172,8 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
   - The progress line shows the turn on the grid layout too
 - Fixed
   - Game 8.00: piers and dock areas never hung under a connection structure
+  - Expanding the panel kept the earlier target instead of reading the station's plan again
+  - Ware balance values cut off by the scroll bar
 
 ### [1.10] - 2026-10-30
 
