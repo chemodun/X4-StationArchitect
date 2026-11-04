@@ -59,6 +59,7 @@
       <t id="160">No owned build module builds this size</t>
       <t id="161">Maintenance bays: %s</t>
       <t id="162">%s resupplies per hour \(now %s\)</t>
+      <t id="163">Placement failed twice at %s, every placed module was removed</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Station Architect</t>

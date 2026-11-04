@@ -59,6 +59,7 @@
       <t id="160">没有拥有的建造模块能建造此尺寸</t>
       <t id="161">维护舱：%s</t>
       <t id="162">%s 补给每小时（当前 %s）</t>
+      <t id="163">Placement failed twice at %s, every placed module was removed</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">空间站建筑师</t>

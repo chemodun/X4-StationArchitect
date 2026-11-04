@@ -59,6 +59,7 @@
       <t id="160">このサイズを建造できる所有建造モジュールがありません</t>
       <t id="161">整備ベイ: %s</t>
       <t id="162">%s 再補給/時間（現在 %s）</t>
+      <t id="163">Placement failed twice at %s, every placed module was removed</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">ステーション建築家</t>

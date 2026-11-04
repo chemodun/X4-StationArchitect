@@ -1964,6 +1964,43 @@ function sab.StopRun(reason)
   refreshPlanTable(run.placed > 0)
 end
 
+-- The items and the plan count as the placement begins; a restart puts each item table back as it was (pairs
+-- reference the tables).
+local function keepStart(run)
+  local items, fields = {}, {}
+  for i, it in ipairs(run.items) do
+    items[i] = it
+    local f = {}
+    for k, v in pairs(it) do f[k] = v end
+    fields[it] = f
+  end
+  run.start = { items = items, fields = fields, count = tonumber(C.GetNumBuildMapConstructionPlan(sab.menu.holomap, false)) }
+end
+
+-- Every entry the run added, the last first.
+local function removePlaced(run)
+  local holomap = sab.menu.holomap
+  for idx = tonumber(C.GetNumBuildMapConstructionPlan(holomap, false)) - 1, run.start.count, -1 do
+    C.RemoveItemFromConstructionMap2(holomap, idx, false)
+  end
+  run.planCount = tonumber(C.GetNumBuildMapConstructionPlan(holomap, false))
+end
+
+-- The placement once more from its start: the run's entries out, every item as it was.
+local function restartPlacement(run)
+  removePlaced(run)
+  local S = run.start
+  run.items = {}
+  for i, it in ipairs(S.items) do
+    for k in pairs(it) do it[k] = nil end
+    for k, v in pairs(S.fields[it]) do it[k] = v end
+    run.items[i] = it
+  end
+  readPlanState(run, sab.Editor())
+  run.next, run.placed, run.failed, run.spur, run.lastPlacedIdx, run.phase = 1, 0, 0, nil, nil, "begin"
+  sab.planRefresh = true
+end
+
 -- One step per menu update.
 -- A pair or free item that landed joins the run's boxes and free connections, as a pack item does in addPlacement.
 local function registerEntry(run, item)
@@ -2015,7 +2052,10 @@ function sab.Tick(chained)
     return
   end
   if run.phase == "confirm" then return end
-  run.placing = run.placing or getElapsedTime()
+  if not run.placing then
+    run.placing = getElapsedTime()
+    keepStart(run)
+  end
   if not chained then run.frames = run.frames + 1 end
   if run.phase == "begin" then
     local item = run.items[run.next]
@@ -2043,7 +2083,17 @@ function sab.Tick(chained)
       sab.Debug("%s failed, again from a new float (%d of %d)", item.macro, item.floatRetries, FLOAT_RETRIES)
       return
     end
-    sab.StopRun("stopped at a failure")
+    -- the editor refuses some valid placements for a while: everything out and once more from the start
+    if not run.restarted then
+      sab.Debug("%s failed every retry: the %d placed entries come out, the placement starts over", item.macro, run.placed)
+      run.restarted = true
+      restartPlacement(run)
+      return
+    end
+    removePlaced(run)
+    run.placed = 0
+    sab.StopRun("stopped at a failure for the second time, every placed entry removed")
+    sab.lastRun.failedTwice = GetMacroData(item.macro, "name")
     return
   end
   registerEntry(run, item)
@@ -2426,6 +2476,7 @@ local function progressText()
   if not macroDataOk() then return ReadText(PAGE, 153) end
   local last = sab.lastRun
   if last and last.declined then return ReadText(PAGE, 143) end
+  if last and last.failedTwice then return string.format(tostring(ReadText(PAGE, 163)), last.failedTwice) end
   if last and last.tooLarge then return string.format(tostring(ReadText(PAGE, 147)), last.tooLarge, MAX_PLOT / 1000) end
   if last and last.changed then return string.format(tostring(ReadText(PAGE, 154)), last.placed, last.failed) end
   if last then return string.format(tostring(ReadText(PAGE, 107)), last.placed, last.failed) end

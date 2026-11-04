@@ -59,6 +59,7 @@
       <t id="160">Nessun modulo di costruzione posseduto costruisce questa taglia</t>
       <t id="161">Baie di manutenzione: %s</t>
       <t id="162">Rifornimenti %s all'ora \(ora %s\)</t>
+      <t id="163">Placement failed twice at %s, every placed module was removed</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architetto di stazioni</t>

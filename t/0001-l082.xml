@@ -59,6 +59,7 @@
       <t id="160">이 크기를 건조하는 보유 건설 모듈이 없습니다</t>
       <t id="161">정비 베이: %s</t>
       <t id="162">%s 재보급/시간 \(현재 %s\)</t>
+      <t id="163">Placement failed twice at %s, every placed module was removed</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">스테이션 건축가</t>

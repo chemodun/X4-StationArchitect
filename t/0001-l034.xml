@@ -59,6 +59,7 @@
       <t id="160">Ningún módulo de construcción propio construye este tamaño</t>
       <t id="161">Bahías de mantenimiento: %s</t>
       <t id="162">Reabastecimientos %s por hora \(ahora %s\)</t>
+      <t id="163">Placement failed twice at %s, every placed module was removed</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Arquitecto de estaciones</t>

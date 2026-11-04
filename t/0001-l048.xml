@@ -59,6 +59,7 @@
       <t id="160">Żaden posiadany moduł budowy nie buduje tego rozmiaru</t>
       <t id="161">Doki serwisowe: %s</t>
       <t id="162">Zaopatrzenia %s na godzinę \(teraz %s\)</t>
+      <t id="163">Placement failed twice at %s, every placed module was removed</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architekt stacji</t>
