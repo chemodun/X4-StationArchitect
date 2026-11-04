@@ -2077,7 +2077,7 @@ sab.expanded = false
 -- the special resource modules { macro, count }, newSpecial the editor's. Unset choices and the race are filled
 -- from the catalogue on the first panel build (targetChoices). station: the station it was derived for.
 local function defaultTarget()
-  return { goals = {}, new = {}, bays = {}, bayOrder = {}, special = {}, fullCycle = false, workforce = true, selfSufficient = false, moduleRace = "any" }
+  return { goals = {}, new = {}, bays = {}, bayOrder = {}, special = {}, docks = {}, fullCycle = false, workforce = true, selfSufficient = false, moduleRace = "any" }
 end
 sab.target = defaultTarget()
 -- the goal and bay lists show at most this many rows before they scroll
@@ -2346,7 +2346,7 @@ function sab.TargetSpec(ctx)
   end
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals, ships = ships, resupplies = resupplies, shipBays = shipBays, special = special,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
-    race = t.race, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, storageHours = t.storageHours }
+    race = t.race, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, storageHours = t.storageHours, docks = t.docks }
 end
 
 function sab.RunTarget()
@@ -2658,6 +2658,19 @@ local function addShipRows(frame, tabOrder, y, idle, buttonHeight, ctx, dirty, t
   return tabOrder, stable.properties.y + stable:getVisibleHeight() + Helper.borderSize
 end
 
+-- The plan's docking (planDocks); a dock count the player set keeps the plan's rescale, another macro or none drops
+-- it. Without a plan nothing changes.
+local function syncDocks(t, plan)
+  if not plan then return {} end
+  local docking = plan.docking or {}
+  t.docks = t.docks or {}
+  for kind, d in pairs(t.docks) do
+    local p = docking[kind]
+    if p and p.macro == d.macro then d.count, d.max = p.count, p.max else t.docks[kind] = nil end
+  end
+  return docking
+end
+
 -- The target form from y down: the Wares form (the editor of the next ware goal with its Add button, the added
 -- goals under their header, one slider row each, its value the count from the station's own up, released there it
 -- is removed; scrolls past MAX_GOAL_ROWS) or the Ships form (addShipRows, alike); the special resource modules, the
@@ -2669,6 +2682,7 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   local cat = sab.planner.Catalogue(ctx.set, true)
   local choices = targetChoices(cat, ctx)
   local ok, plan = pcall(sab.planner.Plan, sab.TargetSpec(ctx))
+  local docking = syncDocks(t, ok and plan or nil)
   local tops = sab.topRows[key] or {}
   local tables = {}
   sab.formTables = sab.formTables or {}
@@ -2761,6 +2775,30 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   row[1].handlers.onSliderCellConfirm = dirty
   if extraRows then extraRows(kit) end
   y = stable.properties.y + stable:getVisibleHeight() + Helper.borderSize
+
+  -- dock areas and piers from the station's own up to what the trade needs; back at the max a slider follows it again
+  if docking.area or docking.pier then
+    local dtable = formTable(frame, tabOrder, y, buttonHeight)
+    tabOrder = tabOrder + 1
+    local header = dtable:addRow(false, {})
+    header[1]:setColSpan(4):createText(ReadText(1011, 1008), Helper.subHeaderTextProperties)
+    for _, kind in ipairs({ "area", "pier" }) do
+      local d = docking[kind]
+      if d then
+        local value = d.count
+        row = dtable:addRow(true, {})
+        row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = d.have, minSelect = d.have, max = d.max,
+          start = d.count, step = 1, hideMaxValue = d.max == 0, readOnly = not idle or d.max == d.have })
+            :setText(string.format(tostring(ReadText(PAGE, 159)), cat.byMacro[d.macro].name, d.have))
+        row[1].handlers.onSliderCellChanged = function(_, v) value = v end
+        row[1].handlers.onSliderCellConfirm = function()
+          t.docks[kind] = value < d.max and { macro = d.macro, count = value, max = d.max } or nil
+          dirty()
+        end
+      end
+    end
+    y = dtable.properties.y + dtable:getVisibleHeight() + Helper.borderSize
+  end
 
   -- the planned modules and their effect share the rest, each scrolling on its own with three rows at least
   local minHeight = 3 * (Helper.scaleY(Helper.standardTextHeight) + Helper.borderSize)

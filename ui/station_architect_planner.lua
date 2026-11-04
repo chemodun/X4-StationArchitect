@@ -749,6 +749,70 @@ local function tradeAfter(station, plan, lack)
   return flow
 end
 
+-- Piers and dock areas for the station's whole trade after the plan, less those it has; the base only while it has
+-- none. One macro per kind, the station's most used first: plan.docking[kind] = { macro, have, max, count }. A count
+-- the player set (target.docks[kind] = { macro, count, max }) follows a new max, its part above have scaled.
+local function planDocks(plan, target, cat, lack, warn)
+  local counts = plan.counts
+  local flow = plan.flow.import + plan.flow.export
+  local havePierDocks, haveAreas, mine = 0, 0, {}
+  if target.station then
+    havePierDocks, haveAreas = stationDocks(target.station)
+    flow = tradeAfter(target.station, plan, lack)
+    for _, macro in ipairs(stationMacros(target.station)) do mine[macro] = (mine[macro] or 0) + 1 end
+  end
+  plan.tradeAfter = flow
+  local function most(list)
+    local pick
+    for _, e in ipairs(list) do
+      if (mine[e.macro] or 0) > (pick and mine[pick.macro] or 0) then pick = e end
+    end
+    return pick
+  end
+  -- whole piers of one size, the largest up to bigPier docks, so an upgrade adds more of the same
+  local piers, small = candidates(cat.dock, target.moduleRace, function(e) return e.group == "pier" end), {}
+  for _, e in ipairs(piers) do
+    if e.capacity <= planner.bigPier then small[#small + 1] = e end
+  end
+  local pier = most(small)
+  if not pier then
+    for _, e in ipairs(small) do
+      if not pier or e.capacity > pier.capacity or (e.capacity == pier.capacity and e.approaches < pier.approaches) then pier = e end
+    end
+    pier = pier or piers[#piers]
+  end
+  local areas = candidates(cat.dock, target.moduleRace, function(e) return e.group == "dock" end)
+  local area = most(areas) or areas[1]
+  plan.areaDocksM = math.max(1, area and area.docksM or 1)
+  plan.basePierDocks = havePierDocks > 0 and 0 or planner.basePierDocks
+  plan.baseDockAreas = haveAreas > 0 and 0 or planner.baseDockAreas
+  local need, needAreas = dockNeed(plan, flow)
+  need, needAreas = math.max(0, need - havePierDocks), math.max(0, needAreas - haveAreas)
+  if need > 0 and not pier then warn("no owned pier") end
+  if needAreas > 0 and not area then warn("no owned dock area") end
+  plan.docking = {}
+  local function size(kind, e, add)
+    if not e then return end
+    local have = mine[e.macro] or 0
+    local top = have + add
+    local count, set = top, (target.docks or {})[kind]
+    if set and set.macro == e.macro then
+      count = set.count
+      if set.max ~= top and set.max > have then
+        count = have + math.floor((count - have) * (top - have) / (set.max - have) + 0.5)
+      end
+      count = math.max(have, math.min(top, count))
+    end
+    plan.docking[kind] = { macro = e.macro, have = have, max = top, count = count }
+    if count > have then
+      counts[e.macro] = (counts[e.macro] or 0) + count - have
+      plan.adds = true
+    end
+  end
+  size("pier", pier, pier and ceil(need / pier.capacity) or 0)
+  size("area", area, needAreas)
+end
+
 -- *** the plan ***
 
 -- The target's goals; a target without a goals list is one goal itself.
@@ -777,6 +841,7 @@ end
 --   plan.ships[buildMacro][size] = { rate, hours, now, buildMacro }, plan.shipBays[macro] = { have, total }.
 --   resupplies = { { size, rate (ships resupplied per hour), buildMacro } } share the bays' time the same way;
 --   plan.resupplies[buildMacro][size] as plan.ships.
+--   docks = { pier, area = { macro, count, max } }: the player's dock counts (planDocks); plan.docking as sized.
 --   special = { { macro, count (special modules to add) } }: the section, modules fed a
 --   processed ware (scrapworks); under full cycle their output and the station's surplus of it feed converters
 --   of the goal wares, then of the ships' wares (each up to its need, the rest to the first converter, the last
@@ -924,8 +989,18 @@ function planner.Plan(target)
   -- a new station has nothing to trade through: it starts from a pier and a dock area
   plan.newStation = not target.station or #stationMacros(target.station) == 0
   if lack.any then plan.adds = true end
-  -- no goal, every goal met and no shortfall: nothing to plan, not even the base docks
-  if not plan.adds then return plan end
+  -- no goal, every goal met and no shortfall: nothing to plan but the docks an existing station's trade needs
+  if not plan.adds then
+    if not plan.newStation then
+      -- ship building is no engine consumption: its wares count for the trade here
+      for w, r in pairs(use) do
+        plan.consumed[w] = r
+        if not planner.Ware(w).processed then plan.flow.import = plan.flow.import + r * planner.Ware(w).volume end
+      end
+      planDocks(plan, target, cat, lack, warn)
+    end
+    return plan
+  end
   local base = {}
 
   -- an existing station's surplus (built, building and planned modules alike) covers new consumption first;
@@ -1101,38 +1176,7 @@ function planner.Plan(target)
     local cands = candidates(cat.storage, moduleRace, function(e) return e.tags[transport] end)
     if #cands > 0 then storageUnits(cands, volume, counts) else warn("no owned %s storage", tostring(transport)) end
   end
-  -- docks for the station's whole trade after the plan, less those it has; the base only while it has none
-  local flow = plan.flow.import + plan.flow.export
-  local havePierDocks, haveAreas = 0, 0
-  if target.station then
-    havePierDocks, haveAreas = stationDocks(target.station)
-    flow = tradeAfter(target.station, plan, lack)
-  end
-  plan.tradeAfter = flow
-  local piers = candidates(cat.dock, moduleRace, function(e) return e.group == "pier" end)
-  local areas = candidates(cat.dock, moduleRace, function(e) return e.group == "dock" end)
-  plan.areaDocksM = math.max(1, areas[1] and areas[1].docksM or 1)
-  plan.basePierDocks = havePierDocks > 0 and 0 or planner.basePierDocks
-  plan.baseDockAreas = haveAreas > 0 and 0 or planner.baseDockAreas
-  local need, needAreas = dockNeed(plan, flow)
-  need, needAreas = math.max(0, need - havePierDocks), math.max(0, needAreas - haveAreas)
-  if need > 0 and #piers == 0 then
-    warn("no owned pier")
-  elseif need > 0 then
-    -- whole piers of one size, the largest up to bigPier docks, so an upgrade adds more of the same
-    local pick
-    for _, e in ipairs(piers) do
-      local better = not pick or e.capacity > pick.capacity or (e.capacity == pick.capacity and e.approaches < pick.approaches)
-      if e.capacity <= planner.bigPier and better then pick = e end
-    end
-    pick = pick or piers[#piers]
-    counts[pick.macro] = (counts[pick.macro] or 0) + ceil(need / pick.capacity)
-  end
-  if needAreas > 0 and #areas == 0 then
-    warn("no owned dock area")
-  elseif needAreas > 0 then
-    counts[areas[1].macro] = (counts[areas[1].macro] or 0) + needAreas
-  end
+  planDocks(plan, target, cat, lack, warn)
   return plan
 end
 
