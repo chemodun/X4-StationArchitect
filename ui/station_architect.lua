@@ -876,10 +876,14 @@ local function worldBox(size, pos, rows)
   return box
 end
 
+-- a macro's approach zones: the Extra Data API reads them from the engine on every call
+local zonesOf = {}
+
 -- The approach zones (exclusionzones, Extra Data API) of a macro through a pose, as boxes with their direction.
 local function zoneBoxes(macro, pos, rows)
   local list = {}
-  for _, z in ipairs(ExtraData and ExtraData.GetMacroDataEx(macro, "exclusionzones") or {}) do
+  if not zonesOf[macro] then zonesOf[macro] = ExtraData and ExtraData.GetMacroDataEx(macro, "exclusionzones") end
+  for _, z in ipairs(zonesOf[macro] or {}) do
     local m = mulRows(z.rows, rows)
     local at, mid = rotate(z.position, rows), rotate(z.centre, m)
     local box = { min = {}, max = {}, dir = unit(rotate(z.direction, rows)) }

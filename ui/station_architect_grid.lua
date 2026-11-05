@@ -845,6 +845,35 @@ local function nearZone(a, z)
   return true
 end
 
+-- Whether box touches a box of list, and the tests made.
+local function touchesAny(touch, box, list)
+  for k = 1, #list do
+    if touch(box, list[k]) then return true, k end
+  end
+  return false, #list
+end
+
+-- Whether box touches a solid, and the tests made: the last solid hit first; a box beyond a face of the footprint
+-- box can touch only the solids leaning past that face.
+local function touchesSolid(D, box, isZone)
+  local touch = isZone and nearZone or hit
+  if not touch(box, D.hull) then return false, 1 end
+  if D.lastHit and touch(box, D.lastHit) then return true, 2 end
+  local F, list = D.F, D.solid
+  for i = 1, 3 do
+    if isZone then
+      if box.min[i] >= F.max[i] + ZONE_MARGIN then list = D.lean[2 * i - 1] break end
+      if box.max[i] <= F.min[i] - ZONE_MARGIN then list = D.lean[2 * i] break end
+    else
+      if box.min[i] + 1 >= F.max[i] then list = D.lean[2 * i - 1] break end
+      if box.max[i] - 1 <= F.min[i] then list = D.lean[2 * i] break end
+    end
+  end
+  local found, k = touchesAny(touch, box, list)
+  if found then D.lastHit = list[k] end
+  return found, k + 2
+end
+
 -- The body and approach zone boxes of a pose around the cross it hangs on.
 local function dockShape(macro, pose)
   local geo = sab.geo
@@ -936,11 +965,21 @@ local function dockState(g, kit)
   -- solids lean past the footprint box by up to EPS
   D.hull = D.F
   for _, s in ipairs(D.solid) do D.hull = union(D.hull, s) end
+  -- the solids past each face of the footprint box, in DIRS order
+  D.lean = {}
+  for side = 1, 6 do
+    local i, list = axisOf(side), {}
+    for _, s in ipairs(D.solid) do
+      if (DIRS[side][i] > 0 and s.max[i] > D.F.max[i]) or (DIRS[side][i] < 0 and s.min[i] < D.F.min[i]) then list[#list + 1] = s end
+    end
+    D.lean[side] = list
+  end
   return D
 end
 
 -- New crosses go outside the block: under it, or past a pier face, within reach; relaxed, past any face, clear
 -- of the solids the growth faces may lean.
+---@async
 local function dockNode(g, D, n, relaxed)
   local x, y, z = n[1], n[2], n[3]
   if x < -DOCK_REACH or x >= g.sx + DOCK_REACH or z < -DOCK_REACH or z >= g.sz + DOCK_REACH or y < -DOCK_REACH or y > g.top then return false end
@@ -956,18 +995,19 @@ local function dockNode(g, D, n, relaxed)
   end
   if D.crosses[nkey(n)] then return false end
   local b = shifted(D.crossBox, { x * g.u[1], y * g.u[2], z * g.u[3] })
-  if relaxed then
-    for _, s in ipairs(D.solid) do if hit(b, s) then return false end end
-  end
-  for _, o in ipairs(D.bodies) do if hit(b, o) then return false end end
-  for _, o in ipairs(D.zones) do if nearZone(b, o) then return false end end
-  return true
+  local found, tests, k = false, 0, 0
+  if relaxed then found, tests = touchesSolid(D, b, false) end
+  if not found then found, k = touchesAny(hit, b, D.bodies) tests = tests + k end
+  if not found then found, k = touchesAny(nearZone, b, D.zones) tests = tests + k end
+  work(g, tests)
+  return not found
 end
 
 -- Nodes by steps from the tree: crosses' free arms and modules' outward ports are one step away.
 ---@async
 local function dockReach(g, D, seq, relaxed)
   local levels, from = {}, {}
+  ---@async
   local function push(n, d, ref)
     local k = nkey(n)
     if from[k] or not dockNode(g, D, n, relaxed) then return end
@@ -1002,6 +1042,25 @@ local function less(a, b)
   return false
 end
 
+-- The least and greatest min and max per axis of the poses' bodies.
+local function bodySpan(list, s)
+  s = s or { minLo = { math.huge, math.huge, math.huge }, maxLo = { -math.huge, -math.huge, -math.huge },
+    minHi = { math.huge, math.huge, math.huge }, maxHi = { -math.huge, -math.huge, -math.huge } }
+  for _, pose in ipairs(list) do
+    local b = pose.body
+    for i = 1, 3 do
+      if b.min[i] < s.minLo[i] then s.minLo[i] = b.min[i] end
+      if b.min[i] > s.maxLo[i] then s.maxLo[i] = b.min[i] end
+      if b.max[i] < s.minHi[i] then s.minHi[i] = b.max[i] end
+      if b.max[i] > s.maxHi[i] then s.maxHi[i] = b.max[i] end
+    end
+  end
+  return s
+end
+
+-- a pier macro's docking bays: the Extra Data API reads them from the engine on every call
+local baysOf = {}
+
 -- The best place for one dock item, or nil; defer: nil, nil, true when only a free drop is left.
 ---@async
 local function dockPlace(g, D, it, defer)
@@ -1017,7 +1076,8 @@ local function dockPlace(g, D, it, defer)
     D.poses[it.macro] = byDi
   end
   local isPier, isBuild = IsMacroClass(it.macro, "pier"), IsMacroClass(it.macro, "buildmodule")
-  local big = isPier and #(ExtraData and ExtraData.GetMacroDataEx(it.macro, "dockingbays") or {}) > sab.planner.bigPier
+  if isPier and not baysOf[it.macro] then baysOf[it.macro] = #(ExtraData and ExtraData.GetMacroDataEx(it.macro, "dockingbays") or {}) end
+  local big = isPier and baysOf[it.macro] > sab.planner.bigPier
   local firstOfKind = not isBuild and (isPier and D.piers or D.areas) == 0
   local A = D.all
   local baseKm3 = grownKm3(D, A.min[1], A.min[2], A.min[3], A.max[1], A.max[2], A.max[3])
@@ -1029,19 +1089,16 @@ local function dockPlace(g, D, it, defer)
     if not pierFace then otherFaces[#otherFaces + 1] = fi end
   end
   local best = {}
-  local function blocked(box, path, isZone)
+  ---@async
+  local function blocked(box, boxes, isZone)
     local touch = isZone and nearZone or hit
-    if touch(box, D.hull) then
-      for _, s in ipairs(D.solid) do if touch(box, s) then return true end end
-    end
-    for _, b in ipairs(D.bodies) do if touch(box, b) then return true end end
-    if not isZone then
-      for _, z in ipairs(D.zones) do if nearZone(box, z) then return true end end
-    end
-    for _, n in ipairs(path) do
-      if touch(box, shifted(D.crossBox, { n[1] * u[1], n[2] * u[2], n[3] * u[3] })) then return true end
-    end
-    return false
+    local found, tests = touchesSolid(D, box, isZone)
+    local k
+    if not found then found, k = touchesAny(touch, box, D.bodies) tests = tests + k end
+    if not found and not isZone then found, k = touchesAny(nearZone, box, D.zones) tests = tests + k end
+    if not found then found, k = touchesAny(touch, box, boxes) tests = tests + k end
+    work(g, tests)
+    return found
   end
   ---@async
   local function try(node, di, cost, extra)
@@ -1066,7 +1123,10 @@ local function dockPlace(g, D, it, defer)
       for _, fi in ipairs(otherFaces) do
         if beyond(fi, F, x0, z0, x1, z1) then away = true end
       end
-      if extra.clear and hit({ min = { x0, y0, z0 }, max = { x1, y1, z1 } }, extra.clear) then away = true end
+      local cl = extra.clear
+      if cl and x0 + 1 < cl.max[1] and x1 - 1 > cl.min[1] and y0 + 1 < cl.max[2] and y1 - 1 > cl.min[2] and z0 + 1 < cl.max[3] and z1 - 1 > cl.min[3] then
+        away = true
+      end
       -- a build module's approach zones run level along a face it is past
       local off = 0
       if isBuild then
@@ -1106,12 +1166,12 @@ local function dockPlace(g, D, it, defer)
         if not cur or less(order, cur.order) then
           o = o or { ox, oy, oz }
           local body = shifted(pb, o)
-          local path = extra.path or {}
-          local ok = not blocked(body, path, false)
+          local boxes = extra.boxes or NONE
+          local ok = not blocked(body, boxes, false)
           if ok then
             for _, z in ipairs(pose.zones) do
               local zb = shifted(z, o)
-              if blocked(zb, path, true) then ok = false break end
+              if blocked(zb, boxes, true) then ok = false break end
             end
           end
           if ok then best[rank] = { order = order, node = node, di = di, pose = pose, cost = cost, cross = extra.cross, path = extra.path, from = extra.from, free = extra.free } end
@@ -1147,9 +1207,12 @@ local function dockPlace(g, D, it, defer)
           if ref.kind ~= "new" then break end
           m = ref.node
         end
+        local boxes = {}
+        for i, p in ipairs(path) do boxes[i] = shifted(D.crossBox, { p[1] * u[1], p[2] * u[2], p[3] * u[3] }) end
+        local extra = { path = path, from = from, boxes = boxes }
         local back = OPPOSITE[from[nkey(n)].di]
         for di = 1, 6 do
-          if di ~= back then try(n, di, d, { path = path, from = from }) end
+          if di ~= back then try(n, di, d, extra) end
         end
       end
     end
@@ -1164,11 +1227,53 @@ local function dockPlace(g, D, it, defer)
     for _, b in ipairs(D.bodies) do L = union(L, b) end
     local clear = { min = { L.min[1] - R, L.min[2] - R, L.min[3] - R }, max = { L.max[1] + R, L.max[2] + R, L.max[3] + R } }
     local far = DOCK_REACH + math.ceil(R / math.min(u[1], u[2], u[3]))
+    if not byDi.spans then
+      byDi.spans = {}
+      for di = 1, 6 do
+        if #byDi[di] > 0 then
+          byDi.spans[di] = bodySpan(byDi[di])
+          byDi.spans.all = bodySpan(byDi[di], byDi.spans.all)
+        end
+      end
+    end
+    local spans, cb, cmin, cmax = byDi.spans, D.crossBox, clear.min, clear.max
+    -- whether some pose within the span at the node can pass try()'s tests, each test on the span's bounds
+    ---@async
+    local function mayDrop(s, ox, oy, oz)
+      work(g, 8)
+      if s.minLo[2] + oy >= F.max[2] - 1 then return false end
+      for _, fi in ipairs(otherFaces) do
+        if beyond(fi, F, s.minLo[1] + ox, s.minLo[3] + oz, s.maxHi[1] + ox, s.maxHi[3] + oz) then return false end
+      end
+      local x0, y0, z0, x1, y1, z1 = s.maxLo[1] + ox, s.maxLo[2] + oy, s.maxLo[3] + oz, s.minHi[1] + ox, s.minHi[2] + oy, s.minHi[3] + oz
+      local outside = not isBuild and y1 <= F.min[2] + 1
+      for _, fi in ipairs(grid.pierFaces) do
+        if beyond(fi, F, x0, z0, x1, z1) then outside = true end
+      end
+      if not outside then return false end
+      if not (x0 + 1 >= cmax[1] or x1 - 1 <= cmin[1] or y0 + 1 >= cmax[2] or y1 - 1 <= cmin[2] or z0 + 1 >= cmax[3] or z1 - 1 <= cmin[3]) then return false end
+      -- the least plot growth a pose there takes, against the wanted place found
+      if best[1] then
+        local km3 = grownKm3(D, x0, y0, z0, x1, y1, z1)
+        if not km3 or km3 - baseKm3 > best[1].order[1] then return false end
+      end
+      return true
+    end
+    local extra = { free = true, clear = clear }
     for x = -far, g.sx + far - 1 do
+      local ox = x * u[1]
       for y = -far, g.top do
+        local oy = y * u[2]
         for z = -far, g.sz + far - 1 do
-          if not hit(shifted(D.crossBox, { x * u[1], y * u[2], z * u[3] }), clear) then
-            for di = 1, 6 do try({ x, y, z }, di, 0, { free = true, clear = clear }) end
+          local oz = z * u[3]
+          work(g, 2)
+          -- the node's cross box out of the reach
+          if (cb.min[1] + ox + 1 >= cmax[1] or cb.max[1] + ox - 1 <= cmin[1] or cb.min[2] + oy + 1 >= cmax[2] or cb.max[2] + oy - 1 <= cmin[2]
+                or cb.min[3] + oz + 1 >= cmax[3] or cb.max[3] + oz - 1 <= cmin[3]) and spans.all and mayDrop(spans.all, ox, oy, oz) then
+            local node = { x, y, z }
+            for di = 1, 6 do
+              if spans[di] and mayDrop(spans[di], ox, oy, oz) then try(node, di, 0, extra) end
+            end
           end
         end
       end
@@ -1219,14 +1324,16 @@ end
 
 -- A root pier (a new station's first, a detached grid's) hangs under the root cross, the pose with the most
 -- approach zones pointing down; emit places it first, free, and the root cross on it.
+---@async
 local function rootUnder(g, D, it)
   local u, X = g.u, g.root
   if not X or X.arms[4] then return false end
   local o = { X.node[1] * u[1], X.node[2] * u[2], X.node[3] * u[3] }
+  ---@async
   local function blocked(box, isZone)
-    local touch = isZone and nearZone or hit
-    for _, s in ipairs(D.solid) do if touch(box, s) then return true end end
-    return false
+    local found, tests = touchesSolid(D, box, isZone)
+    work(g, tests)
+    return found
   end
   local best
   for _, pose in ipairs(poses(g, it.macro)) do
@@ -1288,7 +1395,7 @@ local function docks(g, run, defer)
     local best, wanted, deferred = dockPlace(g, D, it, defer)
     if deferred then
       S.next, S.frames, S.seconds = i, S.frames + g.frames - frames, S.seconds + getElapsedTime() - started
-      sab.Debug("grid: footprint %d x %d docking: %s has no chain, its free drop waits", g.sx, g.sz, it.macro)
+      sab.Debug("grid: footprint %d x %d docking: %s has no chain, its free drop waits, %.1f s", g.sx, g.sz, it.macro, S.seconds)
       return D
     end
     if best then
@@ -1848,7 +1955,7 @@ end
 -- Packs once per new-cross cost in grid.costs and keeps the best layout.
 ---@async
 local function pack(run)
-  local kit = run.kit
+  local kit, started = run.kit, getElapsedTime()
   local probe = { u = kit.cell, a = kit.arms, R = run.subdivide or grid.subdivide }
   local base, cells, spanXZ, tallest, byMacro = {}, 0, 1, 1, {}
   for i, it in ipairs(run.items) do
@@ -1901,8 +2008,8 @@ local function pack(run)
     end
   end
   local costs = grid.costs or { W_COST }
-  sab.Debug("grid: cell %.0f x %.0f x %.0f m in %d^3 occupancy cells, estimated footprint %d x %d cells, %d footprints, %d modules, %.0f module cells",
-    probe.u[1], probe.u[2], probe.u[3], probe.R, s, s, #shapes, #base, cells)
+  sab.Debug("grid: cell %.0f x %.0f x %.0f m in %d^3 occupancy cells, estimated footprint %d x %d cells, %d footprints, %d modules, %.0f module cells, poses %.1f s",
+    probe.u[1], probe.u[2], probe.u[3], probe.R, s, s, #shapes, #base, cells, getElapsedTime() - started)
   -- the layouts with the fewest failed modules
   local cands = {}
   local frames, packs, wCost = 0, 0, W_COST
@@ -1945,6 +2052,11 @@ local function pack(run)
     for _, c in ipairs(cands) do
       if c.dockStage then c.docked = docks(c, run, false) end
       if not g or c.dockFailed < g.dockFailed or (c.dockFailed == g.dockFailed and c.dockFree < g.dockFree) then g, D = c, c.docked end
+      -- each of the others ends a dock free or without a place too
+      if g.dockFailed == 0 and g.dockFree == 1 then
+        sab.Debug("grid: footprint %d x %d docks with one free drop, no other footprint can do better", g.sx, g.sz)
+        break
+      end
     end
   end
   grid.lastDocks = D
