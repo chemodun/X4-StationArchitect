@@ -176,6 +176,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] [b]Ships[/b] tab: build modules sized by ships per hour and resupplies per hour
 [*] [b]Docking[/b] section: dock area and pier count sliders
 [*] A module the editor keeps refusing restarts the placement once
+[*] A warning names a producer that will mostly idle
 [/list]
 [*] Changed
 [list]
@@ -192,6 +193,8 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] An existing station without a target gets the docks its own trade needs
 [*] A refused module is retried without slowing the rest of the run
 [*] Faster layout search
+[*] Spare output of producers the station feeds itself no longer counts as trade or storage
+[*] A producer far above its need gives way to a smaller owned one
 [*] The progress line shows the turn on the grid layout too
 [*] License: Apache 2.0 with the Platform Distribution Restriction, see LICENSE.
 [/list]
@@ -200,6 +203,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] Game 8.00: piers and dock areas never hung under a connection structure
 [*] Expanding the panel kept the earlier target instead of reading the station's plan again
 [*] Ware balance values cut off by the scroll bar
+[*] Very high-output modules (modded mining modules) brought dozens of piers, dock areas and storages
 [/list]
 [/list]
 [size=125][u][1.10] - 2026-10-30[/u][/size]
