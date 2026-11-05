@@ -74,6 +74,8 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 
 ![The Wares tab: two Hull Part Production modules with the full cycle and the workforce](docs/images/panel_target.png)
 
+![An existing claytronics station: its target starts at the station's own count, the docks show what it has, and the plan covers its shortfalls](docs/images/panel_existing.png)
+
 ### Ships
 
 Pick a build module from your blueprints, a fabrication bay or a maintenance bay, and press **Add a module**. Every build module kind the station has or you added gets a slider of its count, starting at what the station has; an added kind released at 0 is removed.
@@ -82,7 +84,7 @@ Pick a build module from your blueprints, a fabrication bay or a maintenance bay
 - Under a maintenance bay, one slider per ship size sets the **resupplies per hour** (restocking a ship's ammunition and units). It starts at a tenth of what the bays manage.
 - **now** on a slider is what the station's bays are working on at the moment, per hour.
 
-The plan adds the wares those ships and resupplies use, their production chain under **Full cycle**, and the storage and docks for that flow. The special resource modules, the options and the Docking sliders are the ones of the Wares tab.
+Ships are planned with the game's High loadout, which sets their build time and wares; a bay builds one ship per production line at a time. The plan adds the wares those ships and resupplies use, their production chain under **Full cycle**, and the storage and docks for that flow. The special resource modules, the options and the Docking sliders are the ones of the Wares tab.
 
 ![The Ships tab: an S/M Ship Fabrication Bay at 10 S and 5 M ships per hour, and an L Ship Maintenance Bay](docs/images/panel_ships.png)
 
@@ -91,6 +93,8 @@ The plan adds the wares those ships and resupplies use, their production chain u
 Both tabs have this section. It works with **Full cycle** only and is greyed out without it. Special resource modules (Scrap Processors) are fed by tugs rather than by trade. Pick one and press **Add a module**: its slider sets how many the station has, from its own count up to 10 more, and shows the module's output per hour; released at the station's count it is removed. On an existing station the section starts with the modules it has.
 
 Their scrap metal feeds the scrap recycling modules that make your target wares and your ships' wares; only the rest comes from regular production modules, and a surplus is sold. Tugs bring the raw scrap straight to them, so it adds no docks, piers or storage.
+
+![One Scrap Processor feeding four Scrap Recyclers that make the whole Claytronics target, the Hull Parts surplus sold](docs/images/panel_special.png)
 
 ### Run
 
@@ -106,6 +110,8 @@ Their scrap metal feeds the scrap recycling modules that make your target wares 
 
 3. If the game's editor still refuses a module after a few retries, the run removes every module it placed and starts the placement over, once. A second refusal removes everything again, and the folded panel names the module.
 4. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press **Confirm module changes** as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has. While a plot's licence is still due (a new plot before its run, or after a **Bill** run, which grows the plot without asking), the panel shows the fee with its own **Buy licence**.
+
+![A finished run: 190 modules placed, 0 failed, the plan waiting for Confirm module changes](docs/images/build_menu_done.png)
 
 ### From the map
 
@@ -154,22 +160,25 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 ### [1.20] - 2026-11-??
 
 - Added
-  - **Ships** tab: any build module with its count slider, and per ship size a ships per hour or resupplies per hour slider
+  - **Ships** tab: build modules sized by ships per hour and resupplies per hour
   - **Docking** section: dock area and pier count sliders
-  - A module the editor keeps refusing restarts the placement once; a second refusal removes every placed module
+  - A module the editor keeps refusing restarts the placement once
 - Changed
-  - A refused module is retried from a new float; the run no longer slows to one module per frame
   - The Target tab is now the **Wares** tab, in the map dialog too
-  - Ship builds and their supply chain follow the ships per hour, not the build modules' full capacity
-  - Ship build times from each hull's High loadout, with one ship per production line of a build module
-  - Special resource modules only with **Full cycle**, and their scrap metal feeds the ships' wares too
+  - Modules are placed in turns from the bottom up, so the station works from its first turn
+  - A new station grows from its first pier
+  - Every turn ends with the dock areas and piers its trade needs
+  - Habitats come in the later turns
+  - Storage per ware: the smallest module size that holds it
+  - Ship builds and their supply chain follow the ships per hour, not the bays' full capacity
+  - Ship build times from each hull's High loadout and the bay's production lines
+  - Special resource modules only with **Full cycle**
+  - Scrap metal from special resource modules feeds the ships' wares too
   - An existing station without a target gets the docks its own trade needs
+  - A refused module is retried without slowing the rest of the run
   - Faster layout search
-  - Placement order, turn by turn from the bottom up, so the station works after its first turn and each turn adds output: storage and the production chain from energy up, the final product last
-  - A new station grows from its first pier: one pier and one dock area open the first turn; every turn ends with the piers and dock areas its trade needs
-  - Habitats and the modules that only feed them come after 40 % of the turns, spread evenly over the rest
-  - Storage: one module of the smallest size that holds the whole need, several only of the largest size
   - The progress line shows the turn on the grid layout too
+  - License: Apache 2.0 with the Platform Distribution Restriction, see LICENSE.
 - Fixed
   - Game 8.00: piers and dock areas never hung under a connection structure
   - Expanding the panel kept the earlier target instead of reading the station's plan again
