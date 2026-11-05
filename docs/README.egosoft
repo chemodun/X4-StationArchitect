@@ -23,7 +23,7 @@ Tell the build menu what your station should produce or build: this extension wo
 [*] This mod requires [b]Protected UI Mode[/b] in the game's Extensions settings to be disabled.
 [*] Windows version of the game only: the placement route reads the game's own editor in memory, which the native Linux build does not expose the same way. The Windows game running on Linux through Proton or Wine should work.
 [*] Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable, or that the Extra Data API cannot read module data, and Run stays off; nothing else in the build menu changes.
-[*] The plot is limited to the game's 20 km: a layout that needs more is refused before anything is placed.
+[*] The plot is limited to the game's 20 km: a layout that needs more, docks and piers included, is refused before anything is placed. When the docks and piers are what does not fit, lower the [b]Docking[/b] sliders.
 [*] Ship build times assume the station has its build drones; a shipyard without them builds several times slower than planned.
 [*] Docks and storage are sized for a target's whole output, as if all of it sells. A module far above vanilla rates (some modded mining modules make millions of units per hour) can then bring dozens of piers, dock areas and storage modules when its ware is a target, an existing station's starting target included: pick a smaller kind of module in the ware list where it offers one, or lower the [b]Docking[/b] sliders and [b]Storage, hours of flow[/b] to the trade you expect.
 [*] Such a module that only feeds the production chain runs part-time and gets a warning, but [b]Workforce[/b] still houses all its workers; if a smaller variant is among your blueprints, the plan takes that one.
@@ -210,6 +210,8 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] Ware balance values cut off by the scroll bar
 [*] Very high-output modules (modded mining modules) feeding the production chain brought dozens of piers, dock areas and storages
 [*] An upgrade planned new habitats for workers the station's habitats had room for
+[*] Docks and piers with no room within the 20 km plot failed after everything else was placed
+[*] An upgrade lost the grid layout when most of its new module volume was of another race than its connection structures
 [/list]
 [/list]
 [size=125][u][1.10] - 2026-10-30[/u][/size]
