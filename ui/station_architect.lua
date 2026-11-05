@@ -2159,19 +2159,19 @@ function sab.ResetTarget()
   sab.panelDirty = true
 end
 
--- an added ware goal takes the ware
-local function goalTaken(ware)
+-- an added ware goal takes its ware and producer group
+local function goalTaken(ware, group)
   for _, g in ipairs(sab.target.goals) do
-    if g.ware == ware then return true end
+    if g.ware == ware and g.group == group then return true end
   end
   return false
 end
 
--- count: the wanted modules of net output, one above what the station has
+-- count: the wanted modules of the editor's ware and producer group, one above what the station has
 function sab.AddGoal(count)
   local n = sab.target.new
-  if not n.ware or goalTaken(n.ware) then return end
-  table.insert(sab.target.goals, { kind = "ware", ware = n.ware, modules = count or 1 })
+  if not n.ware or goalTaken(n.ware, n.group) then return end
+  table.insert(sab.target.goals, { kind = "ware", ware = n.ware, group = n.group, modules = count or 1 })
 end
 -- the map dialog (07c): the last right-clicked sector spot, the open dialog, the target handed to the next build menu
 sab.lastSpot = nil
@@ -2233,7 +2233,7 @@ local function targetChoices(cat, ctx)
       for _, p in ipairs(not e.byHand and e.products or {}) do
         if not seen[p.ware] then
           seen[p.ware] = true
-          wares[#wares + 1] = option(p.ware, sab.planner.Ware(p.ware).name)
+          wares[#wares + 1] = p.ware
         end
       end
     end
@@ -2251,17 +2251,46 @@ local function targetChoices(cat, ctx)
     if habitats[r.id] then races[#races + 1] = option(r.id, r.name) end
     if makers[r.id] then moduleRaces[#moduleRaces + 1] = option(r.id, r.name) end
   end
-  sortedByText(wares); sortedByText(races); sortedByText(moduleRaces)
+  sortedByText(races); sortedByText(moduleRaces)
   table.insert(moduleRaces, 1, option("any", ReadText(PAGE, 151)))
-  -- the editor offers the wares no added goal takes
-  local free = {}
-  for _, w in ipairs(wares) do
-    if not goalTaken(w.id) then free[#free + 1] = w end
-  end
-  local new = t.new
-  if not (seen[new.ware] and not goalTaken(new.ware)) then new.ware = free[1] and free[1].id end
   if not habitats[t.race] then t.race = sab.planner.WorkforceRace(cat) end
   if not makers[t.moduleRace] then t.moduleRace = "any" end
+  -- one line per ware, or one per producer group when its equal modules form several ("ware / module", fastest
+  -- first); goalOf: line id -> { ware, group }
+  local race = t.moduleRace ~= "any" and t.moduleRace or nil
+  local lines, goalOf = {}, {}
+  for _, w in ipairs(wares) do
+    local name = sab.planner.Ware(w).name
+    local offered = {}
+    for _, g in ipairs(sab.planner.ProducerGroups(cat, w, race)) do
+      if g.offered then offered[#offered + 1] = g end
+    end
+    if #offered <= 1 then
+      lines[#lines + 1] = { option = option(w, name), name = name, rank = 0 }
+      goalOf[w] = { ware = w, group = offered[1] and offered[1].sig }
+    else
+      for i, g in ipairs(offered) do
+        local id = w .. "#" .. g.key
+        lines[#lines + 1] = { option = option(id, name .. " / " .. g.rep.name), name = name, rank = i }
+        goalOf[id] = { ware = w, group = g.sig }
+      end
+    end
+  end
+  table.sort(lines, function(a, b)
+    if a.name ~= b.name then return a.name < b.name end
+    return a.rank < b.rank
+  end)
+  -- the editor offers the lines no added goal takes
+  local free = {}
+  for _, l in ipairs(lines) do
+    local c = goalOf[l.option.id]
+    if not goalTaken(c.ware, c.group) then free[#free + 1] = l.option end
+  end
+  local new = t.new
+  local c = new.choice and goalOf[new.choice]
+  if not (c and not goalTaken(c.ware, c.group)) then new.choice = free[1] and free[1].id end
+  c = new.choice and goalOf[new.choice]
+  new.ware, new.group = c and c.ware, c and c.group
 
   stationBays(t, cat, ctx)
   local bays = {}
@@ -2270,7 +2299,7 @@ local function targetChoices(cat, ctx)
   end
   sortedByText(bays)
   if not (t.newBay and cat.byMacro[t.newBay] and not t.bays[t.newBay]) then t.newBay = bays[1] and bays[1].id end
-  return { wares = free, specials = specials, races = races, moduleRaces = moduleRaces, bays = bays }
+  return { wares = free, goalOf = goalOf, specials = specials, races = races, moduleRaces = moduleRaces, bays = bays }
 end
 
 -- Where a target is planned: the build menu's station, or a sector spot before the station exists.
@@ -2285,9 +2314,16 @@ local function currentOf(ctx, ware)
   return sab.planner.Current(ctx.station, ware)
 end
 
--- The ware's net output now in modules of its regular producers' output: the modules beyond the station's own use.
-local function extraModules(current)
-  return current.extra
+-- What a ware goal starts from, and the plan adds above: the station's modules of its producer group, built and
+-- planned; without a group (a ware only converters make) its net output in modules, the low end whole.
+local function goalHave(ctx, ware, group)
+  if not (ctx.station and ware) then return 0, 0 end
+  if group then
+    local n = sab.planner.GroupCount(ctx.station, ctx.set, ware, group)
+    return n, n
+  end
+  local extra = sab.planner.Current(ctx.station, ware).extra
+  return math.max(0, math.floor(extra + 1e-6)), extra
 end
 
 -- The form's target: derived from the panel's station when the panel first shows on it, again once the build
@@ -2369,8 +2405,8 @@ local function fitShipRates(t, cat, spec)
   end
 end
 
--- A ware goal's modules are modules of net output, beyond what the station and the other goals consume; the
--- bays and the special modules count the station's own; ships built or resupplied per hour per bay and size
+-- A ware goal's modules are its producer group's, the station's own counted (goalHave); the station's use of the
+-- ware is planned on top; the bays and the special modules count the station's own; ships built or resupplied per hour per bay and size
 -- fitted to the bays (fitShipRates); special modules only under full cycle. The plan adds the difference; the spec keeps the form's
 -- order.
 function sab.TargetSpec(ctx)
@@ -2382,7 +2418,8 @@ function sab.TargetSpec(ctx)
   fitShipRates(t, cat, { set = ctx.set, station = ctx.station, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, workforce = t.workforce })
   local goals = {}
   for _, g in ipairs(t.goals) do
-    goals[#goals + 1] = { kind = "ware", ware = g.ware, modules = math.max(0, (g.modules or 1) - extraModules(currentOf(ctx, g.ware))) }
+    local _, have = goalHave(ctx, g.ware, g.group)
+    goals[#goals + 1] = { kind = "ware", ware = g.ware, group = g.group, modules = math.max(0, (g.modules or 1) - have) }
   end
   local ships, resupplies, shipBays = {}, {}, {}
   for _, macro in ipairs(t.bayOrder) do
@@ -2577,11 +2614,26 @@ local function saveTopRows(key)
   sab.topRows[key] = tops
 end
 
--- The goal's slider text: the ware with its net now and planned.
-local function goalText(g, ok, plan, ctx)
+-- The goal's slider text: the ware, with its group's module when the editor lists the ware per group, and its net
+-- now and planned (a shortfall the plan fills counts as filled).
+local function goalText(g, ok, plan, ctx, cat, race)
   local current = currentOf(ctx, g.ware)
-  local planned = ok and current.net + (plan.produced[g.ware] or 0) - (plan.consumed[g.ware] or 0) or current.net
-  return sab.planner.Ware(g.ware).name .. ": " .. string.format(tostring(ReadText(PAGE, 140)), string.format("%+d", math.floor(current.net + 0.5)),
+  local lack = ok and ((plan.lacks or {}).wares or {})[g.ware] or 0
+  local planned = ok and current.net + (plan.produced[g.ware] or 0) - (plan.consumed[g.ware] or 0) + lack or current.net
+  local name = sab.planner.Ware(g.ware).name
+  if g.group then
+    local offered, mine = 0, nil
+    for _, grp in ipairs(sab.planner.ProducerGroups(cat, g.ware, race)) do
+      if grp.offered then offered = offered + 1 end
+      if grp.sig == g.group then mine = grp end
+    end
+    if offered > 1 or not (mine and mine.offered) then
+      local _, e = sab.planner.GroupCount(ctx.station, ctx.set, g.ware, g.group)
+      e = mine and mine.rep or e
+      if e then name = name .. " / " .. e.name end
+    end
+  end
+  return name .. ": " .. string.format(tostring(ReadText(PAGE, 140)), string.format("%+d", math.floor(current.net + 0.5)),
     string.format("%+d", math.floor(planned + 0.5)))
 end
 
@@ -2758,12 +2810,15 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
     tabOrder = tabOrder + 1
     local kit = rowKit(ftable, idle, buttonHeight, dirty)
     local n = t.new
-    kit.dropdown(kit.input(ReadText(PAGE, 114)), choices.wares, n.ware, function(id) n.ware = id end)
+    kit.dropdown(kit.input(ReadText(PAGE, 114)), choices.wares, n.choice, function(id)
+      local c = choices.goalOf[id]
+      n.choice, n.ware, n.group = id, c and c.ware, c and c.group
+    end)
     row = ftable:addRow(true, {})
-    row[1]:setColSpan(4):createButton({ height = buttonHeight, active = idle and n.ware ~= nil and not goalTaken(n.ware) }):setText(ReadText(PAGE, 145), { halign = "center" })
+    row[1]:setColSpan(4):createButton({ height = buttonHeight, active = idle and n.ware ~= nil and not goalTaken(n.ware, n.group) }):setText(ReadText(PAGE, 145), { halign = "center" })
     row[1].handlers.onClick = function()
-      -- a new goal starts one module of net output above what the station has
-      sab.AddGoal(math.max(0, math.floor(extraModules(currentOf(ctx, n.ware)) + 1e-6)) + 1)
+      -- a new goal starts one module above what the station has of its group
+      sab.AddGoal(goalHave(ctx, n.ware, n.group) + 1)
       sab.goalsToEnd = key
       dirty()
     end
@@ -2777,15 +2832,16 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
     tabOrder = tabOrder + 1
     local header = gtable:addRow(false, { fixed = true })
     header[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 152)), #t.goals), Helper.subHeaderTextProperties)
+    local race = t.moduleRace ~= "any" and t.moduleRace or nil
     for _, g in ipairs(t.goals) do
       -- never below what the station has, built or planned
-      local low = math.max(0, math.floor(extraModules(currentOf(ctx, g.ware)) + 1e-6))
+      local low = goalHave(ctx, g.ware, g.group)
       local top = low + MAX_ADD_MODULES
       g.modules = math.max(low, math.min(top, g.modules or 1))
       row = gtable:addRow(true, {})
       row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = low, minSelect = low, max = top,
         start = g.modules, step = 1, hideMaxValue = true, readOnly = not idle, mouseOverText = ReadText(PAGE, 144) })
-          :setText(goalText(g, ok, plan, ctx))
+          :setText(goalText(g, ok, plan, ctx, cat, race))
       row[1].handlers.onSliderCellChanged = function(_, value) g.modules = value end
       row[1].handlers.onSliderCellConfirm = function()
         if g.modules <= low then

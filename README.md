@@ -25,7 +25,7 @@ Tell the build menu what your station should produce or build: this extension wo
 - Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable, or that the Extra Data API cannot read module data, and Run stays off; nothing else in the build menu changes.
 - The plot is limited to the game's 20 km: a layout that needs more is refused before anything is placed.
 - Ship build times assume the station has its build drones; a shipyard without them builds several times slower than planned.
-- Docks and storage are sized for a target's whole output, as if all of it sells. A module far above vanilla rates (some modded mining modules make millions of units per hour) can then bring dozens of piers, dock areas and storage modules when its ware is a target, an existing station's starting target included: lower the **Docking** sliders and **Storage, hours of flow** to the trade you expect.
+- Docks and storage are sized for a target's whole output, as if all of it sells. A module far above vanilla rates (some modded mining modules make millions of units per hour) can then bring dozens of piers, dock areas and storage modules when its ware is a target, an existing station's starting target included: pick a smaller kind of module in the ware list where it offers one, or lower the **Docking** sliders and **Storage, hours of flow** to the trade you expect.
 - Such a module that only feeds the production chain runs part-time and gets a warning, but **Workforce** still houses all its workers; if a smaller variant is among your blueprints, the plan takes that one.
 - A module the game's editor refuses is never dropped silently: the placement starts over once, and a second refusal removes every module placed.
 
@@ -63,7 +63,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 
 ### Wares
 
-1. Pick a ware and press **Add a target**. Each added target gets a slider for its number of production modules, with the ware's net per hour now and planned; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target.
+1. Pick a ware and press **Add a target**. Each added target gets a slider for its number of production modules, with the ware's net per hour now and planned; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target. Modules with the same production count as one kind. A ware your blueprints make with several kinds (another race's recipe, a faster modded module) is listed once per kind, as "Ware / Module", and each such target counts only its own kind; with a **Modules race** set, the list keeps that race's kinds.
 2. Set the options:
    - **Modules race**: the race whose modules and ship hulls the plan prefers; **Any** chooses from all your blueprints. Habitats, and under **Self-sufficient workforce** the modules that feed them, follow **Workforce race**.
    - **Full cycle**: every intermediate ware down to raw resources and energy.
@@ -166,6 +166,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
   - **Docking** section: dock area and pier count sliders
   - A module the editor keeps refusing restarts the placement once
   - A warning names a producer that will mostly idle
+  - A ware made by several kinds of module is listed once per kind, as "Ware / Module"
 - Changed
   - The Target tab is now the **Wares** tab, in the map dialog too
   - Modules are placed in turns from the bottom up, so the station works from its first turn
@@ -182,6 +183,8 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
   - Faster layout search
   - Spare output of producers the station feeds itself no longer counts as trade or storage
   - A producer far above its need gives way to a smaller owned one
+  - A habitat far above the workforce gives way to smaller owned ones
+  - A ware target counts its kind of module, no longer modules of net output
   - The progress line shows the turn on the grid layout too
   - License: Apache 2.0 with the Platform Distribution Restriction, see LICENSE.
 - Fixed

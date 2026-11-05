@@ -353,6 +353,82 @@ local function converterFor(cat, ware, race)
   return best, bestProd
 end
 
+-- A module's production as one string: its products with their rates, effects and inputs, and its workforce;
+-- modules with the same one are equal.
+local function signatureOf(e)
+  if e.sig then return e.sig end
+  local parts = {}
+  for _, p in ipairs(e.products or {}) do
+    local inputs = {}
+    for w, r in pairs(p.resources) do inputs[#inputs + 1] = string.format("%s %.6g", w, r) end
+    table.sort(inputs)
+    local fx = p.effects or {}
+    parts[#parts + 1] = string.format("%s %.6g %.6g %.6g [%s]", p.ware, p.rate, fx.work or 0, fx.sunlight or 0, table.concat(inputs, ","))
+  end
+  table.sort(parts)
+  e.sig = table.concat(parts, ";") .. " workforce " .. tostring(e.workforce)
+  return e.sig
+end
+
+-- catalogue -> race (or "") -> ware -> its producer groups
+local groupCache = setmetatable({}, { __mode = "k" })
+
+-- The groups of equal regular producers of a ware (no converter, no goal-only module), fastest first: { sig, key
+-- (its first macro by name), entries, rep (the module a plan places: the race's, else the first), prod (rep's
+-- product of the ware), rate, offered (it has a module of the ware's best race tier) }. Shared: never changed.
+function planner.ProducerGroups(cat, ware, race)
+  local byRace = groupCache[cat] or {}
+  groupCache[cat] = byRace
+  local all = byRace[race or ""]
+  if not all then
+    all = {}
+    local bySig, best = {}, {}
+    for _, group in ipairs({ "production", "processing" }) do
+      for _, e in ipairs(cat[group]) do
+        for _, p in ipairs((not e.byHand and not sectionUse(e)) and e.products or {}) do
+          if p.rate > 0 then
+            local w, sig = p.ware, signatureOf(e)
+            bySig[w] = bySig[w] or {}
+            local g = bySig[w][sig]
+            if not g then
+              g = { sig = sig, key = e.macro, entries = {}, rate = p.rate }
+              bySig[w][sig] = g
+              all[w] = all[w] or {}
+              all[w][#all[w] + 1] = g
+            end
+            g.entries[#g.entries + 1] = e
+            if e.macro < g.key then g.key = e.macro end
+            local t = tier(e, race)
+            if not g.rep or t < g.tier then g.rep, g.prod, g.tier = e, p, t end
+            if not best[w] or t < best[w] then best[w] = t end
+          end
+        end
+      end
+    end
+    for w, groups in pairs(all) do
+      for _, g in ipairs(groups) do g.offered = g.tier == best[w] end
+      table.sort(groups, function(a, b)
+        if a.rate ~= b.rate then return a.rate > b.rate end
+        return a.key < b.key
+      end)
+    end
+    byRace[race or ""] = all
+  end
+  return all[ware] or {}
+end
+
+-- A goal's producer group: the one of its sig, without one the ware's fastest offered; nil when no owned module
+-- has it.
+local function groupOf(cat, ware, sig, race)
+  for _, g in ipairs(planner.ProducerGroups(cat, ware, race)) do
+    if (sig and g.sig == sig) or (not sig and g.offered) then return g end
+  end
+  -- no regular producer: the ware's best one (a converter), as one group
+  local e, p = nil, nil
+  if not sig then e, p = producerFor(cat, ware, race, true) end
+  return e and { rep = e, prod = p } or nil
+end
+
 -- The entries of the best race tier that pass the filter, largest capacity first.
 local function candidates(list, race, filter)
   local byTier = { {}, {}, {} }
@@ -390,6 +466,15 @@ local function ladder(cands, need, counts)
     end
     counts[pick.macro] = (counts[pick.macro] or 0) + 1
   end
+end
+
+-- The candidates at most idleFactor times the need, all of them when none is.
+local function fitting(cands, need)
+  local out = {}
+  for _, e in ipairs(cands) do
+    if e.capacity <= planner.idleFactor * need then out[#out + 1] = e end
+  end
+  return #out > 0 and out or cands
 end
 
 -- Storage: one unit of the smallest class that holds the whole need, else enough of the largest.
@@ -613,6 +698,41 @@ local function moduleEntry(cat, macro)
   return e
 end
 
+-- The station's regular producers of a ware (built and planned) by group, fastest first: { sig, count, entry };
+-- none without a station.
+function planner.StationGroups(station, set, ware)
+  local list, bySig = {}, {}
+  if not station then return list end
+  local cat = planner.Catalogue(set or "")
+  for _, macro in ipairs(stationMacros(station)) do
+    local e = moduleEntry(cat, macro)
+    for _, p in ipairs((e and not e.byHand and not sectionUse(e)) and e.products or {}) do
+      if p.ware == ware then
+        local sig = signatureOf(e)
+        if not bySig[sig] then
+          bySig[sig] = { sig = sig, count = 0, entry = e, rate = p.rate }
+          list[#list + 1] = bySig[sig]
+        end
+        bySig[sig].count = bySig[sig].count + 1
+        break
+      end
+    end
+  end
+  table.sort(list, function(a, b)
+    if a.rate ~= b.rate then return a.rate > b.rate end
+    return a.entry.macro < b.entry.macro
+  end)
+  return list
+end
+
+-- The station's modules of a ware's producer group, built and planned, and one of them.
+function planner.GroupCount(station, set, ware, sig)
+  for _, g in ipairs(planner.StationGroups(station, set, ware)) do
+    if g.sig == sig then return g.count, g.entry end
+  end
+  return 0, nil
+end
+
 -- An existing station's modules, planned ones included: producers per ware, the wares its producers and
 -- habitats use, workforce need and housing, habitats per race, build and special modules per macro.
 local function stationProfile(station, set)
@@ -689,7 +809,7 @@ end
 
 -- The target an existing station looks built for: without build modules its end products (made, used by none of
 -- its producers, a whole module of net output at least, not made by special modules or by converters alone) as
--- ware goals, each at what the station has; its special modules as the section.
+-- ware goals, one per producer group it has, each at the station's count; its special modules as the section.
 -- Full cycle: it makes every resource it could (one at least); self-sufficient: its habitats' wares too.
 -- The workforce race is its habitats' (nil without any); the module race stays any.
 function planner.Derive(station, set)
@@ -710,7 +830,11 @@ function planner.Derive(station, set)
     table.sort(wares)
     for _, w in ipairs(wares) do
       local c = planner.Current(station, w)
-      if c.modules > 0 and c.production > 0 and c.extra >= 1 - 1e-6 then d.goals[#d.goals + 1] = { kind = "ware", ware = w, modules = math.floor(c.extra + 1e-6) } end
+      if c.modules > 0 and c.production > 0 and c.extra >= 1 - 1e-6 then
+        for _, g in ipairs(planner.StationGroups(station, set, w)) do
+          d.goals[#d.goals + 1] = { kind = "ware", ware = w, group = g.sig, modules = g.count }
+        end
+      end
     end
   end
   local function covered(list)
@@ -730,8 +854,8 @@ function planner.Derive(station, set)
 end
 
 -- An existing station's shortfalls the target makes its own: wares it makes, under full cycle its resources and,
--- self-sufficient, its habitats' wares (nominal rates; goal wares count in their goal; wares no owned module
--- makes stay imported); with workforce the housing its producers lack.
+-- self-sufficient, its habitats' wares (nominal rates; goal wares too, their goals count modules; wares no owned
+-- module makes stay imported); with workforce the housing its producers lack.
 local function stationLacks(target)
   local lack = { wares = {}, workforce = 0, any = false }
   if not target.station then return lack end
@@ -744,9 +868,6 @@ local function stationLacks(target)
     if target.selfSufficient then
       for w in pairs(p.habWares) do wares[w] = true end
     end
-  end
-  for _, g in ipairs(target.goals or {}) do
-    if g.ware then wares[g.ware] = nil end
   end
   for w in pairs(wares) do
     local net = producerFor(cat, w, nil) and planner.Current(target.station, w).net or 0
@@ -893,7 +1014,8 @@ function planner.WorkforceRace(cat)
 end
 
 -- target = { set, station, goals, fullCycle, workforce, race, moduleRace, selfSufficient, sunlight, storageHours },
---   each goal { kind = "ware", ware, rate (net ware amount per hour) or modules } or { kind = "ship", buildMacro,
+--   each goal { kind = "ware", ware, rate (net ware amount per hour) or modules (to add) and group (the sig of
+--   the ProducerGroups entry they come from, the ware's fastest when nil) } or { kind = "ship", buildMacro,
 --   count (build modules to add), bays (the station's total after the plan, supplied as a whole) }. race: the
 --   workforce's (habitats and the producers of what they eat), WorkforceRace when nil; moduleRace: preferred for every
 --   other module and the ship hulls, any when nil. A fabrication bay builds the ship sizes its builder classes
@@ -933,8 +1055,8 @@ function planner.Plan(target)
   -- without planned habitats the new modules run at the station's current workforce
   local liveFraction = (not target.workforce) and liveWorkforceFraction(target.station) or 0
 
-  -- baseRate: wares wanted beyond the station's own use; modules: module count goals per ware; use: what
-  -- the station itself takes (ship building)
+  -- baseRate: wares wanted beyond the station's own use; moduleGoals: per ware its module count goals { sig, n };
+  -- use: what the station itself takes (ship building)
   local baseRate, moduleGoals, use, habWares, fixedWorkforce = {}, {}, {}, {}, 0
   ---@type table<string, any[]>
   local bySizes = {}
@@ -968,9 +1090,15 @@ function planner.Plan(target)
       end
     elseif goal.ware then
       if goal.modules then
-        moduleGoals[goal.ware] = (moduleGoals[goal.ware] or 0) + goal.modules
+        moduleGoals[goal.ware] = moduleGoals[goal.ware] or {}
+        table.insert(moduleGoals[goal.ware], { sig = goal.group, n = goal.modules })
         baseRate[goal.ware] = baseRate[goal.ware] or 0
-        if goal.modules > 0 then plan.adds = true end
+        if goal.modules > 0 then
+          plan.adds = true
+          if not groupOf(cat, goal.ware, goal.group, moduleRace) then
+            warn("no owned blueprint of the module chosen for %s", planner.Ware(goal.ware).name)
+          end
+        end
       else
         baseRate[goal.ware] = (baseRate[goal.ware] or 0) + (goal.rate or 0)
         if (goal.rate or 0) > 0 then plan.adds = true end
@@ -1093,17 +1221,26 @@ function planner.Plan(target)
     for macro, n in pairs(fixedCounts) do workforce = workforce + cat.byMacro[macro].workforce * n end
     habCounts = {}
     if target.workforce then
-      ladder(candidates(cat.habitation, race), workforce + lack.workforce, habCounts)
+      -- a habitat far above the need gives way to smaller ones: it would feed a population the station never needs
+      local need = workforce + lack.workforce
+      ladder(fitting(candidates(cat.habitation, race), need), need, habCounts)
       for macro, n in pairs(habCounts) do capacity = capacity + cat.byMacro[macro].capacity * n end
       capacity = math.max(0, capacity - lack.workforce)
     end
     local fraction = target.workforce and (workforce > 0 and math.min(1, capacity / workforce) or 0) or liveFraction
-    -- a module count goal: that many of the ware's producer at this round's fraction
+    -- a module count goal: that many of its group's module at this round's fraction
     base = {}
     for w, r in pairs(baseRate) do base[w] = r end
-    for w, n in pairs(moduleGoals) do
-      local _, p = producerFor(cat, w, raceFor(w), true)
-      base[w] = base[w] + (p and n * rateOf(p, fraction, sunlight) or 0)
+    local goalMods = {}
+    for w, list in pairs(moduleGoals) do
+      goalMods[w] = {}
+      for _, g in ipairs(list) do
+        local grp = groupOf(cat, w, g.sig, raceFor(w))
+        if grp then
+          table.insert(goalMods[w], { e = grp.rep, p = grp.prod, n = g.n })
+          base[w] = base[w] + g.n * rateOf(grp.prod, fraction, sunlight)
+        end
+      end
     end
     -- module shares of the special modules and their converters; a part-time converter by the share it gets
     local shares = {}
@@ -1182,23 +1319,42 @@ function planner.Plan(target)
     local next, nextShares, whole = {}, {}, {}
     local function rateNow(p) return rateOf(p, fraction, sunlight) end
     for w, r in pairs(demand) do
-      -- goal-only modules serve their goal ware alone, never a shortfall or a full cycle; a module count goal keeps
-      -- the producer it was counted in
-      local e, p = producerFor(cat, w, raceFor(w), base[w] ~= nil, not moduleGoals[w] and r or nil, rateNow)
-      if r <= 0 then
-        -- covered by the station's surplus
-      elseif e then
-        local rate = rateNow(p)
-        next[e.macro] = (next[e.macro] or 0) + ceil(r / rate)
-        nextShares[e.macro] = (nextShares[e.macro] or 0) + r / rate
-        -- a goal's surplus is sold: its producers run whole
-        if base[w] then whole[e.macro] = true end
-      elseif not missing[w] and not planner.Ware(w).processed then
-        missing[w] = true
-        if producerFor(cat, w, nil, true) then
-          warn("%s is made only by special resource modules: imported", planner.Ware(w).name)
-        else
-          warn("no owned module produces %s: imported", planner.Ware(w).name)
+      local goals = goalMods[w]
+      if goals and #goals > 0 then
+        -- module count goals place their groups' modules, up to their counts; the station's own use beyond them
+        -- comes from the first; a goal's surplus is sold: its producers run whole
+        local left, adds = r, {}
+        for i, g in ipairs(goals) do
+          local rate = rateNow(g.p)
+          adds[i] = (left > 1e-6 and rate > 0) and math.min(g.n, ceil(left / rate)) or 0
+          left = left - adds[i] * rate
+        end
+        local rate = rateNow(goals[1].p)
+        if left > 1e-6 and rate > 0 then adds[1] = adds[1] + ceil(left / rate) end
+        for i, g in ipairs(goals) do
+          if adds[i] > 0 then
+            next[g.e.macro] = (next[g.e.macro] or 0) + adds[i]
+            whole[g.e.macro] = true
+          end
+        end
+      else
+        -- goal-only modules serve their goal ware alone, never a shortfall or a full cycle
+        local e, p = producerFor(cat, w, raceFor(w), base[w] ~= nil, r, rateNow)
+        if r <= 0 then
+          -- covered by the station's surplus
+        elseif e then
+          local rate = rateNow(p)
+          next[e.macro] = (next[e.macro] or 0) + ceil(r / rate)
+          nextShares[e.macro] = (nextShares[e.macro] or 0) + r / rate
+          -- a goal's surplus is sold: its producers run whole
+          if base[w] then whole[e.macro] = true end
+        elseif not missing[w] and not planner.Ware(w).processed then
+          missing[w] = true
+          if producerFor(cat, w, nil, true) then
+            warn("%s is made only by special resource modules: imported", planner.Ware(w).name)
+          else
+            warn("no owned module produces %s: imported", planner.Ware(w).name)
+          end
         end
       end
     end
