@@ -25,6 +25,8 @@ Tell the build menu what your station should produce or build: this extension wo
 [*] Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable, or that the Extra Data API cannot read module data, and Run stays off; nothing else in the build menu changes.
 [*] The plot is limited to the game's 20 km: a layout that needs more is refused before anything is placed.
 [*] Ship build times assume the station has its build drones; a shipyard without them builds several times slower than planned.
+[*] Docks and storage are sized for a target's whole output, as if all of it sells. A module far above vanilla rates (some modded mining modules make millions of units per hour) can then bring dozens of piers, dock areas and storage modules when its ware is a target, an existing station's starting target included: lower the [b]Docking[/b] sliders and [b]Storage, hours of flow[/b] to the trade you expect.
+[*] Such a module that only feeds the production chain runs part-time and gets a warning, but [b]Workforce[/b] still houses all its workers; if a smaller variant is among your blueprints, the plan takes that one.
 [*] A module the game's editor refuses is never dropped silently: the placement starts over once, and a second refusal removes every module placed.
 [/list]
 [size=3][u][b]Requirements[/b][/u][/size]
@@ -204,7 +206,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] Game 8.00: piers and dock areas never hung under a connection structure
 [*] Expanding the panel kept the earlier target instead of reading the station's plan again
 [*] Ware balance values cut off by the scroll bar
-[*] Very high-output modules (modded mining modules) brought dozens of piers, dock areas and storages
+[*] Very high-output modules (modded mining modules) feeding the production chain brought dozens of piers, dock areas and storages
 [/list]
 [/list]
 [size=3][u][i][1.10] - 2026-10-30[/i][/u][/size]
