@@ -192,6 +192,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
   - Expanding the panel kept the earlier target instead of reading the station's plan again
   - Ware balance values cut off by the scroll bar
   - Very high-output modules (modded mining modules) feeding the production chain brought dozens of piers, dock areas and storages
+  - An upgrade planned new habitats for workers the station's habitats had room for
 
 ### [1.10] - 2026-10-30
 

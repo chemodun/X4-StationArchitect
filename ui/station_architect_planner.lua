@@ -855,9 +855,9 @@ end
 
 -- An existing station's shortfalls the target makes its own: wares it makes, under full cycle its resources and,
 -- self-sufficient, its habitats' wares (nominal rates; goal wares too, their goals count modules; wares no owned
--- module makes stay imported); with workforce the housing its producers lack.
+-- module makes stay imported); with workforce the housing its producers lack, or the room its habitats have left.
 local function stationLacks(target)
-  local lack = { wares = {}, workforce = 0, any = false }
+  local lack = { wares = {}, workforce = 0, spare = 0, any = false }
   if not target.station then return lack end
   local cat = planner.Catalogue(target.set or "")
   local p = stationProfile(target.station, target.set)
@@ -876,6 +876,7 @@ local function stationLacks(target)
     end
   end
   if target.workforce and p.need > p.capacity then lack.workforce, lack.any = p.need - p.capacity, true end
+  if target.workforce and p.capacity > p.need then lack.spare = p.capacity - p.need end
   return lack
 end
 
@@ -1221,11 +1222,12 @@ function planner.Plan(target)
     for macro, n in pairs(fixedCounts) do workforce = workforce + cat.byMacro[macro].workforce * n end
     habCounts = {}
     if target.workforce then
-      -- a habitat far above the need gives way to smaller ones: it would feed a population the station never needs
-      local need = workforce + lack.workforce
+      -- the room the station's habitats have left houses new workers first; a habitat far above the need gives way
+      -- to smaller ones: it would feed a population the station never needs
+      local need = math.max(0, workforce + lack.workforce - lack.spare)
       ladder(fitting(candidates(cat.habitation, race), need), need, habCounts)
       for macro, n in pairs(habCounts) do capacity = capacity + cat.byMacro[macro].capacity * n end
-      capacity = math.max(0, capacity - lack.workforce)
+      capacity = math.max(0, capacity + lack.spare - lack.workforce)
     end
     local fraction = target.workforce and (workforce > 0 and math.min(1, capacity / workforce) or 0) or liveFraction
     -- a module count goal: that many of its group's module at this round's fraction
@@ -1386,6 +1388,7 @@ function planner.Plan(target)
   for _, macro in ipairs(idle) do
     warn("%s makes %dx what the station uses: it will mostly idle", cat.byMacro[macro].name, math.floor(prodCounts[macro] / prodShares[macro]))
   end
+  plan.workforceCapacity = lack.spare
   for macro, n in pairs(habCounts) do
     counts[macro] = n
     plan.workforceCapacity = plan.workforceCapacity + cat.byMacro[macro].capacity * n
@@ -1610,7 +1613,7 @@ function planner.Turns(plan)
     end
   end
   -- no goal module planned: the producers of shortfall wares no other planned module takes are the finals
-  local lacks = plan.lacks or { wares = {}, workforce = 0 }
+  local lacks = plan.lacks or { wares = {}, workforce = 0, spare = 0 }
   if #finals == 0 then
     local takers = {}
     for _, e in ipairs(upstream) do
@@ -1815,7 +1818,8 @@ function planner.Turns(plan)
       placedHabitat = emitWhile(turn, habitats, placedHabitat, t, 1)
     elseif livingShare > 0 then
       emitLevels(supporters, livingShare)
-      placedHabitat = emitWhile(turn, habitats, placedHabitat, ((plan.workforce or 0) + lacks.workforce) * livingShare)
+      placedHabitat = emitWhile(turn, habitats, placedHabitat,
+        ((plan.workforce or 0) + lacks.workforce) * livingShare - lacks.spare)
     end
     -- the last turn: what rounding left over, before its final module
     if t == nTurns then
