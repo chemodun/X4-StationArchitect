@@ -1365,8 +1365,8 @@ local function rootUnder(g, D, it)
 end
 
 -- Build modules first, then piers, then dock areas, each in bill order. g.dockFailed and g.dockFree count the
--- docks without a place and those dropped free. defer: the stage stops at a dock with no chain, before its
--- free drop (g.dockStage); the next call goes on from that dock.
+-- docks without a place and those dropped free, g.dockTotal all of them. defer: the stage stops at a dock with
+-- no chain, before its free drop (g.dockStage); the next call goes on from that dock.
 ---@async
 local function docks(g, run, defer)
   local S = g.dockStage
@@ -1416,7 +1416,7 @@ local function docks(g, run, defer)
   g.dockStage = nil
   local saved = compress(g, run.kit)
   g.connectors = g.connectors + (D.newCrosses or 0) - saved
-  g.dockFailed, g.dockFree = S.failed, S.dropped
+  g.dockFailed, g.dockFree, g.dockTotal = S.failed, S.dropped, #list
   sab.Debug("grid: footprint %d x %d docking %d hung, %d free, %d without a place, %d new crosses, %d saved by struts, %d frames, %.1f s", g.sx, g.sz, S.placed, S.dropped,
     S.failed, D.newCrosses or 0, saved, S.frames + g.frames - frames, S.seconds + getElapsedTime() - started)
   return D
@@ -1627,7 +1627,7 @@ function grid.Seed(run)
     if not members or #list > #members then ref, members = A, list end
   end
   if not members then
-    sab.Debug("grid: no %s on the plan, the upgrade packs without the grid", kit.cross.macro)
+    sab.Debug("grid: no %s on the plan", kit.cross.macro)
     return false
   end
   local c0 = ref.c
@@ -1699,7 +1699,7 @@ function grid.Seed(run)
     end
   end
   if attach == 0 then
-    sab.Debug("grid: the lattice of %d crosses has no free arm or port, the upgrade packs without the grid", #S.crosses)
+    sab.Debug("grid: the lattice of %d %s has no free arm or port", #S.crosses, kit.cross.macro)
     return false
   end
   S.size = { S.hi[1] - S.lo[1] + 1, S.hi[2] - S.lo[2] + 1, S.hi[3] - S.lo[3] + 1 }

@@ -60,6 +60,7 @@
       <t id="161">Baie di manutenzione: %s</t>
       <t id="162">Rifornimenti %s all'ora \(ora %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
+      <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architetto di stazioni</t>

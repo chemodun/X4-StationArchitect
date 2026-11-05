@@ -60,6 +60,7 @@
       <t id="161">Ремонтні доки: %s</t>
       <t id="162">Поповнення припасів %s на годину \(зараз %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
+      <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Архітектор станцій</t>

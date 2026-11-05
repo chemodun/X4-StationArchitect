@@ -1081,6 +1081,13 @@ function sab.OfferPlot(run)
     sab.lastRun = { placed = 0, failed = 0, tooLarge = need / 1000 }
     return
   end
+  -- a dock the layout found no room for within the plot cap would fail after the rest: nothing is placed
+  local g = run.grid
+  if g and g.dockFailed > 0 then
+    sab.StopRun(string.format("%d of %d docks find no room within the plot cap", g.dockFailed, g.dockTotal))
+    sab.lastRun = { placed = 0, failed = 0, noRoom = { g.dockFailed, g.dockTotal } }
+    return
+  end
   if not box or plotIsFree(sector) then
     run.phase = "begin"
     return
@@ -1472,6 +1479,30 @@ local function innerFirst(items)
   end)
 end
 
+-- An upgrade the leading race's kit cannot seed tries the owned kits of the crosses it stands on, most entries
+-- first; not with a Modules race set. The leading kit stays when none seeds.
+local function reseed(run)
+  if run.moduleRace then return false end
+  local lead, counts, order = run.kit, {}, {}
+  for _, m in pairs(run.macros) do
+    if m ~= lead.cross.macro and IsMacroClass(m, "connectionmodule") then counts[m] = (counts[m] or 0) + 1 end
+  end
+  for m in pairs(counts) do order[#order + 1] = m end
+  table.sort(order, function(a, b) return counts[a] > counts[b] or (counts[a] == counts[b] and a < b) end)
+  for _, m in ipairs(order) do
+    local kit = connectorKit(raceOf(m))
+    if kit.cross and kit.cross.macro == m then
+      run.kit = kit
+      if sab.grid.Seed(run) then
+        sab.Debug("grid: the upgrade takes the kit of the %s it stands on", m)
+        return true
+      end
+    end
+  end
+  run.kit = lead
+  return false
+end
+
 -- The connector kit for spurs, then the grid packer, or the plain packer with the first item dropped free at
 -- the plot centre.
 local function finishLayout(run)
@@ -1493,7 +1524,7 @@ local function finishLayout(run)
   end
   -- an upgrade packs on the grid only around crosses that already stand on one; a stacked station without them
   -- gets a grid of its own beside it, rooted on a free pier
-  if not run.fromEmpty and not (run.kit and sab.grid.Seed(run)) then
+  if not run.fromEmpty and not (run.kit and (sab.grid.Seed(run) or reseed(run))) then
     run.rootPier = run.kit and run.stacked and rootPier(run)
     if run.rootPier then
       run.rootPier.rootPier = true
@@ -1502,6 +1533,7 @@ local function finishLayout(run)
       sab.grid.Start(run)
       return
     end
+    sab.Debug("grid: the upgrade packs without the grid")
     run.gridRoute = false
     if run.turns then innerFirst(run.items) end
     run.phase = "begin"
@@ -2519,6 +2551,7 @@ local function progressText()
   if last and last.declined then return ReadText(PAGE, 143) end
   if last and last.failedTwice then return string.format(tostring(ReadText(PAGE, 163)), last.failedTwice) end
   if last and last.tooLarge then return string.format(tostring(ReadText(PAGE, 147)), last.tooLarge, MAX_PLOT / 1000) end
+  if last and last.noRoom then return string.format(tostring(ReadText(PAGE, 164)), last.noRoom[1], last.noRoom[2], MAX_PLOT / 1000) end
   if last and last.changed then return string.format(tostring(ReadText(PAGE, 154)), last.placed, last.failed) end
   if last then return string.format(tostring(ReadText(PAGE, 107)), last.placed, last.failed) end
   return ""

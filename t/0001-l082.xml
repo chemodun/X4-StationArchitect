@@ -60,6 +60,7 @@
       <t id="161">정비 베이: %s</t>
       <t id="162">%s 재보급/시간 \(현재 %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
+      <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">스테이션 건축가</t>
