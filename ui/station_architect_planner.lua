@@ -70,6 +70,7 @@ local planner = {
   baseDockAreas = 1,
   bigPier = 3,               -- piers with more docks: one per station at most, at the bottom
   livingStart = 0.4,          -- share of the turns done before the habitats and what only feeds them
+  idleFactor = 10,            -- a producer over this many times its demand: a better fit, else a warning
   -- set -> catalogue of owned module blueprints
   catalogue = {},
   -- ware -> { name, transport, volume }
@@ -275,21 +276,47 @@ local function tier(e, race)
   return 2
 end
 
--- The best producer of a ware: race tier first, then no processing (scrap) module, then the higher rate;
--- goal-only (byHand) modules only with byHand.
-local function producerFor(cat, ware, race, byHand)
-  local best, bestProd, bestScore
+-- A producer's fit to a demand over b's: making at most idleFactor times the demand first; then, within that, the
+-- fewer modules before the less surplus, beyond it the less surplus before the fewer modules; then the higher rate.
+local function fitsBetter(a, b)
+  if a.within ~= b.within then return a.within end
+  local tol = 1e-6 * math.max(1, a.surplus, b.surplus)
+  local same = math.abs(a.surplus - b.surplus) <= tol
+  if a.within and a.n ~= b.n then return a.n < b.n end
+  if not same then return a.surplus < b.surplus end
+  if a.n ~= b.n then return a.n < b.n end
+  return a.p.rate > b.p.rate
+end
+
+-- The best producer of a ware: race tier first, then no processing (scrap) module, then the higher rate; goal-only
+-- (byHand) modules only with byHand. Over idleFactor times a demand (rate(p): its rate now), the best fit instead.
+local function producerFor(cat, ware, race, byHand, demand, rate)
+  local best, bestProd, bestScore, all = nil, nil, nil, {}
   for _, group in ipairs({ "production", "processing" }) do
     for _, e in ipairs(cat[group]) do
       for _, p in ipairs((byHand or not e.byHand) and e.products or {}) do
         if p.ware == ware and p.rate > 0 then
           local s = tier(e, race) * 10 + (group == "processing" and 5 or 0)
+          all[#all + 1] = { e = e, p = p, s = s }
           if not best or s < bestScore or (s == bestScore and p.rate > bestProd.rate) then
             best, bestProd, bestScore = e, p, s
           end
         end
       end
     end
+  end
+  if best and demand and demand > 0 and rate(bestProd) > planner.idleFactor * demand then
+    local pick
+    for _, c in ipairs(all) do
+      local r = rate(c.p)
+      if c.s == bestScore and r > 0 then
+        c.n = ceil(demand / r)
+        c.surplus = c.n * r - demand
+        c.within = c.n * r <= planner.idleFactor * demand
+        if not pick or fitsBetter(c, pick) then pick = c end
+      end
+    end
+    best, bestProd = pick.e, pick.p
   end
   return best, bestProd
 end
@@ -731,20 +758,55 @@ local function stationLacks(target)
   return lack
 end
 
+-- Per ware the station's modules make, their inputs per unit of it at the station's workforce and sunlight.
+local function inputsPerUnit(station, set, p)
+  local cat = planner.Catalogue(set or "")
+  local fraction = math.max(liveWorkforceFraction(station), p.need > 0 and math.min(1, p.capacity / p.need) or 0)
+  local sunlight = GetComponentData(GetComponentData(station, "sectorid"), "sunlight") or 1
+  local made, inputs = {}, {}
+  for _, macro in ipairs(stationMacros(station)) do
+    local e = moduleEntry(cat, macro)
+    for _, prod in ipairs(e and e.products or {}) do
+      made[prod.ware] = (made[prod.ware] or 0) + rateOf(prod, fraction, sunlight)
+      inputs[prod.ware] = inputs[prod.ware] or {}
+      for w, r in pairs(prod.resources) do inputs[prod.ware][w] = (inputs[prod.ware][w] or 0) + r end
+    end
+  end
+  for w, list in pairs(inputs) do
+    for i, r in pairs(list) do list[i] = made[w] > 0 and r / made[w] or 0 end
+  end
+  return inputs
+end
+
 -- The station's trade volume per hour after the plan: each ware's net now plus the plan's own (shortfall fillers
--- replace imports, so the shortfall counts once).
+-- replace imports, so the shortfall counts once); a used non-goal ware's surplus idles its producers and their inputs.
 local function tradeAfter(station, plan, lack)
   local p = stationProfile(station, plan.set)
-  local wares = {}
+  local net, goal = {}, {}
   for _, list in ipairs({ p.makes, p.uses, p.habWares, plan.produced, plan.consumed }) do
-    for w in pairs(list) do wares[w] = true end
+    for w in pairs(list) do net[w] = 0 end
+  end
+  for _, g in ipairs(plan.target.goals or { plan.target }) do
+    if g.ware then goal[g.ware] = true end
+  end
+  for w in pairs(net) do
+    net[w] = planner.Current(station, w).net + (plan.produced[w] or 0) - (plan.consumed[w] or 0) + (lack.wares[w] or 0)
+  end
+  local per = inputsPerUnit(station, plan.set, p)
+  for _ = 1, 10 do
+    local idle = {}
+    for w, n in pairs(net) do
+      if n > 0.5 and not goal[w] and (p.uses[w] or p.habWares[w] or (plan.consumed[w] or 0) > 0) then idle[w] = n end
+    end
+    if next(idle) == nil then break end
+    for w, n in pairs(idle) do
+      net[w] = 0
+      for i, a in pairs(per[w] or {}) do net[i] = (net[i] or 0) + n * a end
+    end
   end
   local flow = 0
-  for w in pairs(wares) do
-    if not planner.Ware(w).processed then
-      local net = planner.Current(station, w).net + (plan.produced[w] or 0) - (plan.consumed[w] or 0) + (lack.wares[w] or 0)
-      flow = flow + math.abs(net) * planner.Ware(w).volume
-    end
+  for w, n in pairs(net) do
+    if not planner.Ware(w).processed then flow = flow + math.abs(n) * planner.Ware(w).volume end
   end
   return flow
 end
@@ -847,7 +909,8 @@ end
 --   of the goal wares, then of the ships' wares (each up to its need, the rest to the first converter, the last
 --   converter part-time) and their own producers make only the rest; else that output is sold.
 --   A goal ware another goal consumes gets its producers on top of that consumption. A station's shortfalls
---   (stationLacks) are planned too, with or without a goal.
+--   (stationLacks) are planned too, with or without a goal. Producers of non-goal wares run part-time: whole
+--   modules and their workforce, but output and inputs at the share their demand takes (plan.shares).
 --   The result carries counts per macro, the ware balance, the workforce and the warnings; Bill() turns it
 --   into StartBill's list.
 function planner.Plan(target)
@@ -1019,6 +1082,8 @@ function planner.Plan(target)
 
   -- fixedCounts: the special modules and their converters, whole modules
   local prodCounts, habCounts, fixedCounts = {}, {}, {}
+  -- prodShares: module shares of the part-time producers
+  local prodShares = {}
   for macro, n in pairs(special) do fixedCounts[macro] = n end
   local missing = {}
   for _ = 1, 50 do
@@ -1092,9 +1157,10 @@ function planner.Plan(target)
     for w, r in pairs(use) do consumed[w] = (consumed[w] or 0) + r end
     for w, r in pairs(lack.wares) do consumed[w] = (consumed[w] or 0) + r end
     for macro, n in pairs(prodCounts) do
+      local share = prodShares[macro] or n
       for _, p in ipairs(cat.byMacro[macro].products) do
-        produced[p.ware] = (produced[p.ware] or 0) + rateOf(p, fraction, sunlight) * n
-        for w, r in pairs(p.resources) do consumed[w] = (consumed[w] or 0) + r * n end
+        produced[p.ware] = (produced[p.ware] or 0) + rateOf(p, fraction, sunlight) * share
+        for w, r in pairs(p.resources) do consumed[w] = (consumed[w] or 0) + r * share end
       end
     end
     for macro, n in pairs(habCounts) do
@@ -1113,14 +1179,20 @@ function planner.Plan(target)
     for w, r in pairs(fixed) do
       if demand[w] then demand[w] = demand[w] - r end
     end
-    local next = {}
+    local next, nextShares, whole = {}, {}, {}
+    local function rateNow(p) return rateOf(p, fraction, sunlight) end
     for w, r in pairs(demand) do
-      -- goal-only modules serve their goal ware alone, never a shortfall or a full cycle
-      local e, p = producerFor(cat, w, raceFor(w), base[w] ~= nil)
+      -- goal-only modules serve their goal ware alone, never a shortfall or a full cycle; a module count goal keeps
+      -- the producer it was counted in
+      local e, p = producerFor(cat, w, raceFor(w), base[w] ~= nil, not moduleGoals[w] and r or nil, rateNow)
       if r <= 0 then
         -- covered by the station's surplus
       elseif e then
-        next[e.macro] = (next[e.macro] or 0) + ceil(r / rateOf(p, fraction, sunlight))
+        local rate = rateNow(p)
+        next[e.macro] = (next[e.macro] or 0) + ceil(r / rate)
+        nextShares[e.macro] = (nextShares[e.macro] or 0) + r / rate
+        -- a goal's surplus is sold: its producers run whole
+        if base[w] then whole[e.macro] = true end
       elseif not missing[w] and not planner.Ware(w).processed then
         missing[w] = true
         if producerFor(cat, w, nil, true) then
@@ -1130,6 +1202,7 @@ function planner.Plan(target)
         end
       end
     end
+    for macro in pairs(whole) do nextShares[macro] = nil end
     local nextFixed = {}
     for macro, share in pairs(shares) do nextFixed[macro] = ceil(share) end
     local same = true
@@ -1137,12 +1210,25 @@ function planner.Plan(target)
       for macro, n in pairs(pair[1]) do if pair[2][macro] ~= n then same = false end end
       for macro in pairs(pair[2]) do if not pair[1][macro] then same = false end end
     end
-    prodCounts, fixedCounts = next, nextFixed
+    for macro, s in pairs(nextShares) do
+      if not prodShares[macro] or math.abs(prodShares[macro] - s) > 1e-6 * math.max(1, s) then same = false end
+    end
+    for macro in pairs(prodShares) do if not nextShares[macro] then same = false end end
+    prodCounts, fixedCounts, prodShares = next, nextFixed, nextShares
     plan.produced, plan.consumed, plan.workforce, plan.workforceFraction = produced, consumed, workforce, fraction
     if same then break end
   end
   for _, list in ipairs({ prodCounts, fixedCounts }) do
     for macro, n in pairs(list) do counts[macro] = (counts[macro] or 0) + n end
+  end
+  plan.shares = prodShares
+  local idle = {}
+  for macro, share in pairs(prodShares) do
+    if share > 0 and prodCounts[macro] / share > planner.idleFactor then idle[#idle + 1] = macro end
+  end
+  table.sort(idle)
+  for _, macro in ipairs(idle) do
+    warn("%s makes %dx what the station uses: it will mostly idle", cat.byMacro[macro].name, math.floor(prodCounts[macro] / prodShares[macro]))
   end
   for macro, n in pairs(habCounts) do
     counts[macro] = n
