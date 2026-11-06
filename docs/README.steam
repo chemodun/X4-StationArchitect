@@ -215,6 +215,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] Docks and piers with no room within the 20 km plot failed after everything else was placed
 [*] An upgrade lost the grid layout when most of its new module volume was of another race than its connection structures
 [*] A new station's connection structures could follow the race of its storages instead of its habitats and production modules
+[*] A layout that fitted the plot's size but not its faces asked for a plot licence for a kilometre more
 [/list]
 [/list]
 [h2][1.10] - 2026-10-30[/h2]
