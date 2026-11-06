@@ -1035,6 +1035,28 @@ function sab.PlotFaces(box)
   return select(4, plotChange(box, false, true))
 end
 
+-- Per axis, the shift of box (metres) that leaves the plot the least growth: its low face just inside a whole km
+-- face, the fewest faces winning, the smaller shift on a tie; 0 where nothing beats the box as it is.
+function sab.PlotShift(box)
+  local shift = { 0, 0, 0 }
+  for i = 1, 3 do
+    local lo, hi = box.min[i], box.max[i]
+    local moved = { min = { box.min[1], box.min[2], box.min[3] }, max = { box.max[1], box.max[2], box.max[3] } }
+    local function total(s)
+      moved.min[i], moved.max[i] = lo + s, hi + s
+      return select(4, plotChange(moved, false, true)).uncapped[i]
+    end
+    local best, bestTotal = 0, total(0)
+    for n = 0, math.ceil((hi - lo) / PLOT_STEP) + 2 do
+      local s = PLOT_MARGIN - n * PLOT_STEP - lo
+      local t = total(s)
+      if t < bestTotal or (t == bestTotal and best ~= 0 and math.abs(s) < math.abs(best)) then best, bestTotal = s, t end
+    end
+    shift[i] = best
+  end
+  return shift
+end
+
 -- Vanilla's licence rule: free where the sector owner is nobody, the Xenon or the player.
 local function plotIsFree(sector)
   local owner = GetComponentData(sector, "owner")
@@ -1097,7 +1119,10 @@ function sab.OfferPlot(run)
   local buf = ffi.new(BOOL1, 0)
   local full = tonumber(C.GetBuildPlotPrice(sector, C.GetObjectPositionInSector(menu.container), size.x, size.y, size.z, "player"))
   local price = full - tonumber(C.GetBuildPlotPayment(menu.container, buf))
-  sab.Debug("plot after the pack: %.0f x %.0f x %.0f km, licence %d Cr to pay", size.x / 1000, size.y / 1000, size.z / 1000, price)
+  local e = plotExtents()
+  sab.Debug("plot after the pack: %.0f x %.0f x %.0f km, licence %d Cr to pay; plot now x +%.1f -%.1f, y +%.1f -%.1f, z +%.1f -%.1f km, layout x %.1f..%.1f, y %.1f..%.1f, z %.1f..%.1f km",
+    size.x / 1000, size.y / 1000, size.z / 1000, price, e.pos[1] / 1000, e.neg[1] / 1000, e.pos[2] / 1000, e.neg[2] / 1000, e.pos[3] / 1000, e.neg[3] / 1000,
+    box.min[1] / 1000, box.max[1] / 1000, box.min[2] / 1000, box.max[2] / 1000, box.min[3] / 1000, box.max[3] / 1000)
   if price <= 0 then
     run.phase = "begin"
     return

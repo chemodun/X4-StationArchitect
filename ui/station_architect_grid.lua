@@ -2064,20 +2064,17 @@ local function pack(run)
   if run.detached and not detach(g, D, run) then error("no side of the stacked station keeps the layout clear within the plot cap", 0) end
   applyDocks(g, D)
   local box = layoutBox(D)
-  -- per axis, a shift under half a km that puts the layout's low face on a whole km when that saves a plot km
+  -- per axis, the shift that fits the layout into the plot's faces, else onto whole km faces, when that saves plot km
   if box and not S and not run.detached then
-    local shift = {}
-    for i = 1, 3 do shift[i] = -1000 * math.floor(-box.min[i] / 1000 + 0.5) - box.min[i] end
-    local alt = shifted(box, shift)
-    local f0, f1 = sab.PlotFaces(box), sab.PlotFaces(alt)
+    local shift = sab.PlotShift(box)
     for i = 1, 3 do
-      if f1.uncapped[i] < f0.uncapped[i] then
+      if shift[i] ~= 0 then
         g.origin[i] = g.origin[i] + shift[i]
-        box.min[i], box.max[i] = alt.min[i], alt.max[i]
+        box.min[i], box.max[i] = box.min[i] + shift[i], box.max[i] + shift[i]
         for it in pairs(g.dockOut or {}) do
           if it.free and it.pos then it.pos[AXIS_NAMES[i]] = it.pos[AXIS_NAMES[i]] + shift[i] end
         end
-        sab.Debug("grid: shifted %.0f m on axis %d to save a plot km", shift[i], i)
+        sab.Debug("grid: shifted %.0f m on axis %d to save plot km", shift[i], i)
       end
     end
   end
