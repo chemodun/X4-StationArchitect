@@ -78,7 +78,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 [/list][list][list]
 [*] [b]Modules race[/b]: the race whose modules and ship hulls the plan prefers; [b]Any[/b] chooses from all your blueprints. Habitats, and under [b]Self-sufficient workforce[/b] the modules that feed them, follow [b]Workforce race[/b]. A new station's connection structures follow [b]Modules race[/b]; under [b]Any[/b], the race holding most of the planned habitats and production modules, or your smallest connection structures when those modules are all generic.
 [*] [b]Full cycle[/b]: every intermediate ware down to raw resources and energy.
-[*] [b]Workforce[/b]: habitats for the workforce of the planned modules.
+[*] [b]Workforce[/b]: habitats for the workforce of the planned modules. On an existing station it starts unticked while the station has no habitat.
 [*] [b]Self-sufficient workforce[/b]: with [b]Full cycle[/b] and [b]Workforce[/b], the food and medicine of that workforce too.
 [*] [b]Workforce race[/b]: the race of the habitats, and so of what the workforce eats.
 [*] [b]Storage, hours of flow[/b]: how many hours of each ware's flow the storage holds, 1 to 24, 4 by default. Each ware gets one module of the smallest size that holds it, several only of the largest size.
@@ -202,6 +202,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] A habitat far above the workforce gives way to smaller owned ones
 [*] A ware target counts its kind of module, no longer modules of net output
 [*] The progress line shows the turn on the grid layout too
+[*] The panel plans faster on large stations
 [*] License: Apache 2.0 with the Platform Distribution Restriction, see LICENSE.
 [/list]
 [*] Fixed
