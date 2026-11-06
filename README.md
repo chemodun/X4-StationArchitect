@@ -67,7 +67,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 2. Set the options:
    - **Modules race**: the race whose modules and ship hulls the plan prefers; **Any** chooses from all your blueprints. Habitats, and under **Self-sufficient workforce** the modules that feed them, follow **Workforce race**. A new station's connection structures follow **Modules race**; under **Any**, the race holding most of the planned habitats and production modules, or your smallest connection structures when those modules are all generic.
    - **Full cycle**: every intermediate ware down to raw resources and energy.
-   - **Workforce**: habitats for the workforce of the planned modules.
+   - **Workforce**: habitats for the workforce of the planned modules. On an existing station it starts unticked while the station has no habitat.
    - **Self-sufficient workforce**: with **Full cycle** and **Workforce**, the food and medicine of that workforce too.
    - **Workforce race**: the race of the habitats, and so of what the workforce eats.
    - **Storage, hours of flow**: how many hours of each ware's flow the storage holds, 1 to 24, 4 by default. Each ware gets one module of the smallest size that holds it, several only of the largest size.
@@ -113,7 +113,7 @@ Their scrap metal feeds the scrap recycling modules that make your target wares 
 3. If the game's editor still refuses a module after a few retries, the run removes every module it placed and starts the placement over, once. A second refusal removes everything again, and the folded panel names the module.
 4. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press **Confirm module changes** as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has. While a plot's licence is still due (a new plot before its run, or after a **Bill** run, which grows the plot without asking), the panel shows the fee with its own **Buy licence**.
 
-![A finished run: 190 modules placed, 0 failed, the plan waiting for Confirm module changes](docs/images/build_menu_done.png)
+![A finished run: 192 modules placed, 0 failed, the plan waiting for Confirm module changes](docs/images/build_menu_done.png)
 
 ### From the map
 
@@ -186,6 +186,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
   - A habitat far above the workforce gives way to smaller owned ones
   - A ware target counts its kind of module, no longer modules of net output
   - The progress line shows the turn on the grid layout too
+  - The panel plans faster on large stations
   - License: Apache 2.0 with the Platform Distribution Restriction, see LICENSE.
 - Fixed
   - Game 8.00: piers and dock areas never hung under a connection structure

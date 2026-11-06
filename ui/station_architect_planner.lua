@@ -251,11 +251,20 @@ local function entryOf(group, lib, macro)
   return e
 end
 
+local CATALOGUE_GROUPS = { "production", "processing", "storage", "habitation", "dock", "build" }
+
+-- refresh: rebuilt only when a library's blueprint count changed (a blueprint learnt in-session)
 function planner.Catalogue(set, refresh)
   local cat = planner.catalogue[set]
   if cat and not refresh then return cat end
-  cat = { byMacro = {} }
-  for _, group in ipairs({ "production", "processing", "storage", "habitation", "dock", "build" }) do
+  local counts, same = {}, cat ~= nil
+  for _, group in ipairs(CATALOGUE_GROUPS) do
+    counts[group] = tonumber(C.GetNumBlueprints(set, LIBS[group], ""))
+    if same and cat.counts[group] ~= counts[group] then same = false end
+  end
+  if same then return cat end
+  cat = { byMacro = {}, counts = counts }
+  for _, group in ipairs(CATALOGUE_GROUPS) do
     cat[group] = {}
     for _, macro in ipairs(blueprints(set, LIBS[group])) do
       local e = entryOf(group, LIBS[group], macro)
@@ -265,6 +274,19 @@ function planner.Catalogue(set, refresh)
   end
   planner.catalogue[set] = cat
   return cat
+end
+
+-- Tables that live one frame: the panel builds in one frame and reads the same station state many times over
+local frameMemos = { time = nil }
+local function frameMemo(name)
+  local now = getElapsedTime()
+  if frameMemos.time ~= now then frameMemos = { time = now } end
+  local memo = frameMemos[name]
+  if not memo then
+    memo = {}
+    frameMemos[name] = memo
+  end
+  return memo
 end
 
 -- *** picking modules ***
@@ -462,7 +484,7 @@ local function ladder(cands, need, counts)
   if need > 1e-6 then
     local pick = big
     for _, e in ipairs(cands) do
-      if e.capacity >= need and e.capacity <= pick.capacity and e.capacity < pick.capacity + 1e-6 == (e.capacity < pick.capacity) then pick = e end
+      if e.capacity >= need and e.capacity < pick.capacity then pick = e end
     end
     counts[pick.macro] = (counts[pick.macro] or 0) + 1
   end
@@ -541,6 +563,8 @@ end
 
 -- macro .. method -> { seconds, equipment, refill }: each preset is generated once per game load
 local shipBuilds = {}
+-- sizes .. race .. method -> shipResources' results, valid while the owned blueprint count stays
+local shipResourceCache = {}
 
 -- A hull with the planner's loadout preset, generated without a yard: its build seconds at a full workforce and
 -- drones, its equipment wares and of those its ammo and units (ware -> amount); the bare hull without the loadout
@@ -598,8 +622,12 @@ end
 -- station's build method; bare is true without the loadout functions; refill: per resupply the build resources of
 -- the preset's ammo and units.
 local function shipResources(sizes, race, station)
-  local total, refill, ships, seconds = {}, {}, 0, 0
   local setting = stationBuildMethod(station)
+  local key = table.concat(sizes, " ") .. "|" .. tostring(race) .. "|" .. setting
+  local owned = tonumber(C.GetNumBlueprints("", "", ""))
+  local hit = shipResourceCache[key]
+  if hit and hit.owned == owned then return hit[1], hit[2], hit[3], hit[4], hit[5] end
+  local total, refill, ships, seconds = {}, {}, 0, 0
   for _, size in ipairs(sizes) do
     local macros, ofRace = shipBlueprints(size), {}
     for _, macro in ipairs(macros) do
@@ -623,7 +651,9 @@ local function shipResources(sizes, race, station)
     for w, amount in pairs(total) do total[w] = amount / ships end
     for w, amount in pairs(refill) do refill[w] = amount / ships end
   end
-  return total, ships, ships > 0 and seconds / ships / 3600 or 0, not loadoutApi, refill
+  hit = { total, ships, ships > 0 and seconds / ships / 3600 or 0, not loadoutApi, refill, owned = owned }
+  shipResourceCache[key] = hit
+  return hit[1], hit[2], hit[3], hit[4], hit[5]
 end
 
 -- A product's hourly rate under a workforce fraction and sunlight; the engine multiplies the two bonuses
@@ -631,7 +661,7 @@ end
 local function rateOf(p, fraction, sunlight)
   local fx = p.effects
   if not fx then return p.rate end
-  return p.rate * (1 + fx.work * fraction) * (1 + fx.sunlight * (sunlight - 1))
+  return math.max(0, p.rate * (1 + fx.work * fraction) * (1 + fx.sunlight * (sunlight - 1)))
 end
 
 -- The workforce fraction an existing station's producers run at (0 without a station or producers).
@@ -643,6 +673,9 @@ end
 -- The station's module macros: the open build menu's plan on it (built and planned), else its modules and
 -- constructions.
 local function stationMacros(station)
+  local memo = frameMemo("macros")
+  local hit = memo[tostring(station)]
+  if hit then return hit end
   local macros = {}
   local menu = sab.menu
   if menu and menu.shown and menu.holomap ~= 0 and menu.container == station then
@@ -653,6 +686,7 @@ local function stationMacros(station)
     n = C.GetStationModules(buf, n, station, true, false)
     for i = 0, tonumber(n) - 1 do macros[#macros + 1] = GetComponentData(ConvertStringTo64Bit(tostring(buf[i])), "macro") end
   end
+  memo[tostring(station)] = macros
   return macros
 end
 
@@ -736,8 +770,11 @@ end
 -- An existing station's modules, planned ones included: producers per ware, the wares its producers and
 -- habitats use, workforce need and housing, habitats per race, build and special modules per macro.
 local function stationProfile(station, set)
+  local memo, key = frameMemo("profile"), tostring(station) .. "|" .. tostring(set)
+  if memo[key] then return memo[key] end
   local cat = planner.Catalogue(set or "")
   local p = { makes = {}, uses = {}, habWares = {}, need = 0, capacity = 0, races = {}, builds = {}, special = {} }
+  memo[key] = p
   for _, macro in ipairs(stationMacros(station)) do
     local e = moduleEntry(cat, macro)
     if e and e.group == "habitation" then
@@ -1037,7 +1074,7 @@ end
 --   The result carries counts per macro, the ware balance, the workforce and the warnings; Bill() turns it
 --   into StartBill's list.
 function planner.Plan(target)
-  local set = target.set or "factory"
+  local set = target.set or ""
   local cat = planner.Catalogue(set, true)
   local race, moduleRace = target.race or planner.WorkforceRace(cat), target.moduleRace
   local sunlight = target.sunlight
@@ -1318,7 +1355,7 @@ function planner.Plan(target)
     for w, r in pairs(fixed) do
       if demand[w] then demand[w] = demand[w] - r end
     end
-    local next, nextShares, whole = {}, {}, {}
+    local nextCounts, nextShares, whole = {}, {}, {}
     local function rateNow(p) return rateOf(p, fraction, sunlight) end
     for w, r in pairs(demand) do
       local goals = goalMods[w]
@@ -1335,24 +1372,27 @@ function planner.Plan(target)
         if left > 1e-6 and rate > 0 then adds[1] = adds[1] + ceil(left / rate) end
         for i, g in ipairs(goals) do
           if adds[i] > 0 then
-            next[g.e.macro] = (next[g.e.macro] or 0) + adds[i]
+            nextCounts[g.e.macro] = (nextCounts[g.e.macro] or 0) + adds[i]
             whole[g.e.macro] = true
           end
         end
       else
         -- goal-only modules serve their goal ware alone, never a shortfall or a full cycle
         local e, p = producerFor(cat, w, raceFor(w), base[w] ~= nil, r, rateNow)
+        -- a producer whose effects leave it no output here (no sunlight) would ask infinite modules
+        local rate = e and rateNow(p) or 0
         if r <= 0 then
           -- covered by the station's surplus
-        elseif e then
-          local rate = rateNow(p)
-          next[e.macro] = (next[e.macro] or 0) + ceil(r / rate)
+        elseif rate > 0 then
+          nextCounts[e.macro] = (nextCounts[e.macro] or 0) + ceil(r / rate)
           nextShares[e.macro] = (nextShares[e.macro] or 0) + r / rate
           -- a goal's surplus is sold: its producers run whole
           if base[w] then whole[e.macro] = true end
         elseif not missing[w] and not planner.Ware(w).processed then
           missing[w] = true
-          if producerFor(cat, w, nil, true) then
+          if e then
+            warn("%s makes no %s here (sunlight %.2f): imported", e.name, planner.Ware(w).name, sunlight)
+          elseif producerFor(cat, w, nil, true) then
             warn("%s is made only by special resource modules: imported", planner.Ware(w).name)
           else
             warn("no owned module produces %s: imported", planner.Ware(w).name)
@@ -1364,7 +1404,7 @@ function planner.Plan(target)
     local nextFixed = {}
     for macro, share in pairs(shares) do nextFixed[macro] = ceil(share) end
     local same = true
-    for _, pair in ipairs({ { next, prodCounts }, { nextFixed, fixedCounts } }) do
+    for _, pair in ipairs({ { nextCounts, prodCounts }, { nextFixed, fixedCounts } }) do
       for macro, n in pairs(pair[1]) do if pair[2][macro] ~= n then same = false end end
       for macro in pairs(pair[2]) do if not pair[1][macro] then same = false end end
     end
@@ -1372,7 +1412,7 @@ function planner.Plan(target)
       if not prodShares[macro] or math.abs(prodShares[macro] - s) > 1e-6 * math.max(1, s) then same = false end
     end
     for macro in pairs(prodShares) do if not nextShares[macro] then same = false end end
-    prodCounts, fixedCounts, prodShares = next, nextFixed, nextShares
+    prodCounts, fixedCounts, prodShares = nextCounts, nextFixed, nextShares
     plan.produced, plan.consumed, plan.workforce, plan.workforceFraction = produced, consumed, workforce, fraction
     if same then break end
   end
@@ -1461,6 +1501,8 @@ end
 -- planned ones included, converters not; converted: the converters' share of production; extra: the net in
 -- modules of the regular producers' output (in the best producer's nominal rate when only converters make it).
 function planner.Current(station, ware)
+  local memo, key = frameMemo("current"), tostring(station) .. "|" .. ware
+  if memo[key] then return memo[key] end
   local production = tonumber(C.GetContainerWareProduction(station, ware, true)) or 0
   local consumption = (tonumber(C.GetContainerWareConsumption(station, ware, true)) or 0) + (Helper.getWorkforceConsumption(station, ware) or 0)
   local pending, modules, converted = 0, 0, 0
@@ -1534,7 +1576,9 @@ function planner.Current(station, ware)
     local _, p = producerFor(cat, ware, nil)
     extra = p and net / p.rate or 0
   end
-  return { production = production, consumption = consumption, net = net, pending = pending, modules = modules, converted = converted, extra = extra }
+  local result = { production = production, consumption = consumption, net = net, pending = pending, modules = modules, converted = converted, extra = extra }
+  memo[key] = result
+  return result
 end
 
 -- The plan as StartBill takes it, grouped: build, production, processing, habitation, storage, dock areas, piers.

@@ -1182,7 +1182,7 @@ function sab.CanOptimizePlot()
   return box ~= nil and select(3, plotChange(box, true, true))
 end
 
--- The plot fitted to the plan's modules on each side, the smallest plot on an empty plan.
+-- The plot fitted to the plan's modules on each side; on an empty plan one step each side of the station's position.
 function sab.OptimizePlot()
   local box = optimizeBox(true)
   if box and sab.FitPlot(box, true) then sab.panelDirty = true end
@@ -1519,10 +1519,11 @@ end
 -- the plot centre.
 local function finishLayout(run)
   local menu = sab.menu
-  -- the kit's race: the most of the block's volume; docks hang outside it, a storage's race follows its capacity
+  -- the kit's race: the most of the block's volume among habitats and production modules; docks hang outside the
+  -- block, a storage's race follows its capacity, anything else is no part of the block's bulk
   local lead, volumes = nil, {}
   for _, it in ipairs(run.items) do
-    local race = not it.column and not IsMacroClass(it.macro, "storage") and raceOf(it.macro)
+    local race = (it.group == "habitation" or it.group == "production") and raceOf(it.macro)
     if race then
       volumes[race] = (volumes[race] or 0) + (it.volume or 0)
       if not lead or volumes[race] > volumes[lead] then lead = race end
@@ -1858,12 +1859,14 @@ local function connectorOfRace(race)
   for _, m in ipairs(sab.menu.modules and sab.menu.modules.moduletypes_other or {}) do
     if IsMacroClass(m, "connectionmodule") then
       local mr = GetMacroData(m, "makerraceid")
+      -- a generic module (empty race list) fits any race
+      local fits = race == nil
       for _, r in ipairs(type(mr) == "table" and mr or { mr }) do
-        if race == nil or r == race then
-          local count = #sab.Connections(m)
-          if not best or count > bestCount or (count == bestCount and m < best) then best, bestCount = m, count end
-          break
-        end
+        if r == race then fits = true end
+      end
+      if fits then
+        local count = #sab.Connections(m)
+        if not best or count > bestCount or (count == bestCount and m < best) then best, bestCount = m, count end
       end
     end
   end
@@ -1905,7 +1908,9 @@ function sab.StartBill(bill, opts)
   local items, connector, turns = {}, nil, 0
   for _, b in ipairs(bill) do
     local count = tonumber(b.count) or 1
-    if IsMacroClass(b.macro, "connectionmodule") then
+    if type(b.macro) ~= "string" or b.macro == "" then
+      sab.Debug("bill row without a macro skipped")
+    elseif IsMacroClass(b.macro, "connectionmodule") then
       connector = { macro = b.macro }
     else
       local size = sab.sizes[b.macro]
@@ -1916,6 +1921,10 @@ function sab.StartBill(bill, opts)
       turns = math.max(turns, b.turn or 0)
     end
   end
+  if not items[1] then
+    sab.Debug("the bill has no module to place")
+    return false
+  end
   local gridRoute = opts and opts.grid or false
   if turns == 0 then
     table.sort(items, function(a, b)
@@ -1925,11 +1934,11 @@ function sab.StartBill(bill, opts)
   elseif not gridRoute then
     innerFirst(items)
   end
-  if not connector and items[1] then
+  if not connector then
     local macro = defaultConnector(opts and opts.moduleRace, items[1].macro)
     if macro then connector = { macro = macro } end
   end
-  local empty = items[1] and tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) == 0
+  local empty = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false)) == 0
   if empty and not gridRoute then
     local centre = C.GetBuildPlotCenterOffset(menu.container)
     items[1].pack, items[1].free, items[1].pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
@@ -2037,8 +2046,10 @@ local function removePlaced(run)
   run.planCount = tonumber(C.GetNumBuildMapConstructionPlan(holomap, false))
 end
 
--- The placement once more from its start: the run's entries out, every item as it was.
+-- The placement once more from its start: the run's entries out, every item as it was; false without the editor.
 local function restartPlacement(run)
+  local editor = sab.Editor()
+  if not editor then return false end
   removePlaced(run)
   local S = run.start
   run.items = {}
@@ -2047,9 +2058,10 @@ local function restartPlacement(run)
     for k, v in pairs(S.fields[it]) do it[k] = v end
     run.items[i] = it
   end
-  readPlanState(run, sab.Editor())
+  readPlanState(run, editor)
   run.next, run.placed, run.failed, run.spur, run.lastPlacedIdx, run.phase = 1, 0, 0, nil, nil, "begin"
   sab.planRefresh = true
+  return true
 end
 
 -- One step per menu update.
@@ -2138,7 +2150,8 @@ function sab.Tick(chained)
     if not run.restarted then
       sab.Debug("%s failed every retry: the %d placed entries come out, the placement starts over", item.macro, run.placed)
       run.restarted = true
-      restartPlacement(run)
+      if restartPlacement(run) then return end
+      sab.StopRun("the editor is not reachable for the restart")
       return
     end
     removePlaced(run)
@@ -2178,8 +2191,8 @@ local CATEGORIES = {
 sab.bill = {}
 sab.lastRun = nil
 sab.panelDirty = nil
--- "wares", "ships" or "bill"; the Wares and Ships tabs edit one target, kept across menu openings, unset choices
--- default from the catalogue
+-- "wares", "ships" or "bill"; the Wares and Ships tabs edit one target, derived from the station on each menu
+-- opening (formTarget), unset choices default from the catalogue
 sab.tab = "wares"
 -- the panel opens as its title bar only
 sab.expanded = false
@@ -3079,6 +3092,8 @@ end
 function sab.DisplayPanel()
   local menu = sab.menu
   if not (menu.shown and menu.titleData and menu.titleData.width) then return end
+  -- a build from vanilla's displayMenu covers a pending dirty flag
+  sab.panelDirty = nil
   saveTopRows("panel")
   Helper.clearDataForRefresh(menu, PANEL_LAYER)
   local idle = sab.run == nil
