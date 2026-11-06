@@ -18,14 +18,19 @@ local OPPOSITE = { 2, 1, 4, 3, 6, 5 }
 local ROLLS = { 0, math.pi / 2, math.pi, 3 * math.pi / 2 }
 local CHECKS_PER_FRAME = 150000
 grid.checksPerFrame = CHECKS_PER_FRAME
+-- a frame over BACKGROUND_DT long at the base budget is the game in the background (a frame costs its floor
+-- whatever the Lua does): the budget then grows by BOOST, except every PROBE_EVERY-th frame that measures again
+local BACKGROUND_DT, BOOST, PROBE_EVERY = 0.07, 8, 4
+grid.boost = 1
 -- new crosses a module may need to reach the tree
 local MAX_PATH = 4
 -- footprint estimate: grid cells per module cell
 local FILL = 1.6
 -- a box may reach this share of a cell past its face
 local EPS = 0.05
--- occupancy cells per cross cell along each axis: modules pack at u / R, crosses keep whole cells
-grid.subdivide = 1
+-- occupancy cells per cross cell along each axis: modules pack at u / R, crosses keep whole cells; a layout the
+-- editor refuses at R 2 is packed again at R 1 (sab.Tick)
+grid.subdivide = 2
 -- a new cross costs as much as a floor: fewer connectors over a denser block
 local W_TOP, W_COST, W_CONTACT, W_CENTRE = 1000, 1000, 6, 1
 -- eval override for layout experiments: a list of new-cross costs, each packed
@@ -66,8 +71,8 @@ end
 -- Every pose of a macro on a cross at the origin: the occupancy cells it fills (cross cell n holds occupancy
 -- cells R*n .. R*n+R-1), the cross cells they lie in, and its other connections that end on a cross position of
 -- the grid (a port carries a cross or a module there).
-local function poses(g, macro)
-  local geo, list = sab.geo, {}
+local function poses(g, macro, dedupe)
+  local geo, list, seen = sab.geo, {}, {}
   local conns, size = sab.macroConns[macro], sab.sizes[macro]
   if not (conns and size) then return list end
   local u, a, R = g.u, g.a, g.R or 1
@@ -124,10 +129,26 @@ local function poses(g, macro)
             end
           end
           local sx, sy, sz = hi[1] - lo[1] + 1, hi[2] - lo[2] + 1, hi[3] - lo[3] + 1
-          -- top and outer faces, in cross cell units, bound the score before any cell is checked
-          list[#list + 1] = { conn = c.name, di = di, roll = roll, pos = p, rows = pose.rows, cells = cells, ccells = ccells, ports = ports,
-            span = { chi[1] - clo[1] + 1, chi[2] - clo[2] + 1, chi[3] - clo[3] + 1 }, lo = lo, hi = hi, tlo = tlo, thi = thi,
-            ftlo = ftlo, fthi = fthi, box = box, top = hi[2] / R, faces = 2 * (sx * sy + sy * sz + sx * sz) / (R * R) }
+          -- dedupe: a roll or mirrored connection of a symmetric module repeats a pose, evaluate sees the same cells,
+          -- box and ports (the dock stage keeps them, its zones turn with the rows)
+          local sig
+          if dedupe then
+            local parts, keys = { tostring(di) }, {}
+            for i = 1, 3 do
+              parts[#parts + 1] = string.format("%d %d %d %d %d %d %d %d", lo[i], hi[i], tlo[i], thi[i], ftlo[i], fthi[i],
+                math.floor(box.min[i] * 100 + 0.5), math.floor(box.max[i] * 100 + 0.5))
+            end
+            for _, pt in ipairs(ports) do keys[#keys + 1] = pt.node[1] .. "," .. pt.node[2] .. "," .. pt.node[3] .. "," .. pt.di end
+            table.sort(keys)
+            sig = table.concat(parts, "|") .. "#" .. table.concat(keys, ";")
+          end
+          if not (sig and seen[sig]) then
+            if sig then seen[sig] = true end
+            -- top and outer faces, in cross cell units, bound the score before any cell is checked
+            list[#list + 1] = { conn = c.name, di = di, roll = roll, pos = p, rows = pose.rows, cells = cells, ccells = ccells, ports = ports,
+              span = { chi[1] - clo[1] + 1, chi[2] - clo[2] + 1, chi[3] - clo[3] + 1 }, lo = lo, hi = hi, tlo = tlo, thi = thi,
+              ftlo = ftlo, fthi = fthi, box = box, top = hi[2] / R, faces = 2 * (sx * sy + sy * sz + sx * sz) / (R * R) }
+          end
         end
       end
     end
@@ -205,7 +226,7 @@ end
 ---@async
 local function work(g, n)
   g.work = g.work + n
-  if g.work > grid.checksPerFrame then
+  if g.work > grid.checksPerFrame * grid.boost then
     g.work = 0
     g.frames = (g.frames or 0) + 1
     yield()
@@ -658,11 +679,23 @@ end
 ---@async
 local function place(g, rec, wide)
   if not rec.byDi then
-    rec.byDi, rec.bound, rec.minTop, rec.banned = { {}, {}, {}, {}, {}, {} }, math.huge, math.huge, {}
+    rec.byDi, rec.bound, rec.minTop, rec.banned, rec.union = { {}, {}, {}, {}, {}, {} }, math.huge, math.huge, {}, {}
     for _, pose in ipairs(rec.poses) do
       table.insert(rec.byDi[pose.di], pose)
       rec.minTop = math.min(rec.minTop, pose.top)
       rec.bound = math.min(rec.bound, -pose.faces * W_CONTACT)
+      -- per arm direction: the box all its poses lie in, the fewest cells one needs, whether each covers the cell facing the arm
+      local d = DIRS[pose.di]
+      local covers = g.R == 1
+      for i = 1, 3 do covers = covers and pose.lo[i] <= d[i] and d[i] <= pose.hi[i] end
+      local U = rec.union[pose.di]
+      if not U then
+        U = { lo = { pose.lo[1], pose.lo[2], pose.lo[3] }, hi = { pose.hi[1], pose.hi[2], pose.hi[3] }, vmin = #pose.cells, facing = covers }
+        rec.union[pose.di] = U
+      end
+      for i = 1, 3 do U.lo[i], U.hi[i] = math.min(U.lo[i], pose.lo[i]), math.max(U.hi[i], pose.hi[i]) end
+      if #pose.cells < U.vmin then U.vmin = #pose.cells end
+      U.facing = U.facing and covers
     end
   end
   local best
@@ -670,6 +703,20 @@ local function place(g, rec, wide)
   local seq = rec.item.seq or math.huge
   ---@async
   local function consider(kind, node, di, cost, extra)
+    -- no pose on this arm fits when the cell facing it is taken (all cover it) or the free cells in the box of all
+    -- its poses are fewer than the smallest pose needs
+    local U = rec.union[di]
+    if U then
+      local d = DIRS[di]
+      if U.facing and not free(g, node[1] + d[1], node[2] + d[2], node[3] + d[3]) then return end
+      local R = g.R
+      local x0, x1 = math.max(0, R * node[1] + U.lo[1]), math.min(g.fx - 1, R * node[1] + U.hi[1])
+      local y0, y1 = math.max(0, R * node[2] + U.lo[2]), R * node[2] + U.hi[2]
+      local z0, z1 = math.max(0, R * node[3] + U.lo[3]), math.min(g.fz - 1, R * node[3] + U.hi[3])
+      if x0 > x1 or y0 > y1 or z0 > z1 then return end
+      work(g, 1)
+      if (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) - boxSum(g, x0, x1, y0, y1, z0, z1) < U.vmin then return end
+    end
     for _, pose in ipairs(rec.byDi[di]) do
       if (not best or topCost(g, node[2] + pose.top) + cost * W_COST - pose.faces * W_CONTACT < best.score)
           and not (banned[pose] and banned[pose][key(g, node[1], node[2], node[3])]) then
@@ -1382,6 +1429,12 @@ local function docks(g, run, defer)
       end
     end
     if #list == 0 then return D end
+    -- a layout already past the plot cap on an axis leaves the docks nothing to grow from; OfferPlot refuses it
+    local A = D.all
+    if not grownKm3(D, A.min[1], A.min[2], A.min[3], A.max[1], A.max[2], A.max[3]) then
+      g.dockFailed, g.dockTotal = #list, #list
+      return D
+    end
     S = { D = D, list = list, next = 1, placed = 0, dropped = 0, failed = 0, frames = 0, seconds = 0 }
     g.dockStage = S
   end
@@ -1556,7 +1609,8 @@ local function findPlace(g, rec)
       return nil
     elseif g.floor <= g.top + g.tallest then
       checked = true
-      g.floor = g.floor + 1
+      -- up to a seed block's top the band's upper edge stays, a higher floor only narrows it: nothing new to find
+      g.floor = math.max(g.floor, g.free) + 1
     else
       g.floor = floor
       return nil
@@ -1957,13 +2011,14 @@ end
 local function pack(run)
   local kit, started = run.kit, getElapsedTime()
   local probe = { u = kit.cell, a = kit.arms, R = run.subdivide or grid.subdivide }
+  run.packR = probe.R
   local base, cells, spanXZ, tallest, byMacro = {}, 0, 1, 1, {}
   for i, it in ipairs(run.items) do
     it.gridRec, it.seq = nil, i
     if not it.isConnector and not it.column and not IsMacroClass(it.macro, "buildmodule") then
       local m = byMacro[it.macro]
       if not m then
-        local ps, minCells, minSpan = poses(probe, it.macro), math.huge, math.huge
+        local ps, minCells, minSpan = poses(probe, it.macro, true), math.huge, math.huge
         for _, p in ipairs(ps) do
           local v = #p.cells / (probe.R * probe.R * probe.R)
           if v < minCells then minCells = v end
@@ -2094,7 +2149,19 @@ function grid.Start(run)
 end
 
 function grid.Step(run)
+  local now = getElapsedTime()
+  local n = (run.stepN or 0) + 1
+  -- the frame length seen now is that of the previous frame; after a base-budget frame it tells the background
+  -- (the first frame also carries the run's start and the panel redraw: it is never measured)
+  local function probe(i) return i <= 2 or (i - 1) % PROBE_EVERY == 0 end
+  if n >= 3 and probe(n - 1) then
+    run.background = now - run.stepAt > BACKGROUND_DT
+    sab.Trace("grid: a base-budget frame took %.3f s, %s", now - run.stepAt, run.background and "background" or "foreground")
+  end
+  run.stepN, run.stepAt = n, now
+  grid.boost = not probe(n) and run.background and BOOST or 1
   local ok, err = coroutine.resume(run.packer, run)
+  grid.boost = 1
   if not ok then
     sab.Error("grid layout failed: %s", tostring(err))
     sab.StopRun("grid layout failed")

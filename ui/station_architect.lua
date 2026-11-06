@@ -105,14 +105,31 @@ end
 -- half-extents about a centre, metres, from the Extra Data API; nil when it cannot answer
 
 setmetatable(sab.sizes, { __index = function(sizes, macro)
-  local box = ExtraData and ExtraData.GetMacroDataEx(macro, "boundingbox")
-  if not box then return nil end
+  if not ExtraData then return nil end
+  local box = ExtraData.GetMacroDataEx(macro, "boundingbox")
+  if not box then
+    sizes[macro] = false
+    return nil
+  end
   local size = { maxX = box.max[1], maxY = box.max[2], maxZ = box.max[3], cX = box.centre[1], cY = box.centre[2], cZ = box.centre[3] }
   sizes[macro] = size
   return size
 end })
 
 -- *** plan read-back ***
+
+local function planEntry(e)
+  return {
+    idx = tonumber(e.idx),
+    macro = ffi.string(e.macroid),
+    component = ConvertStringTo64Bit(tostring(e.componentid)),
+    offset = { x = e.offset.x, y = e.offset.y, z = e.offset.z, yaw = e.offset.yaw, pitch = e.offset.pitch, roll = e.offset.roll },
+    connection = ffi.string(e.connectionid),
+    predecessorIdx = tonumber(e.predecessoridx),
+    predecessorConnection = ffi.string(e.predecessorconnectionid),
+    isFixed = e.isfixed,
+  }
+end
 
 -- The plan as the map holds it: one entry per module, map order.
 function sab.ReadPlan()
@@ -122,20 +139,18 @@ function sab.ReadPlan()
   if n == 0 then return plan end
   local buf = ffi.new(PLAN_ENTRIES, n)
   n = C.GetBuildMapConstructionPlan(menu.holomap, menu.container, false, buf, n)
-  for i = 0, tonumber(n) - 1 do
-    local e = buf[i]
-    plan[#plan + 1] = {
-      idx = tonumber(e.idx),
-      macro = ffi.string(e.macroid),
-      component = ConvertStringTo64Bit(tostring(e.componentid)),
-      offset = { x = e.offset.x, y = e.offset.y, z = e.offset.z, yaw = e.offset.yaw, pitch = e.offset.pitch, roll = e.offset.roll },
-      connection = ffi.string(e.connectionid),
-      predecessorIdx = tonumber(e.predecessoridx),
-      predecessorConnection = ffi.string(e.predecessorconnectionid),
-      isFixed = e.isfixed,
-    }
-  end
+  for i = 0, tonumber(n) - 1 do plan[#plan + 1] = planEntry(buf[i]) end
   return plan
+end
+
+-- The plan's last entry, the one just added; nil for an empty plan.
+function sab.ReadPlanLast()
+  local menu = sab.menu
+  local n = C.GetNumBuildMapConstructionPlan(menu.holomap, false)
+  if n == 0 then return nil end
+  local buf = ffi.new(PLAN_ENTRIES, n)
+  n = tonumber(C.GetBuildMapConstructionPlan(menu.holomap, menu.container, false, buf, n))
+  return n > 0 and planEntry(buf[n - 1]) or nil
 end
 
 -- The default loadout the vanilla drop handler gives a new module (onRenderTargetMouseUp); nothing when the
@@ -512,7 +527,7 @@ function sab.Connections(name)
   for _, c in ipairs(ExtraData.GetMacroDataEx(name, "snapconnections") or {}) do
     list[#list + 1] = { name = c.name, pos = c.position, dir = c.direction, rows = c.rows }
   end
-  if #list > 0 then sab.snapCache[name] = list end
+  sab.snapCache[name] = list
   return list
 end
 
@@ -781,8 +796,7 @@ local function finishPlacement(run, item)
   end
   if (item.validRetries or 0) > 0 then sab.Debug("%s: %d retries for the editor's valid flag", item.macro, item.validRetries) end
   if count > run.countBefore then
-    local plan = sab.ReadPlan()
-    local added = plan[#plan]
+    local added = sab.ReadPlanLast()
     menu.floatingNewModule = nil
     -- not this one module: the player changed the plan, Tick stops the run
     if count ~= run.countBefore + 1 or added.macro ~= item.macro then return false, true end
@@ -882,7 +896,7 @@ local zonesOf = {}
 -- The approach zones (exclusionzones, Extra Data API) of a macro through a pose, as boxes with their direction.
 local function zoneBoxes(macro, pos, rows)
   local list = {}
-  if not zonesOf[macro] then zonesOf[macro] = ExtraData and ExtraData.GetMacroDataEx(macro, "exclusionzones") end
+  if zonesOf[macro] == nil and ExtraData then zonesOf[macro] = ExtraData.GetMacroDataEx(macro, "exclusionzones") or false end
   for _, z in ipairs(zonesOf[macro] or {}) do
     local m = mulRows(z.rows, rows)
     local at, mid = rotate(z.position, rows), rotate(z.centre, m)
@@ -1749,8 +1763,7 @@ local function tryCandidates(run, item, editor)
           C.AddFloatingSequenceToConstructionPlan(menu.holomap)
           local count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
           if count > run.countBefore then
-            local plan = sab.ReadPlan()
-            local added = plan[#plan]
+            local added = sab.ReadPlanLast()
             menu.floatingNewModule = nil
             if count ~= run.countBefore + 1 or added.macro ~= item.macro then return "changed" end
             run.planCount = count
@@ -1968,7 +1981,9 @@ function sab.StartBill(bill, opts)
     local centre = C.GetBuildPlotCenterOffset(menu.container)
     items[1].pack, items[1].free, items[1].pos = nil, true, { x = centre.x, y = centre.y, z = centre.z }
   end
-  return sab.StartRun(items, connector, turns > 0 and turns or nil, gridRoute, opts)
+  local started = sab.StartRun(items, connector, turns > 0 and turns or nil, gridRoute, opts)
+  if started and sab.run then sab.run.restartBill = { bill = bill, opts = opts } end
+  return started
 end
 
 -- gridRoute: read every module's connection geometry too, then pack on the grid (StartBill).
@@ -1995,7 +2010,7 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
   end
   local run = { items = items, next = 1, phase = "begin", placed = 0, failed = 0, connector = connector, turns = turns,
     stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, moduleRace = opts and opts.moduleRace,
-    started = getElapsedTime(), frames = 0, searchFrames = 0, searches = 0 }
+    subdivide = opts and opts.subdivide, started = getElapsedTime(), frames = 0, searchFrames = 0, searches = 0 }
   readPlanState(run, editor)
   if engine == false then return false end
   run.planCount = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
@@ -2089,12 +2104,24 @@ local function restartPlacement(run)
   return true
 end
 
+-- A layout packed on the finer cell that the editor refuses: the run's entries out, the same bill packed again
+-- on the 400 m cell.
+local function fallBackToCoarse(run, item)
+  local rb = run.restartBill
+  removePlaced(run)
+  run.placed = 0
+  sab.StopRun("the layout is packed again on the 400 m cell")
+  local opts = {}
+  for k, v in pairs(rb.opts or {}) do opts[k] = v end
+  opts.subdivide = 1
+  if not sab.StartBill(rb.bill, opts) then sab.lastRun.failedTwice = GetMacroData(item.macro, "name") end
+end
+
 -- One step per menu update.
 -- A pair or free item that landed joins the run's boxes and free connections, as a pack item does in addPlacement.
 local function registerEntry(run, item)
   local editor = sab.Editor()
-  local plan = sab.ReadPlan()
-  local added = plan[#plan]
+  local added = sab.ReadPlanLast()
   if not (editor and added) then return end
   local pose = checkedPose(editor, added)
   if not pose then return end
@@ -2169,6 +2196,12 @@ function sab.Tick(chained)
       item.floatRetries, item.validRetries, item.validTrail = (item.floatRetries or 0) + 1, nil, nil
       run.phase = "begin"
       sab.Debug("%s failed, again from a new float (%d of %d)", item.macro, item.floatRetries, FLOAT_RETRIES)
+      return
+    end
+    if (run.packR or 1) > 1 and run.restartBill then
+      sab.Debug("%s: the editor refuses the layout on the %d x finer cell, the %d placed entries come out, the bill is packed again on the 400 m cell",
+        item.macro, run.packR, run.placed)
+      fallBackToCoarse(run, item)
       return
     end
     -- the editor refuses some valid placements for a while: everything out and once more from the start
@@ -3454,6 +3487,8 @@ local function hookMapMenu()
   local cleanup = menu.cleanup
   menu.cleanup = function(...)
     sab.dialog, sab.dialogDirty, sab.dialogFrame, sab.dialogTables = nil, nil, nil, nil
+    if sab.formTables then sab.formTables.dialog = nil end
+    sab.topRows.dialog = nil
     if sab.pendingTarget and not sab.pendingTarget.station then sab.pendingTarget = nil end
     return cleanup(...)
   end
@@ -3537,6 +3572,7 @@ local function hookMenu()
   local cleanup = menu.cleanup
   menu.cleanup = function(...)
     sab.run, sab.lastRun, sab.panelDirty, sab.panelTables, sab.panelFrame = nil, nil, nil, nil, nil
+    sab.formTables, sab.topRows = nil, {}
     sab.expanded = false
     sab.target = defaultTarget()
     return cleanup(...)

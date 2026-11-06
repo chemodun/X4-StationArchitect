@@ -289,6 +289,14 @@ local function frameMemo(name)
   return memo
 end
 
+-- The build menu's plan, read once a frame unless its entry count changed
+local function readPlan()
+  local memo, menu = frameMemo("plan"), sab.menu
+  local n = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
+  if memo.n ~= n then memo.n, memo.plan = n, sab.ReadPlan() end
+  return memo.plan
+end
+
 -- *** picking modules ***
 
 -- 0 the wanted race, 1 generic, 2 another race; every module 0 without a wanted race
@@ -679,7 +687,7 @@ local function stationMacros(station)
   local macros = {}
   local menu = sab.menu
   if menu and menu.shown and menu.holomap ~= 0 and menu.container == station then
-    for _, e in ipairs(sab.ReadPlan()) do macros[#macros + 1] = e.macro end
+    for _, e in ipairs(readPlan()) do macros[#macros + 1] = e.macro end
   else
     local n = C.GetNumStationModules(station, true, false)
     local buf = ffi.new(IDS, n)
@@ -1538,7 +1546,7 @@ function planner.Current(station, ware)
     end
   end
   if inMenu then
-    for _, e in ipairs(sab.ReadPlan()) do
+    for _, e in ipairs(readPlan()) do
       local planned = e.component == 0 or IsComponentConstruction(e.component)
       count(e.macro, not planned)
       if planned then
