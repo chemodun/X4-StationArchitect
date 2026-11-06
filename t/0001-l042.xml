@@ -15,12 +15,8 @@
       <t id="105">Optimalizovat parcelu</t>
       <t id="107">Poslední běh: %s umístěno, %s selhalo</t>
       <t id="108">Editor není v této verzi hry dostupný</t>
-      <t id="109">Cíl</t>
       <t id="110">Soupis</t>
-      <t id="111">Vyrobit zboží</t>
-      <t id="112">Stavět nebo udržovat lodě</t>
       <t id="114">Zboží</t>
-      <t id="117">Stavební modul</t>
       <t id="119">Celý cyklus</t>
       <t id="120">Pracovní síla</t>
       <t id="121">Soběstačná pracovní síla</t>
@@ -56,8 +52,6 @@
       <t id="157">Uvolněte na nejnižší hodnotě pro odebrání tohoto modulu</t>
       <t id="158">Lodě %s za hodinu \(nyní %s\)</t>
       <t id="159">%s \(nyní %s\)</t>
-      <t id="160">Žádný vlastněný stavební modul nestaví tuto velikost</t>
-      <t id="161">Údržbové doky: %s</t>
       <t id="162">Doplnění zásob %s za hodinu \(nyní %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>

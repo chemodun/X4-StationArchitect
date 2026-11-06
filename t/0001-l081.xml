@@ -15,12 +15,8 @@
       <t id="105">プロットを最適化</t>
       <t id="107">前回の実行: 配置 %s、失敗 %s</t>
       <t id="108">このゲームビルドではエディターにアクセスできません</t>
-      <t id="109">目標</t>
       <t id="110">リスト</t>
-      <t id="111">ウェアを生産</t>
-      <t id="112">艦船を建造または維持</t>
       <t id="114">ウェア</t>
-      <t id="117">建造モジュール</t>
       <t id="119">全工程</t>
       <t id="120">労働力</t>
       <t id="121">労働力の自給</t>
@@ -56,8 +52,6 @@
       <t id="157">最小値まで下げると、このモジュールを削除します</t>
       <t id="158">%s 艦船/時間（現在 %s）</t>
       <t id="159">%s（現在 %s）</t>
-      <t id="160">このサイズを建造できる所有建造モジュールがありません</t>
-      <t id="161">整備ベイ: %s</t>
       <t id="162">%s 再補給/時間（現在 %s）</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>

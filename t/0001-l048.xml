@@ -15,12 +15,8 @@
       <t id="105">Optymalizuj działkę</t>
       <t id="107">Ostatnie uruchomienie: %s umieszczono, %s nieudanych</t>
       <t id="108">Edytor jest niedostępny w tej wersji gry</t>
-      <t id="109">Cel</t>
       <t id="110">Zestawienie</t>
-      <t id="111">Wyprodukuj towar</t>
-      <t id="112">Buduj lub utrzymuj statki</t>
       <t id="114">Towar</t>
-      <t id="117">Moduł budowy</t>
       <t id="119">Pełny cykl</t>
       <t id="120">Siła robocza</t>
       <t id="121">Samowystarczalna siła robocza</t>
@@ -56,8 +52,6 @@
       <t id="157">Zwolnij przy najniższej wartości, aby usunąć ten moduł</t>
       <t id="158">Statki %s na godzinę \(teraz %s\)</t>
       <t id="159">%s \(teraz %s\)</t>
-      <t id="160">Żaden posiadany moduł budowy nie buduje tego rozmiaru</t>
-      <t id="161">Doki serwisowe: %s</t>
       <t id="162">Zaopatrzenia %s na godzinę \(teraz %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>

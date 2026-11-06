@@ -15,12 +15,8 @@
       <t id="105">Araziyi optimize et</t>
       <t id="107">Son çalıştırma: %s yerleştirildi, %s başarısız</t>
       <t id="108">Düzenleyiciye bu oyun sürümünde erişilemiyor</t>
-      <t id="109">Hedef</t>
       <t id="110">Liste</t>
-      <t id="111">Mal üret</t>
-      <t id="112">Gemi inşa et veya sürdür</t>
       <t id="114">Mal</t>
-      <t id="117">İnşaat modülü</t>
       <t id="119">Tam döngü</t>
       <t id="120">İş gücü</t>
       <t id="121">Kendine yeten iş gücü</t>
@@ -56,8 +52,6 @@
       <t id="157">Bu modülü kaldırmak için en düşük değerde bırakın</t>
       <t id="158">Saat başına %s gemi \(şu an %s\)</t>
       <t id="159">%s \(şu an %s\)</t>
-      <t id="160">Bu boyutu inşa eden sahip olunan inşaat modülü yok</t>
-      <t id="161">Bakım bölmeleri: %s</t>
       <t id="162">Saat başına %s ikmal \(şu an %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>

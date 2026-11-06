@@ -15,12 +15,8 @@
       <t id="105">Otimizar terreno</t>
       <t id="107">Última execução: %s colocados, %s falhos</t>
       <t id="108">O editor não está acessível nesta versão do jogo</t>
-      <t id="109">Alvo</t>
       <t id="110">Lista</t>
-      <t id="111">Fabricar um produto</t>
-      <t id="112">Construir ou manter naves</t>
       <t id="114">Produto</t>
-      <t id="117">Módulo de construção</t>
       <t id="119">Ciclo completo</t>
       <t id="120">Força de trabalho</t>
       <t id="121">Força de trabalho autossuficiente</t>
@@ -56,8 +52,6 @@
       <t id="157">Solte no menor valor para remover este módulo</t>
       <t id="158">Naves %s por hora \(agora %s\)</t>
       <t id="159">%s \(agora %s\)</t>
-      <t id="160">Nenhum módulo de construção próprio constrói este tamanho</t>
-      <t id="161">Baias de manutenção: %s</t>
       <t id="162">Reposições %s por hora \(agora %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>

@@ -15,12 +15,8 @@
       <t id="105">Baugrund optimieren</t>
       <t id="107">Letzter Lauf: %s platziert, %s fehlgeschlagen</t>
       <t id="108">Der Editor ist in dieser Spielversion nicht erreichbar</t>
-      <t id="109">Ziel</t>
       <t id="110">Stückliste</t>
-      <t id="111">Eine Ware produzieren</t>
-      <t id="112">Schiffe bauen oder instand halten</t>
       <t id="114">Ware</t>
-      <t id="117">Baumodul</t>
       <t id="119">Voller Zyklus</t>
       <t id="120">Arbeitskräfte</t>
       <t id="121">Autarke Arbeitskräfte</t>
@@ -56,8 +52,6 @@
       <t id="157">Auf den niedrigsten Wert loslassen, um dieses Modul zu entfernen</t>
       <t id="158">%s-Schiffe pro Stunde \(jetzt %s\)</t>
       <t id="159">%s \(jetzt %s\)</t>
-      <t id="160">Kein eigenes Baumodul baut diese Größe</t>
-      <t id="161">Wartungsbuchten: %s</t>
       <t id="162">%s-Aufstockungen pro Stunde \(jetzt %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>

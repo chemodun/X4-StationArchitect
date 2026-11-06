@@ -1224,9 +1224,11 @@ end
 
 sab.macroConns = sab.macroConns or {}
 
+-- The first maker race; nil for a generic macro (an empty list).
 local function raceOf(macro)
   local races = GetMacroData(macro, "makerraceid")
-  return type(races) == "table" and races[1] or races
+  if type(races) == "table" then return races[1] end
+  return races ~= "" and races or nil
 end
 
 local function armOf(conns, dir)
@@ -1249,31 +1251,41 @@ local function strutOf(macro, conns)
   return { length = len, vertical = math.abs(b.dir[2]) > 0.9, near = a.name, far = b.name }
 end
 
--- The owned connection modules as a kit: the cross with the most arms, every strut length; the plan's race first.
-local function connectorKit(race)
+-- A cross's arm lengths per axis (a Terran cross is 400 x 200 x 400), its longest arm (for the spurs), its cell.
+local function crossShape(conns)
+  ---@type number[]
+  local arms = { 0, 0, 0 }
+  local arm, cell = 0, {}
+  for _, c in ipairs(conns) do
+    local len = math.abs(dot(c.pos, c.dir))
+    local axis = math.abs(c.dir[1]) > 0.9 and 1 or math.abs(c.dir[2]) > 0.9 and 2 or 3
+    arm, arms[axis] = math.max(arm, len), math.max(arms[axis] or 0, len)
+  end
+  for i = 1, 3 do
+    if arms[i] == 0 then arms[i] = arm end
+    cell[i] = 2 * arms[i]
+  end
+  return arms, arm, cell
+end
+
+-- The owned connection modules as a kit: the cross only first, then one of race (nil: none), then the smallest
+-- cell (the denser pack), the most arms, the name; every strut length.
+local function connectorKit(race, only)
   local kit, seen, seenV = { struts = {}, lengths = {}, vLengths = {} }, {}, {}
   for _, m in ipairs(sab.menu.modules and sab.menu.modules.moduletypes_other or {}) do
     local conns = sab.macroConns[m]
     if conns and IsMacroClass(m, "connectionmodule") then
-      local tier = raceOf(m) == race and 0 or 1
+      local tier = (m == only and -1) or ((race ~= nil and raceOf(m) == race) and 0 or 1)
       if #conns >= 6 then
-        local cur = kit.cross
-        if not cur or tier < cur.tier or (tier == cur.tier and (#conns > #cur.conns or (#conns == #cur.conns and m < cur.macro))) then
-          kit.cross = { macro = m, tier = tier, conns = conns }
-          -- arm lengths per axis (a Terran cross is 400 x 200 x 400), the longest for the spurs
-          ---@type number[]
-          local arms = { 0, 0, 0 }
-          kit.arm = 0
-          for _, c in ipairs(conns) do
-            local len = math.abs(dot(c.pos, c.dir))
-            local axis = math.abs(c.dir[1]) > 0.9 and 1 or math.abs(c.dir[2]) > 0.9 and 2 or 3
-            kit.arm, arms[axis] = math.max(kit.arm, len), math.max(arms[axis] or 0, len)
-          end
-          kit.arms, kit.cell = arms, {}
-          for i = 1, 3 do
-            if arms[i] == 0 then arms[i] = kit.arm end
-            kit.cell[i] = 2 * arms[i]
-          end
+        local arms, arm, cell = crossShape(conns)
+        local volume, cur = math.floor(cell[1] + 0.5) * math.floor(cell[2] + 0.5) * math.floor(cell[3] + 0.5), kit.cross
+        local better = not cur or tier < cur.tier
+        if cur and tier == cur.tier then
+          better = volume < cur.volume or (volume == cur.volume and (#conns > #cur.conns or (#conns == #cur.conns and m < cur.macro)))
+        end
+        if better then
+          kit.cross = { macro = m, tier = tier, conns = conns, volume = volume }
+          kit.arms, kit.arm, kit.cell = arms, arm, cell
         end
       else
         local s = strutOf(m, conns)
@@ -1441,12 +1453,12 @@ local function rootPier(run)
     if IsMacroClass(it.macro, "pier") and (not best or approaches(it.macro) < approaches(best.macro)) then best = it end
   end
   if best then return best end
-  local race = run.moduleRace or (run.items[1] and raceOf(run.items[1].macro))
+  local race = run.kitRace
   local pick, pickKey
   for _, m in ipairs(sab.menu.modules and sab.menu.modules.moduletypes_dock or {}) do
     if IsMacroClass(m, "pier") then
       local bays = #(ExtraData.GetMacroDataEx(m, "dockingbays") or {})
-      local k = { raceOf(m) == race and 0 or 1, approaches(m), bays <= sab.planner.bigPier and -bays or bays }
+      local k = { (race ~= nil and raceOf(m) == race) and 0 or 1, approaches(m), bays <= sab.planner.bigPier and -bays or bays }
       local better = not pickKey
       for i = 1, pickKey and #k or 0 do
         if k[i] ~= pickKey[i] then
@@ -1490,7 +1502,7 @@ local function reseed(run)
   for m in pairs(counts) do order[#order + 1] = m end
   table.sort(order, function(a, b) return counts[a] > counts[b] or (counts[a] == counts[b] and a < b) end)
   for _, m in ipairs(order) do
-    local kit = connectorKit(raceOf(m))
+    local kit = connectorKit(raceOf(m), m)
     if kit.cross and kit.cross.macro == m then
       run.kit = kit
       if sab.grid.Seed(run) then
@@ -1507,17 +1519,20 @@ end
 -- the plot centre.
 local function finishLayout(run)
   local menu = sab.menu
-  -- the kit's race: the one holding most of the block's volume (docks hang outside it), whatever the order
+  -- the kit's race: the most of the block's volume; docks hang outside it, a storage's race follows its capacity
   local lead, volumes = nil, {}
   for _, it in ipairs(run.items) do
-    local race = not it.column and raceOf(it.macro)
+    local race = not it.column and not IsMacroClass(it.macro, "storage") and raceOf(it.macro)
     if race then
       volumes[race] = (volumes[race] or 0) + (it.volume or 0)
       if not lead or volumes[race] > volumes[lead] then lead = race end
     end
   end
-  run.kit = connectorKit(run.moduleRace or lead or (run.items[1] and raceOf(run.items[1].macro)) or nil)
+  for race, v in pairs(volumes) do sab.Trace("kit vote: %s %.2f km3", race, 8 * v / 1e9) end
+  run.kitRace = run.moduleRace or lead
+  run.kit = connectorKit(run.kitRace)
   if not run.kit.cross then run.kit = nil end
+  if run.kit then sab.Debug("connection kit: %s (%s)", run.kit.cross.macro, run.kitRace or "no race leads") end
   if not run.gridRoute then
     run.phase = "begin"
     return

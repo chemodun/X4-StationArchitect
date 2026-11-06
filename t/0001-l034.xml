@@ -15,12 +15,8 @@
       <t id="105">Optimizar parcela</t>
       <t id="107">Última ejecución: %s colocados, %s fallidos</t>
       <t id="108">El editor no es accesible en esta versión del juego</t>
-      <t id="109">Objetivo</t>
       <t id="110">Lista</t>
-      <t id="111">Producir una mercancía</t>
-      <t id="112">Construir o mantener naves</t>
       <t id="114">Mercancía</t>
-      <t id="117">Módulo de construcción</t>
       <t id="119">Ciclo completo</t>
       <t id="120">Personal</t>
       <t id="121">Personal autosuficiente</t>
@@ -56,8 +52,6 @@
       <t id="157">Suelta en el valor mínimo para quitar este módulo</t>
       <t id="158">Naves %s por hora \(ahora %s\)</t>
       <t id="159">%s \(ahora %s\)</t>
-      <t id="160">Ningún módulo de construcción propio construye este tamaño</t>
-      <t id="161">Bahías de mantenimiento: %s</t>
       <t id="162">Reabastecimientos %s por hora \(ahora %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>

@@ -15,12 +15,8 @@
       <t id="105">Ottimizza lotto</t>
       <t id="107">Ultima esecuzione: %s posizionati, %s falliti</t>
       <t id="108">L'editor non è raggiungibile in questa versione del gioco</t>
-      <t id="109">Obiettivo</t>
       <t id="110">Distinta</t>
-      <t id="111">Produci una merce</t>
-      <t id="112">Costruisci o mantieni navi</t>
       <t id="114">Merce</t>
-      <t id="117">Modulo di costruzione</t>
       <t id="119">Ciclo completo</t>
       <t id="120">Forza lavoro</t>
       <t id="121">Forza lavoro autosufficiente</t>
@@ -56,8 +52,6 @@
       <t id="157">Rilascia al valore minimo per rimuovere questo modulo</t>
       <t id="158">Navi %s all'ora \(ora %s\)</t>
       <t id="159">%s \(ora %s\)</t>
-      <t id="160">Nessun modulo di costruzione posseduto costruisce questa taglia</t>
-      <t id="161">Baie di manutenzione: %s</t>
       <t id="162">Rifornimenti %s all'ora \(ora %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>

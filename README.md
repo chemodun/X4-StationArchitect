@@ -65,7 +65,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 
 1. Pick a ware and press **Add a target**. Each added target gets a slider for its number of production modules, with the ware's net per hour now and planned; on an existing station a slider starts at what the station already has, and releasing it at that lowest value removes the target. Modules with the same production count as one kind. A ware your blueprints make with several kinds (another race's recipe, a faster modded module) is listed once per kind, as "Ware / Module", and each such target counts only its own kind; with a **Modules race** set, the list keeps that race's kinds.
 2. Set the options:
-   - **Modules race**: the race whose modules and ship hulls the plan prefers; **Any** chooses from all your blueprints. Habitats, and under **Self-sufficient workforce** the modules that feed them, follow **Workforce race**.
+   - **Modules race**: the race whose modules and ship hulls the plan prefers; **Any** chooses from all your blueprints. Habitats, and under **Self-sufficient workforce** the modules that feed them, follow **Workforce race**. A new station's connection structures follow **Modules race**; under **Any**, the race holding most of the planned habitats and production modules, or your smallest connection structures when those modules are all generic.
    - **Full cycle**: every intermediate ware down to raw resources and energy.
    - **Workforce**: habitats for the workforce of the planned modules.
    - **Self-sufficient workforce**: with **Full cycle** and **Workforce**, the food and medicine of that workforce too.
@@ -195,6 +195,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
   - An upgrade planned new habitats for workers the station's habitats had room for
   - Docks and piers with no room within the 20 km plot failed after everything else was placed
   - An upgrade lost the grid layout when most of its new module volume was of another race than its connection structures
+  - A new station's connection structures could follow the race of its storages instead of its habitats and production modules
 
 ### [1.10] - 2026-10-30
 

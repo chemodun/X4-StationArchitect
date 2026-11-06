@@ -15,12 +15,8 @@
       <t id="105">優化規劃區</t>
       <t id="107">上次運行：已放置 %s，失敗 %s</t>
       <t id="108">此遊戲版本無法存取編輯器</t>
-      <t id="109">目標</t>
       <t id="110">清單</t>
-      <t id="111">生產貨物</t>
-      <t id="112">建造或維持飛船</t>
       <t id="114">貨物</t>
-      <t id="117">建造模塊</t>
       <t id="119">完整循環</t>
       <t id="120">勞動力</t>
       <t id="121">勞動力自給自足</t>
@@ -56,8 +52,6 @@
       <t id="157">拖到最低值即可移除此模塊</t>
       <t id="158">%s 飛船每小時（目前 %s）</t>
       <t id="159">%s（目前 %s）</t>
-      <t id="160">沒有擁有的建造模塊能建造此尺寸</t>
-      <t id="161">維護艙：%s</t>
       <t id="162">%s 補給每小時（目前 %s）</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>

@@ -15,12 +15,8 @@
       <t id="105">부지 최적화</t>
       <t id="107">마지막 실행: 배치 %s, 실패 %s</t>
       <t id="108">이 게임 빌드에서는 편집기에 접근할 수 없습니다</t>
-      <t id="109">목표</t>
       <t id="110">목록</t>
-      <t id="111">물품 생산</t>
-      <t id="112">함선 건조 또는 유지</t>
       <t id="114">물품</t>
-      <t id="117">건설 모듈</t>
       <t id="119">전체 사이클</t>
       <t id="120">노동력</t>
       <t id="121">노동력 자급</t>
@@ -56,8 +52,6 @@
       <t id="157">최솟값까지 내리면 이 모듈이 제거됩니다</t>
       <t id="158">%s 함선/시간 \(현재 %s\)</t>
       <t id="159">%s \(현재 %s\)</t>
-      <t id="160">이 크기를 건조하는 보유 건설 모듈이 없습니다</t>
-      <t id="161">정비 베이: %s</t>
       <t id="162">%s 재보급/시간 \(현재 %s\)</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
