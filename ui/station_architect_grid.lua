@@ -16,11 +16,11 @@ local yield = coroutine.yield
 local DIRS = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
 local OPPOSITE = { 2, 1, 4, 3, 6, 5 }
 local ROLLS = { 0, math.pi / 2, math.pi, 3 * math.pi / 2 }
-local CHECKS_PER_FRAME = 150000
+local CHECKS_PER_FRAME = 12000
 grid.checksPerFrame = CHECKS_PER_FRAME
--- a frame over BACKGROUND_DT long at the base budget is the game in the background (a frame costs its floor
+-- two base-budget frames in a row over BACKGROUND_DT long are the game in the background (a frame costs its floor
 -- whatever the Lua does): the budget then grows by BOOST, except every PROBE_EVERY-th frame that measures again
-local BACKGROUND_DT, BOOST, PROBE_EVERY = 0.07, 8, 4
+local BACKGROUND_DT, BOOST, PROBE_EVERY = 0.125, 24, 4
 grid.boost = 1
 -- new crosses a module may need to reach the tree
 local MAX_PATH = 4
@@ -159,13 +159,22 @@ end
 local function key(g, x, y, z) return (y * g.sz + z) * g.sx + x end
 local function fkey(g, x, y, z) return (y * g.fz + z) * g.fx + x end
 
--- The lowest occupancy cell per axis changed in sum s (1 occupancy, 2 crosses, 3 lean) since the sums were rebuilt.
-local function markDirty(g, s, x, y, z)
+-- Per floor, the lowest x and z changed in sum s (1 occupancy, 2 crosses, 3 lean) on floors y0..y1 since the sums
+-- were rebuilt.
+local function markDirty(g, s, x, y0, z, y1)
   local D = g.dirty[s]
   if not D then
-    g.dirty[s] = { math.max(0, x), math.max(0, y), math.max(0, z) }
-  else
-    D[1], D[2], D[3] = math.max(0, math.min(D[1], x)), math.max(0, math.min(D[2], y)), math.max(0, math.min(D[3], z))
+    D = {}
+    g.dirty[s] = D
+  end
+  x, z = math.max(0, x), math.max(0, z)
+  for y = math.max(0, y0), y1 or y0 do
+    local c = D[y]
+    if not c then
+      D[y] = { x, z }
+    else
+      c[1], c[2] = math.min(c[1], x), math.min(c[2], z)
+    end
   end
 end
 
@@ -252,8 +261,8 @@ local function addCross(g, node, parent)
       for z = R * node[3], R * node[3] + R - 1 do g.focc[fkey(g, x, y, z)] = X end
     end
   end
-  markDirty(g, 1, R * node[1], R * node[2], R * node[3])
-  markDirty(g, 2, R * node[1], R * node[2], R * node[3])
+  markDirty(g, 1, R * node[1], R * node[2], R * node[3], R * node[2] + R - 1)
+  markDirty(g, 2, R * node[1], R * node[2], R * node[3], R * node[2] + R - 1)
   if node[2] > g.top then g.top = node[2] end
   return X
 end
@@ -317,46 +326,49 @@ local function pathOf(g, from, node)
   end
 end
 
--- Running sums of occupancy cells, so any box of them is counted in eight lookups. A sum covers the cells below
--- its index on every axis, so after a commit only the sums past their own lowest changed cell (g.dirty) are
--- rebuilt, and the rows the block grew by.
+-- Running sums of occupancy cells per floor, so a box of them is counted in four lookups a floor. A floor's sum
+-- covers the cells below its index on both axes, so after a commit only the floors it touched are rebuilt, from
+-- their own lowest changed cell (g.dirty) on. A floor without a table is empty.
 ---@async
 local function rebuildSums(g)
-  local w, d, h = g.fx + 1, g.fz + 1, g.R * (g.top + g.tallest + 2)
-  local S, CS, LS, oldH = g.sums, g.csums, g.lsums, g.sumH or -1
-  if not S then
-    S, CS, LS, oldH = {}, {}, {}, -1
+  local w, h = g.fx + 1, g.R * (g.top + g.tallest + 2)
+  local fx, fz = g.fx, g.fz
+  if not g.sums then
+    g.sums, g.csums, g.lsums, g.dirty = {}, {}, {}, {}
+    local plane = fx * fz
+    for k, o in pairs(g.focc) do
+      local y = math.floor(k / plane)
+      markDirty(g, 1, 0, y, 0)
+      if o.arms then markDirty(g, 2, 0, y, 0) end
+    end
+    for k in pairs(g.lean) do markDirty(g, 3, 0, math.floor(k / plane), 0) end
   end
   local cells = 0
   -- T over the cells where src holds a value (with field, only one that has it)
-  local fx, fz = g.fx, g.fz
-  local function row(T, src, field, j, i0, k0)
-    for k = k0, fz do
-      for i = i0, fx do
-        local v = 0
-        if i > 0 and j > 0 and k > 0 then
-          local o = src[((j - 1) * fz + k - 1) * fx + i - 1]
-          v = (o and (not field or o[field]) and 1 or 0)
-              + T[(j * d + k) * w + i - 1] + T[((j - 1) * d + k) * w + i] + T[(j * d + k - 1) * w + i]
-              - T[((j - 1) * d + k) * w + i - 1] - T[(j * d + k - 1) * w + i - 1] - T[((j - 1) * d + k - 1) * w + i]
-              + T[((j - 1) * d + k - 1) * w + i - 1]
-        end
-        T[(j * d + k) * w + i] = v
-      end
-    end
-    cells = cells + (fz - k0 + 1) * (fx - i0 + 1)
-  end
-  local sums = { { S, g.focc }, { CS, g.focc, "arms" }, { LS, g.lean } }
+  local sums = { { g.sums, g.focc }, { g.csums, g.focc, "arms" }, { g.lsums, g.lean } }
   for s, t in ipairs(sums) do
-    local D = g.dirty[s]
-    if D then
-      for j = D[2] + 1, math.min(h, oldH) do row(t[1], t[2], t[3], j, D[1] + 1, D[3] + 1) end
+    local T, src, field = t[1], t[2], t[3]
+    for y, c in pairs(g.dirty[s] or NONE) do
+      local P, i0, k0 = T[y], c[1] + 1, c[2] + 1
+      if not P then
+        P, i0, k0 = {}, 0, 0
+        T[y] = P
+      end
+      for k = k0, fz do
+        local at, up = k * w, (k - 1) * w
+        for i = i0, fx do
+          local v = 0
+          if i > 0 and k > 0 then
+            local o = src[(y * fz + k - 1) * fx + i - 1]
+            v = (o and (not field or o[field]) and 1 or 0) + P[at + i - 1] + P[up + i] - P[up + i - 1]
+          end
+          P[at + i] = v
+        end
+      end
+      cells = cells + (fz - k0 + 1) * (fx - i0 + 1)
     end
   end
-  for j = math.max(0, oldH + 1), h do
-    for _, t in ipairs(sums) do row(t[1], t[2], t[3], j, 0, 0) end
-  end
-  g.sums, g.csums, g.lsums, g.sumH, g.dirty = S, CS, LS, h, {}
+  g.sumH, g.dirty = h, {}
   work(g, cells)
 end
 
@@ -364,11 +376,15 @@ end
 -- counts cross cells only (R^3 per cross), g.lsums cells a module box leans into.
 local function boxSum(g, x0, x1, y0, y1, z0, z1, sums)
   if y1 >= g.sumH then y1 = g.sumH - 1 end
-  if y0 > y1 then return 0 end
-  local S, w, d = sums or g.sums, g.fx + 1, g.fz + 1
-  local i1, j1, k1 = x1 + 1, y1 + 1, z1 + 1
-  return S[(j1 * d + k1) * w + i1] - S[(j1 * d + k1) * w + x0] - S[(y0 * d + k1) * w + i1] - S[(j1 * d + z0) * w + i1]
-      + S[(y0 * d + k1) * w + x0] + S[(j1 * d + z0) * w + x0] + S[(y0 * d + z0) * w + i1] - S[(y0 * d + z0) * w + x0]
+  local S, w = sums or g.sums, g.fx + 1
+  local i1, k1 = x1 + 1, z1 + 1
+  local a, b, c, d = k1 * w + i1, k1 * w + x0, z0 * w + i1, z0 * w + x0
+  local n = 0
+  for y = y0, y1 do
+    local P = S[y]
+    if P then n = n + P[a] - P[b] - P[c] + P[d] end
+  end
+  return n
 end
 
 local function inBox(x, y, z, x0, x1, y0, y1, z0, z1)
@@ -491,7 +507,7 @@ local function commit(g, rec, best)
   for _, off in ipairs(pose.cells) do
     g.focc[fkey(g, f[1] + off[1], f[2] + off[2], f[3] + off[3])] = rec
   end
-  markDirty(g, 1, f[1] + pose.lo[1], f[2] + pose.lo[2], f[3] + pose.lo[3])
+  markDirty(g, 1, f[1] + pose.lo[1], f[2] + pose.lo[2], f[3] + pose.lo[3], f[2] + pose.hi[2])
   for _, off in ipairs(pose.ccells) do
     local x, y, z = node[1] + off[1], node[2] + off[2], node[3] + off[3]
     g.occ[key(g, x, y, z)] = g.occ[key(g, x, y, z)] or rec
@@ -2153,9 +2169,11 @@ function grid.Step(run)
   local n = (run.stepN or 0) + 1
   -- the frame length seen now is that of the previous frame; after a base-budget frame it tells the background
   -- (the first frame also carries the run's start and the panel redraw: it is never measured)
-  local function probe(i) return i <= 2 or (i - 1) % PROBE_EVERY == 0 end
+  local function probe(i) return i <= 3 or (i - 1) % PROBE_EVERY == 0 end
   if n >= 3 and probe(n - 1) then
-    run.background = now - run.stepAt > BACKGROUND_DT
+    local slow = now - run.stepAt > BACKGROUND_DT
+    run.background = slow and run.slow == true
+    run.slow = slow
     sab.Trace("grid: a base-budget frame took %.3f s, %s", now - run.stepAt, run.background and "background" or "foreground")
   end
   run.stepN, run.stepAt = n, now
