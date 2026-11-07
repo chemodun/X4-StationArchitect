@@ -164,31 +164,20 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 - Added
   - **Ships** tab: build modules sized by ships per hour and resupplies per hour
   - **Docking** section: dock area and pier count sliders
-  - A module the editor keeps refusing restarts the placement once
   - A warning names a producer that will mostly idle
   - A ware made by several kinds of module is listed once per kind, as "Ware / Module"
 - Changed
   - The Target tab is now the **Wares** tab, in the map dialog too
-  - Modules are placed in turns from the bottom up, so the station works from its first turn
-  - A new station grows from its first pier
-  - Every turn ends with the dock areas and piers its trade needs
-  - Habitats come in the later turns
+  - Modules are placed in turns from the bottom up: the station works from its first turn, a new station grows from its first pier, every turn ends with the docks its trade needs, habitats come in the later turns
+  - Denser layouts on a finer grid, found faster; a layout the editor refuses is packed again on the coarse one
+  - A module the editor refuses on touching faces is placed when nothing overlaps it; one it keeps refusing restarts the placement once, without slowing the rest of the run
   - Storage per ware: the smallest module size that holds it
-  - Ship builds and their supply chain follow the ships per hour, not the bays' full capacity
-  - Ship build times from each hull's High loadout and the bay's production lines
-  - Special resource modules only with **Full cycle**
-  - Scrap metal from special resource modules feeds the ships' wares too
+  - Ship builds, their supply chain and build times follow the ships per hour and each hull's High loadout, not the bays' full capacity
+  - Special resource modules only with **Full cycle**; their scrap metal feeds the ships' wares too
   - An existing station without a target gets the docks its own trade needs
-  - A refused module is retried without slowing the rest of the run
-  - Faster layout search
-  - Denser layouts: modules pack on a finer grid, and a layout the editor refuses is packed again on the coarse one
-  - Spare output of producers the station feeds itself no longer counts as trade or storage
-  - A producer far above its need gives way to a smaller owned one
-  - A habitat far above the workforce gives way to smaller owned ones
+  - Spare output of producers the station feeds itself counts as neither trade nor storage; a producer or habitat far above its need gives way to a smaller owned one
   - A ware target counts its kind of module, no longer modules of net output
-  - The progress line shows the turn on the grid layout too
-  - The panel plans faster on large stations
-  - License: Apache 2.0 with the Platform Distribution Restriction, see LICENSE.
+  - The panel plans faster on large stations, and the progress line shows the turn on the grid layout too
 - Fixed
   - Game 8.00: piers and dock areas never hung under a connection structure
   - Expanding the panel kept the earlier target instead of reading the station's plan again
@@ -196,8 +185,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
   - Very high-output modules (modded mining modules) feeding the production chain brought dozens of piers, dock areas and storages
   - An upgrade planned new habitats for workers the station's habitats had room for
   - Docks and piers with no room within the 20 km plot failed after everything else was placed
-  - An upgrade lost the grid layout when most of its new module volume was of another race than its connection structures
-  - A new station's connection structures could follow the race of its storages instead of its habitats and production modules
+  - Connection structures could take the wrong race: an upgrade lost its grid layout, a new station followed its storages
   - A layout that fitted the plot's size but not its faces asked for a plot licence for a kilometre more
 
 ### [1.10] - 2026-10-30
