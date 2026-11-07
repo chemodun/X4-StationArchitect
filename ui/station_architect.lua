@@ -794,15 +794,24 @@ local function finishPlacement(run, item)
     end
     traceTraffic(item, box)
     -- the body test refuses a pose whose boxes are clear: drop it once with that test off
-    if pair and snap.snapped and not wrongEntry and box and sab.BoxesClear(run, box, snap.entryIdx) then
-      C.SetConstructionMapCollisionDetection(menu.holomap, false)
-      local again = sab.Snap(editor)
-      if again.snapped and again.entryIdx == snap.entryIdx and again.connection == snap.connection then
-        C.AddFloatingSequenceToConstructionPlan(menu.holomap)
-        count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
-        if count > run.countBefore then sab.Debug("%s: dropped with the module overlap test off, the boxes are clear", item.macro) end
+    if pair and snap.snapped and not wrongEntry and size then
+      -- the box at the pose the editor drops, not the planned one (samePlace allows a metre)
+      local dropBox = sab.geo.worldBox(size, { snap.pose.x, snap.pose.y, snap.pose.z }, snap.pose.rows)
+      if not sab.BoxesClear(run, dropBox, snap.entryIdx) then
+        sab.Debug("%s: a placed box overlaps, the module overlap test stays on", item.macro)
+      else
+        C.SetConstructionMapCollisionDetection(menu.holomap, false)
+        local again = sab.Snap(editor)
+        if again.snapped and again.entryIdx == snap.entryIdx and again.connection == snap.connection
+            and again.predecessorConnection == snap.predecessorConnection then
+          C.AddFloatingSequenceToConstructionPlan(menu.holomap)
+          count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
+          sab.Debug("%s: %s with the module overlap test off, the boxes are clear", item.macro, count > run.countBefore and "dropped" or "refused")
+        else
+          sab.Debug("%s: the snap moved with the module overlap test off, not dropped", item.macro)
+        end
+        C.SetConstructionMapCollisionDetection(menu.holomap, true)
       end
-      C.SetConstructionMapCollisionDetection(menu.holomap, true)
     end
   end
   if (item.validRetries or 0) > 0 then sab.Debug("%s: %d retries for the editor's valid flag", item.macro, item.validRetries) end
