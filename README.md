@@ -159,7 +159,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 
 ## Changelog
 
-### [1.20] - 2026-11-??
+### [1.20] - 2026-11-08
 
 - Added
   - **Ships** tab: build modules sized by ships per hour and resupplies per hour
