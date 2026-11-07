@@ -797,8 +797,9 @@ local function finishPlacement(run, item)
     if pair and snap.snapped and not wrongEntry and size then
       -- the box at the pose the editor drops, not the planned one (samePlace allows a metre)
       local dropBox = sab.geo.worldBox(size, { snap.pose.x, snap.pose.y, snap.pose.z }, snap.pose.rows)
-      if not sab.BoxesClear(run, dropBox, snap.entryIdx) then
-        sab.Debug("%s: a placed box overlaps, the module overlap test stays on", item.macro)
+      local clear, why = sab.BoxesClear(run, dropBox, snap.entryIdx)
+      if not clear then
+        sab.Debug("%s: %s, the module overlap test stays on", item.macro, why)
       else
         C.SetConstructionMapCollisionDetection(menu.holomap, false)
         local again = sab.Snap(editor)
@@ -941,10 +942,11 @@ end
 -- touching faces are the engine's body test refusing a millimetre; deeper than this is a real overlap
 local FLUSH_MARGIN = -0.5
 
--- A box clear of every placed box but the entry it attaches to, flush faces allowed.
+-- A box clear of every placed box but the entry it attaches to, flush faces allowed; else false and why.
 function sab.BoxesClear(run, box, entryIdx)
+  if (run.unsized or 0) > 0 then return false, "an entry without a size" end
   for idx, b in pairs(run.boxes) do
-    if idx ~= entryIdx and overlaps(box, b, FLUSH_MARGIN) then return false end
+    if idx ~= entryIdx and overlaps(box, b, FLUSH_MARGIN) then return false, "a placed box overlaps" end
   end
   return true
 end
@@ -980,6 +982,9 @@ local function addEntry(run, idx, macro, pose)
     run.boxes[idx] = box
     if columnClass(macro) then run.zones[idx] = zoneBoxes(macro, { pose.x, pose.y, pose.z }, pose.rows) end
     if run.plot then sab.FitPlot(box, false) end
+  else
+    -- no box to test against: the drop with the module overlap test off is not taken on this plan
+    run.unsized = (run.unsized or 0) + 1
   end
 end
 
@@ -1022,7 +1027,7 @@ end
 -- The plan's connections, boxes, anchor and plot at the start of a run.
 local function readPlanState(run, editor)
   run.conns = sab.PlanConnections(editor)
-  run.boxes, run.zones, run.macros, run.poses, run.sum, run.n = {}, {}, {}, {}, { 0, 0, 0 }, 0
+  run.boxes, run.zones, run.macros, run.poses, run.sum, run.n, run.unsized = {}, {}, {}, {}, { 0, 0, 0 }, 0, 0
   local plan = sab.ReadPlan()
   for _, e in ipairs(plan) do
     local pose = checkedPose(editor, e)
