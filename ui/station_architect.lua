@@ -793,6 +793,17 @@ local function finishPlacement(run, item)
       return false, true
     end
     traceTraffic(item, box)
+    -- the body test refuses a pose whose boxes are clear: drop it once with that test off
+    if pair and snap.snapped and not wrongEntry and box and sab.BoxesClear(run, box, snap.entryIdx) then
+      C.SetConstructionMapCollisionDetection(menu.holomap, false)
+      local again = sab.Snap(editor)
+      if again.snapped and again.entryIdx == snap.entryIdx and again.connection == snap.connection then
+        C.AddFloatingSequenceToConstructionPlan(menu.holomap)
+        count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
+        if count > run.countBefore then sab.Debug("%s: dropped with the module overlap test off, the boxes are clear", item.macro) end
+      end
+      C.SetConstructionMapCollisionDetection(menu.holomap, true)
+    end
   end
   if (item.validRetries or 0) > 0 then sab.Debug("%s: %d retries for the editor's valid flag", item.macro, item.validRetries) end
   if count > run.countBefore then
@@ -914,6 +925,17 @@ end
 local function overlaps(a, b, margin)
   for i = 1, 3 do
     if a.min[i] - margin >= b.max[i] or a.max[i] + margin <= b.min[i] then return false end
+  end
+  return true
+end
+
+-- touching faces are the engine's body test refusing a millimetre; deeper than this is a real overlap
+local FLUSH_MARGIN = -0.5
+
+-- A box clear of every placed box but the entry it attaches to, flush faces allowed.
+function sab.BoxesClear(run, box, entryIdx)
+  for idx, b in pairs(run.boxes) do
+    if idx ~= entryIdx and overlaps(box, b, FLUSH_MARGIN) then return false end
   end
   return true
 end
