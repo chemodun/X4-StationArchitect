@@ -196,6 +196,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] An existing station without a target gets the docks its own trade needs
 [*] A refused module is retried without slowing the rest of the run
 [*] Faster layout search
+[*] Denser layouts: modules pack on a finer grid, and a layout the editor refuses is packed again on the coarse one
 [*] Spare output of producers the station feeds itself no longer counts as trade or storage
 [*] A producer far above its need gives way to a smaller owned one
 [*] A habitat far above the workforce gives way to smaller owned ones
