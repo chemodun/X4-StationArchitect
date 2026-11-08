@@ -2405,14 +2405,16 @@ local function targetChoices(cat, ctx)
       for r in pairs(e.races) do makers[r] = true end
     end
   end
+  -- the races the player has met
+  local raceSet, makerSet = {}, {}
   for _, r in ipairs(GetLibrary("races")) do
-    if habitats[r.id] then races[#races + 1] = option(r.id, r.name) end
-    if makers[r.id] then moduleRaces[#moduleRaces + 1] = option(r.id, r.name) end
+    if habitats[r.id] then races[#races + 1], raceSet[r.id] = option(r.id, r.name), true end
+    if makers[r.id] then moduleRaces[#moduleRaces + 1], makerSet[r.id] = option(r.id, r.name), true end
   end
   sortedByText(races); sortedByText(moduleRaces)
   table.insert(moduleRaces, 1, option("any", ReadText(PAGE, 151)))
-  if not habitats[t.race] then t.race = sab.planner.WorkforceRace(cat) end
-  if not makers[t.moduleRace] then t.moduleRace = "any" end
+  if not raceSet[t.race] then t.race = sab.planner.WorkforceRace(cat, raceSet) end
+  if not makerSet[t.moduleRace] then t.moduleRace = "any" end
   -- one line per ware, or one per producer group when its equal modules form several ("ware / module", fastest
   -- first); goalOf: line id -> { ware, group }
   local race = t.moduleRace ~= "any" and t.moduleRace or nil

@@ -229,6 +229,9 @@ local function entryOf(group, lib, macro)
     e.capacity = data.storagecapacity or 0
     e.tags = data.storagetags or {}
   elseif group == "habitation" then
+    -- a habitat goes by its workforce's race; SW Interworlds' differ from their makers'
+    local workforceRace = ExtraData and ExtraData.GetMacroDataEx(macro, "workforcerace")
+    if workforceRace then e.race, e.races = workforceRace, { [workforceRace] = true } end
     e.capacity = data.workforcecapacity or 0
     e.needs = {}
     local scale = (data.workforceproductamount or 0) > 0 and e.capacity / data.workforceproductamount or 0
@@ -264,13 +267,23 @@ function planner.Catalogue(set, refresh)
   end
   if same then return cat end
   cat = { byMacro = {}, counts = counts }
+  local extralarge = {}
   for _, group in ipairs(CATALOGUE_GROUPS) do
     cat[group] = {}
     for _, macro in ipairs(blueprints(set, LIBS[group])) do
-      local e = entryOf(group, LIBS[group], macro)
-      cat[group][#cat[group] + 1] = e
-      cat.byMacro[macro] = e
+      -- station-sized modules (total conversions) are beyond the grid: never planned
+      if GetMacroData(macro, "size") == "extralarge" then
+        extralarge[#extralarge + 1] = macro
+      else
+        local e = entryOf(group, LIBS[group], macro)
+        cat[group][#cat[group] + 1] = e
+        cat.byMacro[macro] = e
+      end
     end
+  end
+  if #extralarge > 0 then
+    sab.Debug("catalogue %s: %d extralarge modules left out: %s", set ~= "" and set or "(any set)", #extralarge,
+      table.concat(extralarge, ", "))
   end
   planner.catalogue[set] = cat
   return cat
@@ -1050,11 +1063,15 @@ local function goalsOf(target)
 end
 
 -- The race with the most owned habitats in cat; a tie goes to the lower race id.
-function planner.WorkforceRace(cat)
+-- allowed: a set of races to pick from; ignored when none of them has a habitat
+function planner.WorkforceRace(cat, allowed)
   local counts, best = {}, nil
   for _, e in ipairs(cat.habitation) do counts[e.race] = (counts[e.race] or 0) + 1 end
-  for race, n in pairs(counts) do
-    if not best or n > counts[best] or (n == counts[best] and race < best) then best = race end
+  for _, only in ipairs(allowed and { true, false } or { false }) do
+    for race, n in pairs(counts) do
+      if (not only or allowed[race]) and (not best or n > counts[best] or (n == counts[best] and race < best)) then best = race end
+    end
+    if best then return best end
   end
   return best
 end

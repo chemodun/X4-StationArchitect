@@ -24,6 +24,7 @@ Tell the build menu what your station should produce or build: this extension wo
 - Windows version of the game only: the placement route reads the game's own editor in memory, which the native Linux build does not expose the same way. The Windows game running on Linux through Proton or Wine should work.
 - Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable, or that the Extra Data API cannot read module data, and Run stays off; nothing else in the build menu changes.
 - The plot is limited to the game's 20 km: a layout that needs more, docks and piers included, is refused before anything is placed. When the docks and piers are what does not fit, lower the **Docking** sliders.
+- Extralarge modules are never planned. Vanilla has none among its blueprints; some total conversions add station-sized ones (Star Wars Interworlds' Free Port and trade station modules), and the plan takes the smaller modules instead.
 - Ship build times assume the station has its build drones; a shipyard without them builds several times slower than planned.
 - Docks and storage are sized for a target's whole output, as if all of it sells. A module far above vanilla rates (some modded mining modules make millions of units per hour) can then bring dozens of piers, dock areas and storage modules when its ware is a target, an existing station's starting target included: pick a smaller kind of module in the ware list where it offers one, or lower the **Docking** sliders and **Storage, hours of flow** to the trade you expect.
 - Such a module that only feeds the production chain runs part-time and gets a warning, but **Workforce** still houses all its workers; if a smaller variant is among your blueprints, the plan takes that one.
@@ -69,7 +70,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
    - **Full cycle**: every intermediate ware down to raw resources and energy.
    - **Workforce**: habitats for the workforce of the planned modules. On an existing station it starts unticked while the station has no habitat.
    - **Self-sufficient workforce**: with **Full cycle** and **Workforce**, the food and medicine of that workforce too.
-   - **Workforce race**: the race of the habitats, and so of what the workforce eats.
+   - **Workforce race**: the race of the habitats' workforce, and so of what it eats. The list holds the races you have met.
    - **Storage, hours of flow**: how many hours of each ware's flow the storage holds, 1 to 24, 4 by default. Each ware gets one module of the smallest size that holds it, several only of the largest size.
 3. **Docking** has one slider for dock areas and one for piers, from what the station has up to what the planned trade needs. Both start at the top; a lowered one scales along when the target changes, and back at the top it follows the need again. On an existing station they show without a target too, sized for the station's own trade.
 4. Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning. On an existing station a line under the planned modules names the shortfalls the plan covers: wares the station makes that run short (under **Full cycle** also the wares it uses) and missing housing.
@@ -158,6 +159,13 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 - [SirNukes](https://next.nexusmods.com/profile/sirnukes?gameId=2659) for the Mod Support APIs that power the UI hooks.
 
 ## Changelog
+
+### [1.21] - 2026-11-??
+
+- Fixed
+  - **Workforce race** and **Modules race** could start on a race you have not met, an empty choice in the list
+  - Star Wars Interworlds habitats without a maker race could never be picked; a habitat now goes by the race of its workforce
+  - A large workforce with Star Wars Interworlds planned its station-sized Free Port and stalled the run; extralarge modules are no longer planned
 
 ### [1.20] - 2026-11-08
 
