@@ -24,7 +24,7 @@ Tell the build menu what your station should produce or build: this extension wo
 [*] Windows version of the game only: the placement route reads the game's own editor in memory, which the native Linux build does not expose the same way. The Windows game running on Linux through Proton or Wine should work.
 [*] Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable, or that the Extra Data API cannot read module data, and Run stays off; nothing else in the build menu changes.
 [*] The plot is limited to the game's 20 km: a layout that needs more, docks and piers included, is refused before anything is placed. When the docks and piers are what does not fit, lower the [b]Docking[/b] sliders.
-[*] Extralarge modules are never planned. Vanilla has none among its blueprints; some total conversions add station-sized ones (Star Wars Interworlds' Free Port and trade station modules), and the plan takes the smaller modules instead.
+[*] Extralarge modules are never planned. Vanilla has none among its blueprints; some total conversions add station-sized ones, and the plan takes the smaller modules instead.
 [*] Ship build times assume the station has its build drones; a shipyard without them builds several times slower than planned.
 [*] Docks and storage are sized for a target's whole output, as if all of it sells. A module far above vanilla rates (some modded mining modules make millions of units per hour) can then bring dozens of piers, dock areas and storage modules when its ware is a target, an existing station's starting target included: pick a smaller kind of module in the ware list where it offers one, or lower the [b]Docking[/b] sliders and [b]Storage, hours of flow[/b] to the trade you expect.
 [*] Such a module that only feeds the production chain runs part-time and gets a warning, but [b]Workforce[/b] still houses all its workers; if a smaller variant is among your blueprints, the plan takes that one.
@@ -175,12 +175,19 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 
 [h2][1.21] - 2026-11-??[/h2]
 [list]
+[*] Added
+[list]
+[*] Tested with Star Wars Interworlds and adapted to work with it
+[/list]
 [*] Fixed
 [list]
 [*] [b]Workforce race[/b] and [b]Modules race[/b] could start on a race you have not met, an empty choice in the list
 [*] Star Wars Interworlds habitats without a maker race could never be picked; a habitat now goes by the race of its workforce
-[*] A large workforce with Star Wars Interworlds planned its station-sized Free Port and stalled the run; extralarge modules are no longer planned
+[*] A large workforce could plan a station-sized habitat of a total conversion and stall the run; extralarge modules are no longer planned
 [*] When a layout was packed again on the 400 m cell, the panel folded to its title and showed no progress of that second pass
+[*] Modules whose body reaches back past the connection they hang by were built inside other modules; they now get their own room in the grid layout
+[*] A cross too small for a module stacked those modules into a tower beside the station; the connection kit now prefers a cross every module fits on, and a module may wrap the small cross it hangs on
+[*] A module was refused while the mouse cursor rested over the spot it was placed at, which cost a retry each time; the cursor no longer matters
 [/list]
 [/list]
 [h2][1.20] - 2026-11-08[/h2]
