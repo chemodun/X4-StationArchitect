@@ -129,6 +129,7 @@ local function blueprints(set, lib)
   for i = 0, tonumber(n) - 1 do macros[#macros + 1] = ffi.string(buf[i].macro) end
   return macros
 end
+planner.Blueprints = blueprints
 
 -- The production method behind a library product: the library carries no method id, so the one whose
 -- time, amount and resources match wins; a tie goes to the module's maker race, then to "default".

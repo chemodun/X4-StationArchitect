@@ -55,6 +55,7 @@ local P, U8PP, U16P, U32P, I32P, U64P = ffi.typeof("uint8_t*"), ffi.typeof("uint
 local FLOATP, VOIDPP, CHARP, CHARPP, UPTR = ffi.typeof("float*"), ffi.typeof("void**"), ffi.typeof("const char*"), ffi.typeof("const char**"), ffi.typeof("uintptr_t")
 local FN_RESOLVE, FN_UPDATE = ffi.typeof("void*(*)(void*, uint64_t, uint32_t)"), ffi.typeof("void(*)(void*, uint8_t, const float*)")
 local FN_U8_I32 = ffi.typeof("uint8_t(*)(void*, int32_t)")
+local I64P = ffi.typeof("int64_t*")
 -- vanilla's cdefs (ego_detailmonitor loads first); the Plan2 variant is 9.00 only
 local PLAN_ENTRIES = ffi.typeof("UIConstructionPlanEntry[?]")
 local BOOL1 = ffi.typeof("bool[1]")
@@ -269,6 +270,12 @@ local UPDATE_800 = { 0x0f, 0x28, 0x05, false, false, false, false, 0x48, 0x8b, 0
 ---@type (integer|false)[]
 local DRAGGING_800 = { 0x41, 0x38, 0x9f, false, false, false, false }
 
+-- both builds: the editor's picked-entry getter (vtable slot pickGetter) loads the plan entry vector's begin and
+-- end, then the int64 pick index
+---@type (integer|false)[]
+local PICK_GETTER = { 0x4c, 0x8b, 0x81, false, false, false, false, 0x48, 0x8b, 0x91, false, false, false, false,
+  0x48, 0x8b, 0x81, false, false, false, false, 0x49, 0x2b, 0xd0, 0x48, 0xc1, 0xfa, 0x03, 0x48, 0x3b, 0xc2 }
+
 -- Per build: the patterns, their operand positions and the engine objects' field offsets. The patterns pin
 -- editor, plan and the floating rows; the code-read dragging offset must equal `dragging`.
 local BUILDS = {
@@ -284,6 +291,8 @@ local BUILDS = {
       editorCheck = 0x18, editorCheckArg = 2, plan = 0x300, selection = 0x3c8, floating = 0x430, snapPose = 0x470,
       valid = 0x4b0, snapEntryIdx = 0x4b8, snapEntry = 0x4c0, snapModuleConn = 0x4c8, snapStationConn = 0x4d0,
       dragging = 0x570,
+      -- the picked entry (int64 index, plan size = the float) and the vtable slot of its getter
+      pick = 0x620, pickGetter = 0x218,
       -- plan entry transform, connection name
       entryTransform = 0x30, connectionName = 0x10,
     },
@@ -298,6 +307,7 @@ local BUILDS = {
       editorCheck = 0x18, editorCheckArg = 2, plan = 0x310, selection = 0x3d8, floating = 0x440, snapPose = 0x480,
       valid = 0x4c0, snapEntryIdx = 0x4c8, snapEntry = 0x4d0, snapModuleConn = 0x4d8, snapStationConn = 0x4e0,
       dragging = 0x580,
+      pick = 0x630, pickGetter = 0x1e0,
       entryTransform = 0x30, connectionName = 0x10,
     },
   },
@@ -408,6 +418,7 @@ local function detect()
       sab.Debug("engine located (%s layout, %s): resolver 0x%x registry 0x%x update 0x%x dragging +0x%x", b.name, img.id,
         found.resolver, found.registry, found.update, found.dragging)
       return {
+        img = img,
         resolve = ffi.cast(FN_RESOLVE, img.base + found.resolver),
         registry = ffi.cast(VOIDPP, img.base + found.registry),
         update = ffi.cast(FN_UPDATE, img.base + found.update),
@@ -661,6 +672,26 @@ function sab.Snap(editor)
   return r
 end
 
+-- The pick index, once its getter's code confirms the field; false when it does not.
+local function pickField(editor)
+  if engine.pick == nil then
+    local img, L = engine.img, LAYOUT
+    local at = tonumber(uptr(ffi.cast(VOIDPP, pp(editor)[0] + L.pickGetter)[0]) - uptr(img.base))
+    local ok = inText(img, at, #PICK_GETTER) and matchBytes(img.base + at, PICK_GETTER) and i32(img.base + at + 3) == L.plan + 8
+        and i32(img.base + at + 10) == L.plan + 0x10 and i32(img.base + at + 17) == L.pick
+    engine.pick = ok and L.pick or false
+    if not ok then sab.Debug("pick index not confirmed: a refused valid drop keeps the dragged retry") end
+  end
+  return engine.pick
+end
+
+-- The editor refuses a drop while the real cursor picks the float: clear the pick first (-1, nothing picked).
+local function dropFloating(editor)
+  local pick = editor and pickField(editor)
+  if pick then ffi.cast(I64P, editor + pick)[0] = -1 end
+  C.AddFloatingSequenceToConstructionPlan(sab.menu.holomap)
+end
+
 -- *** one placement ***
 -- Frame 1: float the macro. Frame 2: write its transform, run the editor's snap search, drop, all in
 -- one chunk, so the drag code's cursor write never reaches the search and the nearest compatible pair
@@ -780,7 +811,7 @@ local function finishPlacement(run, item)
     wrongEntry = false
   end
   if (snap.snapped and not wrongEntry) or (item.free and snap.valid and not (item.alone and snap.snapped)) then
-    C.AddFloatingSequenceToConstructionPlan(menu.holomap)
+    dropFloating(editor)
   end
   local count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
   -- a snap to the wanted entry the editor calls invalid can be a passing state, so is a free drop not checked
@@ -788,26 +819,34 @@ local function finishPlacement(run, item)
   local pending = (pair and snap.snapped and not wrongEntry) or (item.free and not snap.snapped and not snap.valid)
   if count <= run.countBefore and pending then
     if sab.debugLevel == "trace" then item.validTrail = (item.validTrail or "") .. (snap.valid and "1" or "0") end
-    if (item.validRetries or 0) < VALID_RETRIES then
+    -- refused twice in a row at a valid pose: the undragged add's refusal, only a dragged float takes it
+    item.validRefused = snap.valid and (item.validRefused or 0) + 1 or 0
+    local undraggedRefusal = item.validRefused >= 2 and not item.dragged
+    if undraggedRefusal then
+      sab.Debug("%s: refused twice at a valid pose, the next float is dragged", item.macro)
+    elseif (item.validRetries or 0) < VALID_RETRIES then
       item.validRetries = (item.validRetries or 0) + 1
       return false, true
     end
     traceTraffic(item, box)
     -- the body test refuses a pose whose boxes are clear: drop it once with that test off
-    if pair and snap.snapped and not wrongEntry and size then
+    if pair and snap.snapped and not wrongEntry and size and not undraggedRefusal then
       -- the box at the pose the editor drops, not the planned one (samePlace allows a metre)
       local dropBox = sab.geo.worldBox(size, { snap.pose.x, snap.pose.y, snap.pose.z }, snap.pose.rows)
-      local clear, why = sab.BoxesClear(run, dropBox, snap.entryIdx)
+      local clear, why, other = sab.BoxesClear(run, dropBox, snap.entryIdx)
       if not clear then
+        if other then item.overlapAt = { pose = snap.pose, entryIdx = other } end
         sab.Debug("%s: %s, the module overlap test stays on", item.macro, why)
+        if sab.debugLevel ~= "none" then sab.Debug("  %s", sab.RefusalText(run, item, editor, snap, dropBox)) end
       else
         C.SetConstructionMapCollisionDetection(menu.holomap, false)
         local again = sab.Snap(editor)
         if again.snapped and again.entryIdx == snap.entryIdx and again.connection == snap.connection
             and again.predecessorConnection == snap.predecessorConnection then
-          C.AddFloatingSequenceToConstructionPlan(menu.holomap)
+          dropFloating(editor)
           count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
           sab.Debug("%s: %s with the module overlap test off, the boxes are clear", item.macro, count > run.countBefore and "dropped" or "refused")
+          if count <= run.countBefore and sab.debugLevel ~= "none" then sab.Debug("  %s", sab.RefusalText(run, item, editor, snap, dropBox)) end
         else
           sab.Debug("%s: the snap moved with the module overlap test off, not dropped", item.macro)
         end
@@ -821,6 +860,14 @@ local function finishPlacement(run, item)
     menu.floatingNewModule = nil
     -- not this one module: the player changed the plan, Tick stops the run
     if count ~= run.countBefore + 1 or added.macro ~= item.macro then return false, true end
+    -- the dragged float's stale body check let in a pose the editor refused for a placed box: take it out
+    local o = item.overlapAt
+    if o and samePlace(o.pose, added.offset) then
+      C.RemoveItemFromConstructionMap2(menu.holomap, added.idx, false)
+      run.failed = run.failed + 1
+      sab.Debug("%s: dropped into entry %d %s by the dragged float, taken out", item.macro, o.entryIdx, tostring(run.macros[o.entryIdx]))
+      return false
+    end
     run.planCount = count
     run.placed = run.placed + 1
     applyDefaultLoadout(added)
@@ -849,15 +896,14 @@ end
 -- free connection x every connection of the module x four rolls, nearest module centre to the plan's
 -- anchor first, pre-checked in Lua against the plot and the placed boxes; the engine's snap (tags) and
 -- valid flag (collision) give the verdict. Outer modules take outward connections only, placed last.
--- No place: the overlapping candidates go to the engine's collision check, then the plot grows when it
--- blocked candidates, then a connector grows outward from the edge and the item tries again. Further
+-- No place: the plot grows when it blocked candidates, then a connector grows outward from the edge and the item tries again. Further
 -- connectors for the same item continue straight from the previous one's tip (a spur); the item tries the tip first.
 -- A target plan on an empty plot takes the grid layout (station_architect_grid.lua) instead.
 
 local OUTER = { "dockarea", "pier", "buildmodule", "defencemodule", "ventureplatform" }
 local TRIES_PER_FRAME, CHECKS_PER_FRAME = 8, 400
 local ROLLS = { 0, math.pi / 2, math.pi, 3 * math.pi / 2 }
-local RELAXED_TRIES, MAX_REACH, MAX_SPURS, MAX_PLOT, PLOT_STEP, PLOT_MARGIN = 200, 6, 3, 20000, 1000, 10
+local MAX_REACH, MAX_SPURS, MAX_PLOT, PLOT_STEP, PLOT_MARGIN = 6, 3, 20000, 1000, 10
 sab.maxPlotKm = MAX_PLOT / 1000
 local AXES = { "x", "y", "z" }
 local STRAIGHT = 0.9
@@ -946,7 +992,7 @@ local FLUSH_MARGIN = -0.5
 function sab.BoxesClear(run, box, entryIdx)
   if (run.unsized or 0) > 0 then return false, "an entry without a size" end
   for idx, b in pairs(run.boxes) do
-    if idx ~= entryIdx and overlaps(box, b, FLUSH_MARGIN) then return false, "a placed box overlaps" end
+    if idx ~= entryIdx and overlaps(box, b, FLUSH_MARGIN) then return false, "a placed box overlaps", idx end
   end
   return true
 end
@@ -970,6 +1016,51 @@ local function inside(a, b)
     if a.min[i] < b.min[i] + PLOT_MARGIN or a.max[i] > b.max[i] - PLOT_MARGIN then return false end
   end
   return true
+end
+
+-- For the log: what refuses a snapped drop. Probes the editor with the module overlap test off, drops nothing.
+function sab.RefusalText(run, item, editor, snap, box)
+  local ours, count, worst, depth, per = {}, 0, nil, nil, nil
+  if run.plot and not inside(box, run.plot) then ours[#ours + 1] = "over a plot face" end
+  if inZone(run, box) then ours[#ours + 1] = "in a placed approach zone" end
+  for idx, b in pairs(run.boxes) do
+    if idx ~= snap.entryIdx then
+      local o = {}
+      for i = 1, 3 do o[i] = math.min(box.max[i], b.max[i]) - math.max(box.min[i], b.min[i]) end
+      local d = math.min(o[1], o[2], o[3])
+      if d > -FLUSH_MARGIN then
+        count = count + 1
+        if not depth or d > depth then worst, depth, per = idx, d, o end
+      end
+    end
+  end
+  if worst then
+    ours[#ours + 1] = string.format("%d placed boxes overlap, deepest entry %d %s by %.1f m (x %.1f, y %.1f, z %.1f)", count, worst,
+      tostring(run.macros[worst]), depth, per[1], per[2], per[3])
+  end
+  -- how far the box reaches back past the connection it hangs by (the grid counts that part as loose)
+  local back
+  for _, c in ipairs(sab.Connections(item.macro)) do
+    if c.name == snap.connection then
+      local rows, cp = snap.pose.rows, rotate(c.pos, snap.pose.rows)
+      local cw, dw = { cp[1] + snap.pose.x, cp[2] + snap.pose.y, cp[3] + snap.pose.z }, unit(rotate(c.dir, rows))
+      back = 0
+      for i = 1, 3 do back = back + math.max(dw[i] * (box.max[i] - cw[i]), dw[i] * (box.min[i] - cw[i])) end
+    end
+  end
+  local holomap = sab.menu.holomap
+  C.SetConstructionMapCollisionDetection(holomap, false)
+  local off = sab.Snap(editor)
+  C.SetConstructionMapCollisionDetection(holomap, true)
+  local same = off.snapped and off.entryIdx == snap.entryIdx and off.connection == snap.connection
+  local verdict = "invalid with the module overlap test off: an approach zone or the plot"
+  if not same then
+    verdict = "the snap moves with the module overlap test off"
+  elseif off.valid then
+    verdict = "valid with the module overlap test off: the module body test"
+  end
+  return string.format("editor: %s; boxes: %s; box reaches %s m back past %s", verdict, ours[1] and table.concat(ours, ", ") or "clear",
+    back and string.format("%.1f", back) or "?", tostring(snap.connection))
 end
 
 local function addEntry(run, idx, macro, pose)
@@ -1343,23 +1434,40 @@ local function crossShape(conns)
   return arms, arm, cell
 end
 
--- The owned connection modules as a kit: the cross only first, then one of race (nil: none), then the smallest
--- cell (the denser pack), the most arms, the name; every strut length.
-local function connectorKit(race, only)
+-- Owned blueprints of the plot's set, read live: the menu's lists are built when it opens.
+local function owned(lib)
+  return sab.planner.Blueprints(sab.menu.set or "", lib)
+end
+
+-- The owned connection modules as a kit: the cross only first, then the fewest grid items without a pose on it
+-- (items: the grid route), then one of race (nil: none), then the smallest cell (the denser pack), the most arms,
+-- the name; every strut length.
+local function connectorKit(race, only, items, R)
   local kit, seen, seenV = { struts = {}, lengths = {}, vLengths = {} }, {}, {}
-  for _, m in ipairs(sab.menu.modules and sab.menu.modules.moduletypes_other or {}) do
+  for _, m in ipairs(owned("moduletypes_other")) do
     local conns = sab.macroConns[m]
     if conns and IsMacroClass(m, "connectionmodule") then
       local tier = (m == only and -1) or ((race ~= nil and raceOf(m) == race) and 0 or 1)
       if #conns >= 6 then
         local arms, arm, cell = crossShape(conns)
         local volume, cur = math.floor(cell[1] + 0.5) * math.floor(cell[2] + 0.5) * math.floor(cell[3] + 0.5), kit.cross
-        local better = not cur or tier < cur.tier
-        if cur and tier == cur.tier then
-          better = volume < cur.volume or (volume == cur.volume and (#conns > #cur.conns or (#conns == #cur.conns and m < cur.macro)))
+        local misfits, names = 0, {}
+        if items and tier >= 0 then
+          misfits, names = sab.grid.Misfits({ cell = cell, arms = arms }, items, R)
+          sab.Trace("kit fit: %s, %d items without a grid pose%s", m, misfits, misfits > 0 and " (" .. table.concat(names, ", ") .. ")" or "")
+        end
+        local better = not cur or (tier < 0) ~= (cur.tier < 0) and tier < 0
+        if cur and (tier < 0) == (cur.tier < 0) then
+          if misfits ~= cur.misfits then
+            better = misfits < cur.misfits
+          elseif tier ~= cur.tier then
+            better = tier < cur.tier
+          else
+            better = volume < cur.volume or (volume == cur.volume and (#conns > #cur.conns or (#conns == #cur.conns and m < cur.macro)))
+          end
         end
         if better then
-          kit.cross = { macro = m, tier = tier, conns = conns, volume = volume }
+          kit.cross = { macro = m, tier = tier, conns = conns, volume = volume, misfits = misfits }
           kit.arms, kit.arm, kit.cell = arms, arm, cell
         end
       else
@@ -1530,7 +1638,7 @@ local function rootPier(run)
   if best then return best end
   local race = run.kitRace
   local pick, pickKey
-  for _, m in ipairs(sab.menu.modules and sab.menu.modules.moduletypes_dock or {}) do
+  for _, m in ipairs(owned("moduletypes_dock")) do
     if IsMacroClass(m, "pier") then
       local bays = #(ExtraData.GetMacroDataEx(m, "dockingbays") or {})
       local k = { (race ~= nil and raceOf(m) == race) and 0 or 1, approaches(m), bays <= sab.planner.bigPier and -bays or bays }
@@ -1606,9 +1714,11 @@ local function finishLayout(run)
   end
   for race, v in pairs(volumes) do sab.Trace("kit vote: %s %.2f km3", race, 8 * v / 1e9) end
   run.kitRace = run.moduleRace or lead
-  run.kit = connectorKit(run.kitRace)
+  run.kit = connectorKit(run.kitRace, nil, run.gridRoute and run.items, run.subdivide or sab.grid.subdivide)
   if not run.kit.cross then run.kit = nil end
-  if run.kit then sab.Debug("connection kit: %s (%s)", run.kit.cross.macro, run.kitRace or "no race leads") end
+  if run.kit then
+    sab.Debug("connection kit: %s (%s), %d items without a grid pose", run.kit.cross.macro, run.kitRace or "no race leads", run.kit.cross.misfits)
+  end
   if not run.gridRoute then
     run.phase = "begin"
     return
@@ -1734,9 +1844,9 @@ local function boxOk(run, item, cand)
     end
   end
   for idx, b in pairs(run.boxes) do
-    if idx ~= cand.f.entryIdx and not item.relaxed and overlaps(box, b, -5) then return false, "overlap" end
+    if idx ~= cand.f.entryIdx and overlaps(box, b, -5) then return false, "overlap" end
   end
-  -- an item the grid left out, at its bill position: clear of what the grid still builds, relaxed or not
+  -- an item the grid left out, at its bill position: clear of what the grid still builds
   local R = item.early and run.reserve
   if R then
     for _, z in ipairs(R.zones) do
@@ -1772,13 +1882,40 @@ local function addPlacement(run, editor, added, cand)
   end
 end
 
+local function samePair(snap, cand)
+  return snap.snapped and snap.entryIdx == cand.f.entryIdx and snap.connection == cand.m.name and snap.predecessorConnection == cand.f.name
+end
+
+-- The drop of a candidate the editor calls valid: "placed", "changed", or nil when the editor refuses it.
+local function dropCandidate(run, item, editor, cand, at)
+  local menu = sab.menu
+  dropFloating(editor)
+  local count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
+  if count <= run.countBefore then
+    skip(item, "refused")
+    sab.Trace("%s: drop refused on entry %d %s / %s", item.macro, cand.f.entryIdx, cand.f.name, cand.m.name)
+    return nil
+  end
+  local added = sab.ReadPlanLast()
+  menu.floatingNewModule = nil
+  if count ~= run.countBefore + 1 or added.macro ~= item.macro then return "changed" end
+  run.planCount = count
+  run.placed = run.placed + 1
+  applyDefaultLoadout(added)
+  addPlacement(run, editor, added, cand)
+  notePlaced(run, item, added.idx, cand)
+  sab.Debug("placed %s as entry %d: %s on entry %d %s (%s) at %.0f %.0f %.0f, candidate %d", item.macro, added.idx,
+    added.connection, added.predecessorIdx, added.predecessorConnection, cand.f.macro, added.offset.x, added.offset.y, added.offset.z, at)
+  if cand.roll ~= 0 then sab.Debug("  (roll %.0f deg)", math.deg(cand.roll)) end
+  return "placed"
+end
+
 -- One frame of attempts for a pack item: "placed", "more", "exhausted" or "changed" (a drop not of this item).
 local function tryCandidates(run, item, editor)
-  local menu = sab.menu
   local tries, checks = 0, 0
   while tries < TRIES_PER_FRAME and checks < CHECKS_PER_FRAME do
     local cand = item.candidates[item.cursor]
-    if not cand or (item.relaxed and item.relaxedTries >= RELAXED_TRIES) then return "exhausted" end
+    if not cand then return "exhausted" end
     item.cursor = item.cursor + 1
     checks = checks + 1
     local ok, reason = boxOk(run, item, cand)
@@ -1791,31 +1928,12 @@ local function tryCandidates(run, item, editor)
     if ok then
       tries = tries + 1
       cand.tested = true
-      if item.relaxed then item.relaxedTries = item.relaxedTries + 1 end
       sab.WriteFloating(editor, cand.pose.pos, cand.pose.rows)
       local snap = sab.Snap(editor)
-      if snap.snapped and snap.entryIdx == cand.f.entryIdx and snap.connection == cand.m.name and snap.predecessorConnection == cand.f.name then
+      if samePair(snap, cand) then
         if snap.valid then
-          C.AddFloatingSequenceToConstructionPlan(menu.holomap)
-          local count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
-          if count > run.countBefore then
-            local added = sab.ReadPlanLast()
-            menu.floatingNewModule = nil
-            if count ~= run.countBefore + 1 or added.macro ~= item.macro then return "changed" end
-            run.planCount = count
-            run.placed = run.placed + 1
-            applyDefaultLoadout(added)
-            addPlacement(run, editor, added, cand)
-            notePlaced(run, item, added.idx, cand)
-            sab.Debug("placed %s as entry %d: %s on entry %d %s (%s) at %.0f %.0f %.0f, candidate %d", item.macro, added.idx,
-              added.connection, added.predecessorIdx, added.predecessorConnection, cand.f.macro, added.offset.x, added.offset.y, added.offset.z, item.cursor - 1)
-            if cand.roll ~= 0 or item.relaxed then
-              sab.Debug("  (roll %.0f deg%s)", math.deg(cand.roll), item.relaxed and ", by the engine's collision check" or "")
-            end
-            return "placed"
-          end
-          skip(item, "refused")
-          sab.Trace("%s: drop refused on entry %d %s / %s", item.macro, cand.f.entryIdx, cand.f.name, cand.m.name)
+          local r = dropCandidate(run, item, editor, cand, item.cursor - 1)
+          if r then return r end
         else
           skip(item, "rejected")
           sab.Trace("%s: entry %d %s / %s rejected by the editor", item.macro, cand.f.entryIdx, cand.f.name, cand.m.name)
@@ -1878,15 +1996,10 @@ local function packStep(run, item)
     return string.format("%d candidates: plot %d, block %d, overlap %d, reserved %d, closes %d, incompatible %d, elsewhere %d, rejected %d, refused %d", total,
       s.plot or 0, s.block or 0, s.overlap or 0, s.reserved or 0, s.closes or 0, s.incompatible or 0, s.elsewhere or 0, s.rejected or 0, s.refused or 0)
   end
-  if not item.relaxed and (s.overlap or 0) > 0 then
-    item.relaxed, item.cursor, item.relaxedTries = true, 1, 0
-    sab.Debug("%s: no place among %s; the overlapping ones go to the engine's collision check", item.macro, skipsText())
-    return
-  end
   C.RemoveFloatingSequenceFromConstructionPlan(menu.holomap)
   menu.floatingNewModule = nil
   local need = item.plotNeed
-  item.candidates, item.relaxed, item.plotNeed = nil, nil, nil
+  item.candidates, item.plotNeed = nil, nil
   if (s.plot or 0) > 0 and need and sab.FitPlot(need.box, false) then
     sab.Debug("%s: no place among %s; retrying in the grown plot", item.macro, skipsText())
     run.phase = "begin"
@@ -1930,7 +2043,7 @@ end
 -- any race when race is nil.
 local function connectorOfRace(race)
   local best, bestCount
-  for _, m in ipairs(sab.menu.modules and sab.menu.modules.moduletypes_other or {}) do
+  for _, m in ipairs(owned("moduletypes_other")) do
     if IsMacroClass(m, "connectionmodule") then
       local mr = GetMacroData(m, "makerraceid")
       -- a generic module (empty race list) fits any race
@@ -2056,7 +2169,7 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
   local function want(m)
     if m and not sab.macroConns[m] then sab.macroConns[m] = sab.Connections(m) end
   end
-  for _, m in ipairs(menu.modules and menu.modules.moduletypes_other or {}) do
+  for _, m in ipairs(owned("moduletypes_other")) do
     if IsMacroClass(m, "connectionmodule") then want(m) end
   end
   if gridRoute then
@@ -2235,7 +2348,7 @@ function sab.Tick(chained)
     if (item.floatRetries or 0) < FLOAT_RETRIES then
       -- the same item again next frame from a new float, dragged unless free; what is placed stays
       run.failed = run.failed - 1
-      item.floatRetries, item.validRetries, item.validTrail = (item.floatRetries or 0) + 1, nil, nil
+      item.floatRetries, item.validRetries, item.validTrail, item.validRefused = (item.floatRetries or 0) + 1, nil, nil, nil
       run.phase = "begin"
       sab.Debug("%s failed, again from a new float (%d of %d)", item.macro, item.floatRetries, FLOAT_RETRIES)
       return

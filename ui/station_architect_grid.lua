@@ -28,6 +28,8 @@ local MAX_PATH = 4
 local FILL = 1.6
 -- a box may reach this share of a cell past its face
 local EPS = 0.05
+-- a box reaching deeper than this into a cell leans into it; two boxes meet past twice this (sab.BoxesClear's margin)
+local LEAN = 0.25
 -- occupancy cells per cross cell along each axis: modules pack at u / R, crosses keep whole cells; a layout the
 -- editor refuses at R 2 is packed again at R 1 (sab.Tick)
 grid.subdivide = 2
@@ -70,8 +72,9 @@ end
 
 -- Every pose of a macro on a cross at the origin: the occupancy cells it fills (cross cell n holds occupancy
 -- cells R*n .. R*n+R-1), the cross cells they lie in, and its other connections that end on a cross position of
--- the grid (a port carries a cross or a module there).
-local function poses(g, macro, dedupe)
+-- the grid (a port carries a cross or a module there). wraps: a body may enter the cross's own cells up to its far
+-- arm's tip (wrap), those cells stay the cross's. first: stop at the first pose.
+local function poses(g, macro, dedupe, wraps, first)
   local geo, list, seen = sab.geo, {}, {}
   local conns, size = sab.macroConns[macro], sab.sizes[macro]
   if not (conns and size) then return list end
@@ -82,12 +85,6 @@ local function poses(g, macro, dedupe)
         local pose = sab.PoseForWorld({ a[1] * d[1], a[2] * d[2], a[3] * d[3] }, d, c, roll)
         local p = { pose.pos.x, pose.pos.y, pose.pos.z }
         local box = geo.worldBox(size, p, pose.rows)
-        -- the body lies beyond the connection it hangs by: a box reaching back past it is loose (8.00 models)
-        local flat = false
-        for i = 1, 3 do
-          if d[i] > 0 and box.min[i] < a[i] then box.min[i] = a[i] elseif d[i] < 0 and box.max[i] > -a[i] then box.max[i] = -a[i] end
-          if box.min[i] >= box.max[i] then flat = true end
-        end
         local lo, hi, tlo, thi, ftlo, fthi, clo, chi = {}, {}, {}, {}, {}, {}, {}, {}
         for i = 1, 3 do
           local h = u[i] / R
@@ -98,15 +95,20 @@ local function poses(g, macro, dedupe)
           -- cross cells the box enters past a metre: no cross may stand there
           tlo[i] = math.floor((box.min[i] + 1) / u[i] + 0.5)
           thi[i] = math.floor((box.max[i] - 1) / u[i] + 0.5)
-          -- occupancy cells it enters past a metre: it leans into those beyond its own
-          ftlo[i] = math.floor((box.min[i] + 1) / h + R / 2)
-          fthi[i] = math.floor((box.max[i] - 1) / h + R / 2)
+          -- occupancy cells it enters past LEAN: it leans into those beyond its own
+          ftlo[i] = math.floor((box.min[i] + LEAN) / h + R / 2)
+          fthi[i] = math.floor((box.max[i] - LEAN) / h + R / 2)
         end
-        if not flat and not (lo[1] <= R - 1 and hi[1] >= 0 and lo[2] <= R - 1 and hi[2] >= 0 and lo[3] <= R - 1 and hi[3] >= 0) then
+        local enters = lo[1] <= R - 1 and hi[1] >= 0 and lo[2] <= R - 1 and hi[2] >= 0 and lo[3] <= R - 1 and hi[3] >= 0
+        local ax = axisOf(di)
+        local wrap = enters and wraps and (d[ax] > 0 and box.min[ax] or -box.max[ax]) >= 1 - a[ax]
+        if not enters or wrap then
           local cells, ccells = {}, {}
           for x = lo[1], hi[1] do
             for y = lo[2], hi[2] do
-              for z = lo[3], hi[3] do cells[#cells + 1] = { x, y, z } end
+              for z = lo[3], hi[3] do
+                if not (wrap and x >= 0 and x < R and y >= 0 and y < R and z >= 0 and z < R) then cells[#cells + 1] = { x, y, z } end
+              end
             end
           end
           for x = clo[1], chi[1] do
@@ -145,9 +147,10 @@ local function poses(g, macro, dedupe)
           if not (sig and seen[sig]) then
             if sig then seen[sig] = true end
             -- top and outer faces, in cross cell units, bound the score before any cell is checked
-            list[#list + 1] = { conn = c.name, di = di, roll = roll, pos = p, rows = pose.rows, cells = cells, ccells = ccells, ports = ports,
+            list[#list + 1] = { conn = c.name, di = di, roll = roll, pos = p, rows = pose.rows, cells = cells, ccells = ccells, ports = ports, wrap = wrap or nil,
               span = { chi[1] - clo[1] + 1, chi[2] - clo[2] + 1, chi[3] - clo[3] + 1 }, lo = lo, hi = hi, tlo = tlo, thi = thi,
               ftlo = ftlo, fthi = fthi, box = box, top = hi[2] / R, faces = 2 * (sx * sy + sy * sz + sx * sz) / (R * R) }
+            if first then return list end
           end
         end
       end
@@ -416,7 +419,14 @@ local function evaluate(g, node, pose, cost, path, on)
   local z0, z1 = R * node[3] + pose.lo[3], R * node[3] + pose.hi[3]
   local nx, nz = g.fx, g.fz
   if x0 < 0 or z0 < 0 or y0 < 0 or x1 >= nx or z1 >= nz then return nil end
-  if boxSum(g, x0, x1, y0, y1, z0, z1) > 0 then return nil end
+  local taken = boxSum(g, x0, x1, y0, y1, z0, z1)
+  if pose.wrap and taken > 0 then
+    -- the cross it wraps holds its own cells
+    local b = { R * node[1], R * node[2], R * node[3] }
+    taken = taken - boxSum(g, math.max(x0, b[1]), math.min(x1, b[1] + R - 1), math.max(y0, b[2]), math.min(y1, b[2] + R - 1),
+      math.max(z0, b[3]), math.min(z1, b[3] + R - 1), g.csums)
+  end
+  if taken > 0 then return nil end
   -- cross cells the box enters (tx, in cross cells), occupancy cells it leans into (lx)
   local tx0, tx1 = node[1] + pose.tlo[1], node[1] + pose.thi[1]
   local ty0, ty1 = node[2] + pose.tlo[2], node[2] + pose.thi[2]
@@ -426,21 +436,28 @@ local function evaluate(g, node, pose, cost, path, on)
   local lx0, lx1 = math.max(0, R * node[1] + pose.ftlo[1]), math.min(nx - 1, R * node[1] + pose.fthi[1])
   local ly0, ly1 = math.max(0, R * node[2] + pose.ftlo[2]), R * node[2] + pose.fthi[2]
   local lz0, lz1 = math.max(0, R * node[3] + pose.ftlo[3]), math.min(nz - 1, R * node[3] + pose.fthi[3])
-  -- modules in the cells the box leans into, and modules leaning into its own cells: the boxes themselves must
-  -- not meet, the module it hangs on aside
+  -- modules in or leaning into the cells the box leans into, and modules leaning into its own cells: the boxes
+  -- themselves must not meet, the module it hangs on aside
   local leaning = boxSum(g, lx0, lx1, ly0, ly1, lz0, lz1) > boxSum(g, lx0, lx1, ly0, ly1, lz0, lz1, g.csums)
-  local leaned = boxSum(g, x0, x1, y0, y1, z0, z1, g.lsums) > 0
-  if leaning or leaned then
-    local b, u = pose.box, g.u
-    local bx0, bx1 = b.min[1] + node[1] * u[1] + 1, b.max[1] + node[1] * u[1] - 1
-    local by0, by1 = b.min[2] + node[2] * u[2] + 1, b.max[2] + node[2] * u[2] - 1
-    local bz0, bz1 = b.min[3] + node[3] * u[3] + 1, b.max[3] + node[3] * u[3] - 1
-    if leaning then
+  local ownLean = boxSum(g, x0, x1, y0, y1, z0, z1, g.lsums)
+  local leaned = ownLean > 0
+  local shared = boxSum(g, lx0, lx1, ly0, ly1, lz0, lz1, g.lsums) > ownLean
+  if leaning or leaned or shared then
+    local b, u, m = pose.box, g.u, 2 * LEAN
+    local bx0, bx1 = b.min[1] + node[1] * u[1] + m, b.max[1] + node[1] * u[1] - m
+    local by0, by1 = b.min[2] + node[2] * u[2] + m, b.max[2] + node[2] * u[2] - m
+    local bz0, bz1 = b.min[3] + node[3] * u[3] + m, b.max[3] + node[3] * u[3] - m
+    if leaning or shared then
       for x = lx0, lx1 do
         for y = ly0, math.min(ly1, g.sumH - 1) do
           for z = lz0, lz1 do
-            if (x < x0 or x > x1 or y < y0 or y > y1 or z < z0 or z > z1)
-                and meets(g.focc[fkey(g, x, y, z)], on, bx0, bx1, by0, by1, bz0, bz1) then return nil end
+            if x < x0 or x > x1 or y < y0 or y > y1 or z < z0 or z > z1 then
+              local k = fkey(g, x, y, z)
+              if leaning and meets(g.focc[k], on, bx0, bx1, by0, by1, bz0, bz1) then return nil end
+              for _, M in ipairs(shared and g.lean[k] or NONE) do
+                if meets(M, on, bx0, bx1, by0, by1, bz0, bz1) then return nil end
+              end
+            end
           end
         end
       end
@@ -479,14 +496,10 @@ local function evaluate(g, node, pose, cost, path, on)
       if n[1] == node[1] + pt.node[1] and n[2] == node[2] + pt.node[2] and n[3] == node[3] + pt.node[3] then return nil end
     end
   end
-  for i, step in ipairs(path or {}) do
-    local n = step[1]
-    if i == 1 then
-      if R * n[1] + R - 1 >= x0 and R * n[1] <= x1 and R * n[2] + R - 1 >= y0 and R * n[2] <= y1
-          and R * n[3] + R - 1 >= z0 and R * n[3] <= z1 then return nil end
-    elseif inBox(n[1], n[2], n[3], tx0, tx1, ty0, ty1, tz0, tz1) then
-      return nil
-    end
+  -- path[1] is the new cross it hangs on
+  for i = 2, #(path or NONE) do
+    local n = path[i][1]
+    if inBox(n[1], n[2], n[3], tx0, tx1, ty0, ty1, tz0, tz1) then return nil end
   end
   local sx, sy, sz = x1 - x0 + 1, y1 - y0 + 1, z1 - z0 + 1
   local contacts = boxSum(g, x0, x1, y1 + 1, y1 + 1, z0, z1)
@@ -523,6 +536,12 @@ local function commit(g, rec, best)
   markTouched(g, t0, t1, own)
   markLean(g, { f[1] + pose.ftlo[1], f[2] + pose.ftlo[2], f[3] + pose.ftlo[3] }, { f[1] + pose.fthi[1], f[2] + pose.fthi[2], f[3] + pose.fthi[3] },
     { f[1] + pose.lo[1], f[2] + pose.lo[2], f[3] + pose.lo[3] }, { f[1] + pose.hi[1], f[2] + pose.hi[2], f[3] + pose.hi[3] }, rec)
+  if pose.wrap then
+    -- the wrapped cross's cells it enters: another body wrapping that cross meets it box to box
+    local none = { math.huge, math.huge, math.huge }
+    markLean(g, { f[1] + math.max(0, pose.lo[1]), f[2] + math.max(0, pose.lo[2]), f[3] + math.max(0, pose.lo[3]) },
+      { f[1] + math.min(R - 1, pose.hi[1]), f[2] + math.min(R - 1, pose.hi[2]), f[3] + math.min(R - 1, pose.hi[3]) }, none, none, rec)
+  end
   local attach
   if best.kind == "port" then
     best.port.used = true
@@ -734,7 +753,8 @@ local function place(g, rec, wide)
       if (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) - boxSum(g, x0, x1, y0, y1, z0, z1) < U.vmin then return end
     end
     for _, pose in ipairs(rec.byDi[di]) do
-      if (not best or topCost(g, node[2] + pose.top) + cost * W_COST - pose.faces * W_CONTACT < best.score)
+      -- a wrapping body hangs on a cross only
+      if not (pose.wrap and kind == "port") and (not best or topCost(g, node[2] + pose.top) + cost * W_COST - pose.faces * W_CONTACT < best.score)
           and not (banned[pose] and banned[pose][key(g, node[1], node[2], node[3])]) then
         local score = evaluate(g, node, pose, cost, extra and extra.path, extra and extra.module)
         if score and (not best or score < best.score) then
@@ -1827,13 +1847,13 @@ local function seedGrid(g, S)
       M.box.min[i] = E.box.min[i] - S.o0[i] + d[i] * u[i]
       M.box.max[i] = E.box.max[i] - S.o0[i] + d[i] * u[i]
     end
-    -- in occupancy cells: the claim (docks to the metre, as the cross cells), the cells entered past a metre
+    -- in occupancy cells: the claim (docks to the metre, as the cross cells), the cells entered past LEAN
     local flo, fhi, ftlo, fthi = {}, {}, {}, {}
     for i = 1, 3 do
       local h = u[i] / R
       local e = E.column and 1 or EPS * h
       flo[i], fhi[i] = math.floor((M.box.min[i] + e) / h + R / 2), math.floor((M.box.max[i] - e) / h + R / 2)
-      ftlo[i], fthi[i] = math.floor((M.box.min[i] + 1) / h + R / 2), math.floor((M.box.max[i] - 1) / h + R / 2)
+      ftlo[i], fthi[i] = math.floor((M.box.min[i] + LEAN) / h + R / 2), math.floor((M.box.max[i] - LEAN) / h + R / 2)
     end
     mark(E.lo, E.hi, M)
     fmark(flo, fhi, M)
@@ -2022,6 +2042,22 @@ local function detach(g, D, run)
   return true
 end
 
+-- The pack items a cross { cell, arms } gives no pose (the packer hangs them outside the grid): count, macros.
+function grid.Misfits(cross, items, R)
+  local probe, fits, n, names = { u = cross.cell, a = cross.arms, R = R or grid.subdivide }, {}, 0, {}
+  for _, it in ipairs(items) do
+    local m = it.macro
+    if not it.isConnector and not it.column and sab.macroConns[m] and sab.sizes[m] and not IsMacroClass(m, "buildmodule") then
+      if fits[m] == nil then
+        fits[m] = #poses(probe, m, false, true, true) > 0
+        if not fits[m] then names[#names + 1] = m end
+      end
+      if not fits[m] then n = n + 1 end
+    end
+  end
+  return n, names
+end
+
 -- Packs once per new-cross cost in grid.costs and keeps the best layout.
 ---@async
 local function pack(run)
@@ -2034,7 +2070,7 @@ local function pack(run)
     if not it.isConnector and not it.column and not IsMacroClass(it.macro, "buildmodule") then
       local m = byMacro[it.macro]
       if not m then
-        local ps, minCells, minSpan = poses(probe, it.macro, true), math.huge, math.huge
+        local ps, minCells, minSpan = poses(probe, it.macro, true, true), math.huge, math.huge
         for _, p in ipairs(ps) do
           local v = #p.cells / (probe.R * probe.R * probe.R)
           if v < minCells then minCells = v end
