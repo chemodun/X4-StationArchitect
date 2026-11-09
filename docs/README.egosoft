@@ -53,7 +53,7 @@ Tell the build menu what your station should produce or build: this extension wo
 [*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3823580916]Lua Log API[/url]
 [*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/2473]Lua Log API[/url]
 [/list]
-[*] [b]Extra Data API[/b]: Version [b]1.02[/b] or higher by [url=https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659]Chem O`Dun[/url].
+[*] [b]Extra Data API[/b]: Version [b]1.03[/b] or higher by [url=https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659]Chem O`Dun[/url].
 [list]
 [*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3825599643]Extra Data API[/url]
 [*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/2519]Extra Data API[/url]
@@ -159,6 +159,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [size=130][u]Videos[/u][/size]
 [list]
 [*] [url=https://www.youtube.com/watch?v=I0ORUjMGBjQ]Intro video[/url]
+[*] [url=https://www.youtube.com/watch?v=irCsdFh7BkQ]Star Wars Interworlds[/url]
 [/list]
 [size=130][u]Credits[/u][/size]
 [list]
@@ -172,7 +173,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [/list]
 [size=130][u]Changelog[/u][/size]
 
-[size=125][u][1.21] - 2026-11-??[/u][/size]
+[size=125][u][1.21] - 2026-11-09[/u][/size]
 [list]
 [*] Added
 [list]
@@ -181,12 +182,12 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] Fixed
 [list]
 [*] [b]Workforce race[/b] and [b]Modules race[/b] could start on a race you have not met, an empty choice in the list
-[*] Star Wars Interworlds habitats without a maker race could never be picked; a habitat now goes by the race of its workforce
-[*] A large workforce could plan a station-sized habitat of a total conversion and stall the run; extralarge modules are no longer planned
+[*] Star Wars Interworlds habitats without a maker race could never be picked
+[*] A large workforce could plan a station-sized habitat of a total conversion and stall the run
 [*] When a layout was packed again on the 400 m cell, the panel folded to its title and showed no progress of that second pass
-[*] Modules whose body reaches back past the connection they hang by were built inside other modules; they now get their own room in the grid layout
-[*] A cross too small for a module stacked those modules into a tower beside the station; the connection kit now prefers a cross every module fits on, and a module may wrap the small cross it hangs on
-[*] A module was refused while the mouse cursor rested over the spot it was placed at, which cost a retry each time; the cursor no longer matters
+[*] Modules whose body reaches back past the connection they hang by were built inside other modules
+[*] A cross too small for a module stacked those modules into a tower beside the station
+[*] A module was refused while the mouse cursor rested over the spot it was placed at
 [/list]
 [/list]
 [size=125][u][1.20] - 2026-11-08[/u][/size]
