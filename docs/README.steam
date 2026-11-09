@@ -7,6 +7,7 @@ Tell the build menu what your station should produce or build: this extension wo
 [*] [b]Target planner[/b]: say what the station should make, not which modules: wares on the [b]Wares[/b] tab, ships to build or resupply per hour on the [b]Ships[/b] tab; several targets in one plan.
 [*] [b]Compact layout[/b]: production, storage and habitats packed tight on connection modules; build modules on the sides with clear approach lanes; docks and piers outward.
 [*] [b]Full cycle and workforce[/b]: optionally every intermediate ware down to raw resources and energy, habitats for the workforce, and its food and medicine.
+[*] [b]Buy instead of make[/b]: untick any production module the plan adds for an intermediate ware; that ware is bought and the rest of the plan follows.
 [*] [b]Read from the game[/b]: production rates, sunlight and workforce bonuses, module sizes, docking bays, ship build times and the production lines of every build module; docks sized for the planned traffic.
 [*] [b]Docking[/b]: the dock areas and piers the planned trade needs, each count on a slider you can lower.
 [*] [b]Special resource modules[/b]: Scrap Processors fed by tugs; with [b]Full cycle[/b] their scrap metal goes into your target wares and your ships' wares before any regular production.
@@ -83,9 +84,11 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 [*] [b]Self-sufficient workforce[/b]: with [b]Full cycle[/b] and [b]Workforce[/b], the food and medicine of that workforce too.
 [*] [b]Workforce race[/b]: the race of the habitats' workforce, and so of what it eats. The list holds the races of your habitat blueprints.
 [*] [b]Storage, hours of flow[/b]: how many hours of each ware's flow the storage holds, 1 to 24, 4 by default. Each ware gets one module of the smallest size that holds it, several only of the largest size.
+[*] [b]Keep storage hours for later stations[/b]: ticking it saves the [b]Storage, hours of flow[/b] value, and while it is ticked every change of the slider is saved too. Later plans start from the saved value with the box ticked. Unticking it stops the saving; the slider and the saved value stay as they are.
 [/list]
 [/list]3. [b]Docking[/b] has one slider for dock areas and one for piers, from what the station has up to what the planned trade needs. Both start at the top; a lowered one scales along when the target changes, and back at the top it follows the need again. On an existing station they show without a target too, sized for the station's own trade.
 [list=1][*] Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning. On an existing station a line under the planned modules names the shortfalls the plan covers: wares the station makes that run short (under [b]Full cycle[/b] also the wares it uses) and missing housing.
+[*] A production module planned for anything but a target (an intermediate ware, the habitats' food, a shortfall, a ware your ships use) has a box in the planned modules, ticked. Untick it when the station should buy that ware instead: the module is not built, its row stays with the count it would take, and the plan is made again around the bought ware, its storage and docks included. The modules that only fed it go with it. The modules of the targets themselves have no box; their sliders set them.
 [/list]
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_target.png[/img]
 
@@ -175,6 +178,18 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [/list]
 [h2][b]Changelog[/b][/h2]
 
+[h2][1.22] - 2026-11-??[/h2]
+[list]
+[*] Added
+[list]
+[*] Production modules for intermediate wares can be unticked in the planned modules; their ware is bought instead
+[*] [b]Keep storage hours for later stations[/b] saves the storage hours for the next plans
+[/list]
+[*] Fixed
+[list]
+[*] [b]Modules race[/b] and [b]Workforce race[/b] listed only the races you have met, so your modules of another race could not be picked
+[/list]
+[/list]
 [h2][1.21] - 2026-11-09[/h2]
 [list]
 [*] Added
