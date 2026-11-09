@@ -1090,6 +1090,8 @@ end
 --   resupplies = { { size, rate (ships resupplied per hour), buildMacro } } share the bays' time the same way;
 --   plan.resupplies[buildMacro][size] as plan.ships.
 --   docks = { pier, area = { macro, count, max } }: the player's dock counts (planDocks); plan.docking as sized.
+--   exclude = { [macro] = true }: producers of non-goal wares left out, their ware bought; plan.excluded[macro] the
+--   count they would take, plan.optional the macros the player may leave out.
 --   special = { { macro, count (special modules to add) } }: the section, modules fed a
 --   processed ware (scrapworks); under full cycle their output and the station's surplus of it feed converters
 --   of the goal wares, then of the ships' wares (each up to its need, the rest to the first converter, the last
@@ -1276,6 +1278,7 @@ function planner.Plan(target)
   local prodCounts, habCounts, fixedCounts = {}, {}, {}
   -- prodShares: module shares of the part-time producers
   local prodShares = {}
+  local exclude, leftOut, optional = target.exclude or {}, {}, {}
   for macro, n in pairs(special) do fixedCounts[macro] = n end
   local missing = {}
   for _ = 1, 50 do
@@ -1382,6 +1385,7 @@ function planner.Plan(target)
       if demand[w] then demand[w] = demand[w] - r end
     end
     local nextCounts, nextShares, whole = {}, {}, {}
+    leftOut, optional = {}, {}
     local function rateNow(p) return rateOf(p, fraction, sunlight) end
     for w, r in pairs(demand) do
       local goals = goalMods[w]
@@ -1407,8 +1411,11 @@ function planner.Plan(target)
         local e, p = producerFor(cat, w, raceFor(w), base[w] ~= nil, r, rateNow)
         -- a producer whose effects leave it no output here (no sunlight) would ask infinite modules
         local rate = e and rateNow(p) or 0
+        if rate > 0 and not base[w] then optional[e.macro] = true end
         if r <= 0 then
           -- covered by the station's surplus
+        elseif rate > 0 and not base[w] and exclude[e.macro] then
+          leftOut[e.macro] = (leftOut[e.macro] or 0) + ceil(r / rate)
         elseif rate > 0 then
           nextCounts[e.macro] = (nextCounts[e.macro] or 0) + ceil(r / rate)
           nextShares[e.macro] = (nextShares[e.macro] or 0) + r / rate
@@ -1446,6 +1453,7 @@ function planner.Plan(target)
     for macro, n in pairs(list) do counts[macro] = (counts[macro] or 0) + n end
   end
   plan.shares = prodShares
+  plan.excluded, plan.optional = leftOut, optional
   local idle = {}
   for macro, share in pairs(prodShares) do
     if share > 0 and prodCounts[macro] / share > planner.idleFactor then idle[#idle + 1] = macro end
@@ -1608,16 +1616,23 @@ function planner.Current(station, ware)
 end
 
 -- The plan as StartBill takes it, grouped: build, production, processing, habitation, storage, dock areas, piers.
-function planner.Bill(plan)
+-- listed: the left-out producers too, in their place, with `excluded = true` (the panel's list, never a bill).
+function planner.Bill(plan, listed)
   local cat = planner.Catalogue(plan.set)
+  local excluded = listed and plan.excluded or {}
   local bill = {}
   for _, group in ipairs(GROUPS) do
     local macros = {}
-    for macro in pairs(plan.counts) do
-      if (cat.byMacro[macro] or {}).group == group then macros[#macros + 1] = macro end
+    for _, list in ipairs({ plan.counts, excluded }) do
+      for macro in pairs(list) do
+        if (cat.byMacro[macro] or {}).group == group and not (list == excluded and plan.counts[macro]) then macros[#macros + 1] = macro end
+      end
     end
     table.sort(macros)
-    for _, macro in ipairs(macros) do bill[#bill + 1] = { macro = macro, count = plan.counts[macro] } end
+    for _, macro in ipairs(macros) do
+      local n = plan.counts[macro]
+      bill[#bill + 1] = n and { macro = macro, count = n } or { macro = macro, count = excluded[macro], excluded = true }
+    end
   end
   return bill
 end

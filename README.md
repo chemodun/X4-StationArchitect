@@ -7,6 +7,7 @@ Tell the build menu what your station should produce or build: this extension wo
 - **Target planner**: say what the station should make, not which modules: wares on the **Wares** tab, ships to build or resupply per hour on the **Ships** tab; several targets in one plan.
 - **Compact layout**: production, storage and habitats packed tight on connection modules; build modules on the sides with clear approach lanes; docks and piers outward.
 - **Full cycle and workforce**: optionally every intermediate ware down to raw resources and energy, habitats for the workforce, and its food and medicine.
+- **Buy instead of make**: untick any production module the plan adds for an intermediate ware; that ware is bought and the rest of the plan follows.
 - **Read from the game**: production rates, sunlight and workforce bonuses, module sizes, docking bays, ship build times and the production lines of every build module; docks sized for the planned traffic.
 - **Docking**: the dock areas and piers the planned trade needs, each count on a slider you can lower.
 - **Special resource modules**: Scrap Processors fed by tugs; with **Full cycle** their scrap metal goes into your target wares and your ships' wares before any regular production.
@@ -72,8 +73,10 @@ Open the build menu of one of your stations. The Station Architect panel sits un
    - **Self-sufficient workforce**: with **Full cycle** and **Workforce**, the food and medicine of that workforce too.
    - **Workforce race**: the race of the habitats' workforce, and so of what it eats. The list holds the races of your habitat blueprints.
    - **Storage, hours of flow**: how many hours of each ware's flow the storage holds, 1 to 24, 4 by default. Each ware gets one module of the smallest size that holds it, several only of the largest size.
+   - **Keep storage hours for later stations**: ticking it saves the **Storage, hours of flow** value, and while it is ticked every change of the slider is saved too. Later plans start from the saved value with the box ticked. Unticking it stops the saving; the slider and the saved value stay as they are.
 3. **Docking** has one slider for dock areas and one for piers, from what the station has up to what the planned trade needs. Both start at the top; a lowered one scales along when the target changes, and back at the top it follows the need again. On an existing station they show without a target too, sized for the station's own trade.
 4. Check the preview: the planned modules, each ware's net per hour now and planned, the workforce and trade line, and any warning. On an existing station a line under the planned modules names the shortfalls the plan covers: wares the station makes that run short (under **Full cycle** also the wares it uses) and missing housing.
+5. A production module planned for anything but a target (an intermediate ware, the habitats' food, a shortfall, a ware your ships use) has a box in the planned modules, ticked. Untick it when the station should buy that ware instead: the module is not built, its row stays with the count it would take, and the plan is made again around the bought ware, its storage and docks included. The modules that only fed it go with it. The modules of the targets themselves have no box; their sliders set them.
 
 ![The Wares tab: two Hull Part Production modules with the full cycle and the workforce](docs/images/panel_target.png)
 
@@ -160,6 +163,14 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 - [SirNukes](https://next.nexusmods.com/profile/sirnukes?gameId=2659) for the Mod Support APIs that power the UI hooks.
 
 ## Changelog
+
+### [1.22] - 2026-11-??
+
+- Added
+  - Production modules for intermediate wares can be unticked in the planned modules; their ware is bought instead
+  - **Keep storage hours for later stations** saves the storage hours for the next plans
+- Fixed
+  - **Modules race** and **Workforce race** listed only the races you have met, so your modules of another race could not be picked
 
 ### [1.21] - 2026-11-09
 

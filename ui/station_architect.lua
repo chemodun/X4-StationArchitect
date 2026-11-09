@@ -2435,9 +2435,9 @@ sab.expanded = false
 -- player moved it below its max) } }, the station's and the added ones in bayOrder, newBay the editor's. special:
 -- the special resource modules { macro, count }, newSpecial the editor's. Unset choices and the race are filled
 -- from the catalogue on the first panel build (targetChoices). station: the station it was derived for. keepHours:
--- the Storage hours checkbox once clicked.
+-- the Storage hours checkbox once clicked. exclude: macro -> true, producers the player unchecked in the plan list.
 local function defaultTarget()
-  return { goals = {}, new = {}, bays = {}, bayOrder = {}, special = {}, docks = {}, fullCycle = false, workforce = true, selfSufficient = false, moduleRace = "any" }
+  return { goals = {}, new = {}, bays = {}, bayOrder = {}, special = {}, docks = {}, exclude = {}, fullCycle = false, workforce = true, selfSufficient = false, moduleRace = "any" }
 end
 sab.target = defaultTarget()
 -- the goal and bay lists show at most this many rows before they scroll
@@ -2454,7 +2454,7 @@ local SIZE_TEXTS = { xs = 52, s = 51, m = 50, l = 49, xl = 48 }
 local MAX_STORAGE_HOURS = 24
 
 -- the Storage hours kept for later stations (config storageHours); nil when none is kept
-function sab.KeptStorageHours()
+local function keptStorageHours()
   local h = tonumber(sab.cfg.storageHours)
   return h and math.max(1, math.min(MAX_STORAGE_HOURS, math.floor(h))) or nil
 end
@@ -2755,7 +2755,7 @@ function sab.TargetSpec(ctx)
   end
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals, ships = ships, resupplies = resupplies, shipBays = shipBays, special = special,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
-    race = t.race, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, storageHours = t.storageHours or sab.KeptStorageHours(), docks = t.docks }
+    race = t.race, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, storageHours = t.storageHours or keptStorageHours(), docks = t.docks, exclude = t.exclude }
 end
 
 function sab.RunTarget()
@@ -3197,7 +3197,7 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   checkbox(input(ReadText(PAGE, 120), 3), t.workforce, true, function(v) t.workforce = v end)
   checkbox(input(ReadText(PAGE, 121), 3), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
   dropdown(input(ReadText(PAGE, 149)), choices.races, t.race, function(id) t.race = id end, t.workforce)
-  local hours = t.storageHours or sab.KeptStorageHours() or sab.planner.storageHours
+  local hours = t.storageHours or keptStorageHours() or sab.planner.storageHours
   row = stable:addRow(true, {})
   row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1, max = MAX_STORAGE_HOURS,
     start = hours, step = 1, readOnly = not idle }):setText(ReadText(PAGE, 148))
@@ -3206,7 +3206,7 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   -- a new target keeps when a value is kept; unchecking stops saving and leaves the kept value
   local function keeping()
     if t.keepHours ~= nil then return t.keepHours end
-    return sab.KeptStorageHours() ~= nil
+    return keptStorageHours() ~= nil
   end
   row[1].handlers.onSliderCellConfirm = function()
     if keeping() then sab.WriteConfig("storageHours", t.storageHours or hours) end
@@ -3256,10 +3256,22 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
     row[1]:setColSpan(4):createText(string.format(tostring(ReadText(PAGE, 125)), tostring(plan)), { color = Color["text_warning"] })
     return nil, tabOrder, ptable.properties.y + ptable:getVisibleHeight() + Helper.borderSize
   end
-  for _, b in ipairs(sab.planner.Bill(plan)) do
+  -- a producer of a non-goal ware can be unchecked: its ware is bought, its row stays with the count it would take
+  local optional = plan.optional or {}
+  for _, b in ipairs(sab.planner.Bill(plan, true)) do
     row = ptable:addRow(true, {})
     row[1]:createText(tostring(b.count) .. " x", { halign = "right" })
-    row[2]:setColSpan(3):createText(cat.byMacro[b.macro].name, {})
+    if optional[b.macro] or b.excluded then
+      local macro = b.macro
+      row[2]:setColSpan(2):createText(cat.byMacro[macro].name, {})
+      row[4]:createCheckBox(not t.exclude[macro], { height = Helper.standardTextHeight, width = Helper.standardTextHeight, active = idle })
+      row[4].handlers.onClick = function(_, checked)
+        t.exclude[macro] = (not checked) or nil
+        dirty()
+      end
+    else
+      row[2]:setColSpan(3):createText(cat.byMacro[b.macro].name, {})
+    end
   end
   if plan.lacks and plan.lacks.any then
     local names = {}
