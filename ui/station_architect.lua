@@ -846,6 +846,10 @@ local function finishPlacement(run, item)
           dropFloating(editor)
           count = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
           sab.Debug("%s: %s with the module overlap test off, the boxes are clear", item.macro, count > run.countBefore and "dropped" or "refused")
+          local rec = item.gridRec
+          if count > run.countBefore and rec and rec.pose and rec.pose.wrap then
+            sab.Debug("%s: it wraps the cross of entry %d, its body may touch that cross", item.macro, snap.entryIdx)
+          end
           if count <= run.countBefore and sab.debugLevel ~= "none" then sab.Debug("  %s", sab.RefusalText(run, item, editor, snap, dropBox)) end
         else
           sab.Debug("%s: the snap moved with the module overlap test off, not dropped", item.macro)
@@ -1434,9 +1438,12 @@ local function crossShape(conns)
   return arms, arm, cell
 end
 
--- Owned blueprints of the plot's set, read live: the menu's lists are built when it opens.
+-- Owned blueprints of the plot's set, read live: the menu's lists are built when it opens. Without the planner,
+-- the menu's list.
 local function owned(lib)
-  return sab.planner.Blueprints(sab.menu.set or "", lib)
+  local planner = sab.planner
+  if planner and planner.Blueprints then return planner.Blueprints(sab.menu.set or "", lib) end
+  return sab.menu.modules and sab.menu.modules[lib] or {}
 end
 
 -- The owned connection modules as a kit: the cross only first, then the fewest grid items without a pose on it

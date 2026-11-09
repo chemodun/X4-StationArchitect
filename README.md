@@ -45,7 +45,7 @@ Tell the build menu what your station should produce or build: this extension wo
 - **Lua Log API**: Version **1.00** or higher by [Chem O`Dun](https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659).
   - Available on Steam: [Lua Log API](https://steamcommunity.com/sharedfiles/filedetails/?id=3823580916)
   - Available on Nexus Mods: [Lua Log API](https://www.nexusmods.com/x4foundations/mods/2473)
-- **Extra Data API**: Version **1.02** or higher by [Chem O`Dun](https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659).
+- **Extra Data API**: Version **1.03** or higher by [Chem O`Dun](https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659).
   - Available on Steam: [Extra Data API](https://steamcommunity.com/sharedfiles/filedetails/?id=3825599643)
   - Available on Nexus Mods: [Extra Data API](https://www.nexusmods.com/x4foundations/mods/2519)
 
@@ -147,6 +147,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 ## Videos
 
 - [Intro video](https://www.youtube.com/watch?v=I0ORUjMGBjQ)
+- [Star Wars Interworlds](https://www.youtube.com/watch?v=irCsdFh7BkQ)
 
 ## Credits
 
@@ -160,18 +161,18 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 
 ## Changelog
 
-### [1.21] - 2026-11-??
+### [1.21] - 2026-11-09
 
 - Added
   - Tested with Star Wars Interworlds and adapted to work with it
 - Fixed
   - **Workforce race** and **Modules race** could start on a race you have not met, an empty choice in the list
-  - Star Wars Interworlds habitats without a maker race could never be picked; a habitat now goes by the race of its workforce
-  - A large workforce could plan a station-sized habitat of a total conversion and stall the run; extralarge modules are no longer planned
+  - Star Wars Interworlds habitats without a maker race could never be picked
+  - A large workforce could plan a station-sized habitat of a total conversion and stall the run
   - When a layout was packed again on the 400 m cell, the panel folded to its title and showed no progress of that second pass
-  - Modules whose body reaches back past the connection they hang by were built inside other modules; they now get their own room in the grid layout
-  - A cross too small for a module stacked those modules into a tower beside the station; the connection kit now prefers a cross every module fits on, and a module may wrap the small cross it hangs on
-  - A module was refused while the mouse cursor rested over the spot it was placed at, which cost a retry each time; the cursor no longer matters
+  - Modules whose body reaches back past the connection they hang by were built inside other modules
+  - A cross too small for a module stacked those modules into a tower beside the station
+  - A module was refused while the mouse cursor rested over the spot it was placed at
 
 ### [1.20] - 2026-11-08
 
