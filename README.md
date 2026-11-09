@@ -166,6 +166,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
   - **Workforce race** and **Modules race** could start on a race you have not met, an empty choice in the list
   - Star Wars Interworlds habitats without a maker race could never be picked; a habitat now goes by the race of its workforce
   - A large workforce with Star Wars Interworlds planned its station-sized Free Port and stalled the run; extralarge modules are no longer planned
+  - When a layout was packed again on the 400 m cell, the panel folded to its title and showed no progress of that second pass
 
 ### [1.20] - 2026-11-08
 

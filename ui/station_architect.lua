@@ -2143,14 +2143,20 @@ end
 -- A layout packed on the finer cell that the editor refuses: the run's entries out, the same bill packed again
 -- on the 400 m cell.
 local function fallBackToCoarse(run, item)
-  local rb = run.restartBill
+  local rb, expanded = run.restartBill, sab.expanded
   removePlaced(run)
   run.placed = 0
   sab.StopRun("the layout is packed again on the 400 m cell")
+  -- the second pass shows its progress as the first did
+  local result = sab.lastRun
+  sab.expanded, sab.lastRun = expanded, nil
   local opts = {}
   for k, v in pairs(rb.opts or {}) do opts[k] = v end
   opts.subdivide = 1
-  if not sab.StartBill(rb.bill, opts) then sab.lastRun.failedTwice = GetMacroData(item.macro, "name") end
+  if not sab.StartBill(rb.bill, opts) then
+    sab.expanded, sab.lastRun = false, result
+    result.failedTwice = GetMacroData(item.macro, "name")
+  end
 end
 
 -- One step per menu update.
