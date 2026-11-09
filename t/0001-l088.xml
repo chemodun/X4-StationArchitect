@@ -55,6 +55,7 @@
       <t id="162">%s 補給每小時（目前 %s）</t>
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
+      <t id="165">為以後的空間站保留倉儲小時數</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">空間站建築師</t>

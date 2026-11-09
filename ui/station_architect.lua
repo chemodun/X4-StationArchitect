@@ -105,6 +105,17 @@ function sab.ReadConfig()
   sab.panelDirty = true
 end
 
+-- nil removes the key
+function sab.WriteConfig(key, value)
+  if not sab.playerId or sab.playerId == 0 then return end
+  local cfg = GetNPCBlackboard(sab.playerId, sab.configBlackboard)
+  cfg = (type(cfg) == "table") and cfg or {}
+  cfg[key] = value
+  SetNPCBlackboard(sab.playerId, sab.configBlackboard, cfg)
+  sab.cfg = cfg
+  sab.Debug("config %s set to %s", key, tostring(value))
+end
+
 -- *** module sizes ***
 -- half-extents about a centre, metres, from the Extra Data API; nil when it cannot answer
 
@@ -2423,7 +2434,8 @@ sab.expanded = false
 -- count the rates were fitted to), rates: size -> { rate (ships per hour, nil until fitted), hours, max, set (the
 -- player moved it below its max) } }, the station's and the added ones in bayOrder, newBay the editor's. special:
 -- the special resource modules { macro, count }, newSpecial the editor's. Unset choices and the race are filled
--- from the catalogue on the first panel build (targetChoices). station: the station it was derived for.
+-- from the catalogue on the first panel build (targetChoices). station: the station it was derived for. keepHours:
+-- the Storage hours checkbox once clicked.
 local function defaultTarget()
   return { goals = {}, new = {}, bays = {}, bayOrder = {}, special = {}, docks = {}, fullCycle = false, workforce = true, selfSufficient = false, moduleRace = "any" }
 end
@@ -2438,8 +2450,14 @@ local MAX_BAYS = 10
 local MAX_SPECIAL = 10
 -- ship size -> vanilla's size text on page 1001; the order of the Ships rows, sizes without one after by name
 local SIZE_TEXTS = { xs = 52, s = 51, m = 50, l = 49, xl = 48 }
--- storage per ware in hours of its flow; nil in a target keeps the planner's default
+-- storage per ware in hours of its flow; nil in a target takes the kept value, else the planner's default
 local MAX_STORAGE_HOURS = 24
+
+-- the Storage hours kept for later stations (config storageHours); nil when none is kept
+function sab.KeptStorageHours()
+  local h = tonumber(sab.cfg.storageHours)
+  return h and math.max(1, math.min(MAX_STORAGE_HOURS, math.floor(h))) or nil
+end
 
 function sab.ResetTarget()
   sab.target = defaultTarget()
@@ -2737,7 +2755,7 @@ function sab.TargetSpec(ctx)
   end
   return { set = ctx.set, station = ctx.station, sunlight = ctx.sunlight, goals = goals, ships = ships, resupplies = resupplies, shipBays = shipBays, special = special,
     fullCycle = t.fullCycle, workforce = t.workforce, selfSufficient = t.fullCycle and t.workforce and t.selfSufficient,
-    race = t.race, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, storageHours = t.storageHours, docks = t.docks }
+    race = t.race, moduleRace = t.moduleRace ~= "any" and t.moduleRace or nil, storageHours = t.storageHours or sab.KeptStorageHours(), docks = t.docks }
 end
 
 function sab.RunTarget()
@@ -3179,12 +3197,26 @@ local function addTargetTables(frame, tabOrder, y, bottom, idle, buttonHeight, c
   checkbox(input(ReadText(PAGE, 120), 3), t.workforce, true, function(v) t.workforce = v end)
   checkbox(input(ReadText(PAGE, 121), 3), t.selfSufficient, t.fullCycle and t.workforce, function(v) t.selfSufficient = v end)
   dropdown(input(ReadText(PAGE, 149)), choices.races, t.race, function(id) t.race = id end, t.workforce)
+  local hours = t.storageHours or sab.KeptStorageHours() or sab.planner.storageHours
   row = stable:addRow(true, {})
   row[1]:setColSpan(4):createSliderCell({ height = buttonHeight, valueColor = Color["slider_value"], min = 1, minSelect = 1, max = MAX_STORAGE_HOURS,
-    start = t.storageHours or sab.planner.storageHours, step = 1, readOnly = not idle }):setText(ReadText(PAGE, 148))
+    start = hours, step = 1, readOnly = not idle }):setText(ReadText(PAGE, 148))
   ---@diagnostic disable-next-line: inject-field
   row[1].handlers.onSliderCellChanged = function(_, value) t.storageHours = value end
-  row[1].handlers.onSliderCellConfirm = dirty
+  -- a new target keeps when a value is kept; unchecking stops saving and leaves the kept value
+  local function keeping()
+    if t.keepHours ~= nil then return t.keepHours end
+    return sab.KeptStorageHours() ~= nil
+  end
+  row[1].handlers.onSliderCellConfirm = function()
+    if keeping() then sab.WriteConfig("storageHours", t.storageHours or hours) end
+    dirty()
+  end
+  checkbox(input(ReadText(PAGE, 165), 3), keeping(), true, function(v)
+    ---@diagnostic disable-next-line: inject-field
+    t.keepHours = v
+    if v then sab.WriteConfig("storageHours", t.storageHours or hours) end
+  end)
   if extraRows then extraRows(kit) end
   y = stable.properties.y + stable:getVisibleHeight() + Helper.borderSize
 
