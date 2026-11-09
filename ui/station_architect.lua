@@ -25,6 +25,8 @@ ffi.cdef [[
   void AddMacroToConstructionMap(UniverseID holomapid, const char* macroname, bool startdragging);
   void GenerateModuleLoadout(UILoadout* result, UniverseID holomapid, size_t cp_idx, UniverseID defensibleid, float level);
   void GenerateModuleLoadoutCounts(UILoadoutCounts* result, UniverseID holomapid, size_t cp_idx, UniverseID defensibleid, float level);
+  uint32_t GetAllRaces(RaceInfo* result, uint32_t resultlen);
+  uint32_t GetNumAllRaces(void);
   size_t GetNumBuildMapConstructionPlan(UniverseID holomapid, bool usestoredplan);
   size_t GetNumUpgradeSlots(UniverseID destructibleid, const char* macroname, const char* upgradetypename);
   UniverseID GetPlayerID(void);
@@ -59,6 +61,7 @@ local I64P = ffi.typeof("int64_t*")
 -- vanilla's cdefs (ego_detailmonitor loads first); the Plan2 variant is 9.00 only
 local PLAN_ENTRIES = ffi.typeof("UIConstructionPlanEntry[?]")
 local BOOL1 = ffi.typeof("bool[1]")
+local RACES = ffi.typeof("RaceInfo[?]")
 
 -- 9.00 only; 8.00 has no such export, its build menu never grows the plot
 local hasUpdatePlot, updatePlot = pcall(function() return C.UpdateConstructionMapBuildPlot end)
@@ -2531,11 +2534,15 @@ local function targetChoices(cat, ctx)
       for r in pairs(e.races) do makers[r] = true end
     end
   end
-  -- the races the player has met
+  -- every race, met or not (GetLibrary lists the met ones only); a race without owned modules stays out
   local raceSet, makerSet = {}, {}
-  for _, r in ipairs(GetLibrary("races")) do
-    if habitats[r.id] then races[#races + 1], raceSet[r.id] = option(r.id, r.name), true end
-    if makers[r.id] then moduleRaces[#moduleRaces + 1], makerSet[r.id] = option(r.id, r.name), true end
+  local n = C.GetNumAllRaces()
+  local buf = ffi.new(RACES, n)
+  n = C.GetAllRaces(buf, n)
+  for i = 0, n - 1 do
+    local id, name = ffi.string(buf[i].id), ffi.string(buf[i].name)
+    if habitats[id] then races[#races + 1], raceSet[id] = option(id, name), true end
+    if makers[id] then moduleRaces[#moduleRaces + 1], makerSet[id] = option(id, name), true end
   end
   sortedByText(races); sortedByText(moduleRaces)
   table.insert(moduleRaces, 1, option("any", ReadText(PAGE, 151)))
