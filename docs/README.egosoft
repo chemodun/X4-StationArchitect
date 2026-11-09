@@ -81,7 +81,7 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 [*] [b]Full cycle[/b]: every intermediate ware down to raw resources and energy.
 [*] [b]Workforce[/b]: habitats for the workforce of the planned modules. On an existing station it starts unticked while the station has no habitat.
 [*] [b]Self-sufficient workforce[/b]: with [b]Full cycle[/b] and [b]Workforce[/b], the food and medicine of that workforce too.
-[*] [b]Workforce race[/b]: the race of the habitats' workforce, and so of what it eats. The list holds the races you have met.
+[*] [b]Workforce race[/b]: the race of the habitats' workforce, and so of what it eats. The list holds the races of your habitat blueprints.
 [*] [b]Storage, hours of flow[/b]: how many hours of each ware's flow the storage holds, 1 to 24, 4 by default. Each ware gets one module of the smallest size that holds it, several only of the largest size.
 [/list]
 [/list]3. [b]Docking[/b] has one slider for dock areas and one for piers, from what the station has up to what the planned trade needs. Both start at the top; a lowered one scales along when the target changes, and back at the top it follows the need again. On an existing station they show without a target too, sized for the station's own trade.
