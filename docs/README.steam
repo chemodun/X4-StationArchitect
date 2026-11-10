@@ -7,7 +7,7 @@ Tell the build menu what your station should produce or build: this extension wo
 [*] [b]Target planner[/b]: say what the station should make, not which modules: wares on the [b]Wares[/b] tab, ships to build or resupply per hour on the [b]Ships[/b] tab; several targets in one plan.
 [*] [b]Compact layout[/b]: production, storage and habitats packed tight on connection modules; build modules on the sides with clear approach lanes; docks and piers outward.
 [*] [b]Full cycle and workforce[/b]: optionally every intermediate ware down to raw resources and energy, habitats for the workforce, and its food and medicine.
-[*] [b]Buy instead of make[/b]: untick any production module the plan adds for an intermediate ware; that ware is bought and the rest of the plan follows.
+[*] [b]Buy instead of make[/b]: untick a production module the plan adds for anything but a target; its ware is bought and the rest of the plan follows.
 [*] [b]Read from the game[/b]: production rates, sunlight and workforce bonuses, module sizes, docking bays, ship build times and the production lines of every build module; docks sized for the planned traffic.
 [*] [b]Docking[/b]: the dock areas and piers the planned trade needs, each count on a slider you can lower.
 [*] [b]Special resource modules[/b]: Scrap Processors fed by tugs; with [b]Full cycle[/b] their scrap metal goes into your target wares and your ships' wares before any regular production.
@@ -122,7 +122,7 @@ Their scrap metal feeds the scrap recycling modules that make your target wares 
 [/list]
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_licence.png[/img]
 [list=1]
-[*] The run places the modules one after another, in turns from the bottom up: the station works after its first turn and every turn adds output, its storage and production chain from energy up, the final product last, then the dock areas and piers its trade needs. A new station opens its first turn with one pier and one dock area and grows from that pier; habitats and the modules that only feed them come after 40 % of the turns, spread evenly over the rest. The panel shows the progress and the turn, and [b]Stop[/b] halts the run after the current module. Changing the plan by hand stops the run too, and closing the build menu ends it. The menu's lists are rebuilt once when the run ends, not after every module.
+[*] The run places the modules one after another, in turns from the bottom up: the station works after its first turn and every turn adds output, its storage and production chain from energy up, the final product last, then the dock areas and piers its trade needs. A new station opens its first turn with one pier and one dock area and grows from that pier; habitats and the modules that only feed them come after 30 % of the turns, spread evenly over the rest. The panel shows the progress and the turn, and [b]Stop[/b] halts the run after the current module. Changing the plan by hand stops the run too, and closing the build menu ends it. The menu's lists are rebuilt once when the run ends, not after every module.
 [/list]
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_running.png[/img]
 
@@ -180,11 +180,11 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [/list]
 [h2][b]Changelog[/b][/h2]
 
-[h2][1.22] - 2026-11-??[/h2]
+[h2][1.30] - 2026-11-10[/h2]
 [list]
 [*] Added
 [list]
-[*] Production modules for intermediate wares can be unticked in the planned modules; their ware is bought instead
+[*] Production modules planned for anything but a target can be unticked in the planned modules; their ware is bought instead
 [*] [b]Keep storage hours for later stations[/b] saves the storage hours for the next plans
 [/list]
 [*] Changed
@@ -192,6 +192,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] A station without connection structures is upgraded on the grid too: from its free connections, or beside it when they have no room
 [*] The plot grown for a plan goes back to its earlier size when the plan is cancelled, left unconfirmed at closing, or no longer needs it at the next run; a paid plot is kept
 [*] The licence still due after a run is shown as an additional fee
+[*] Habitats and the modules that only feed them come earlier in a run
 [/list]
 [*] Fixed
 [list]
