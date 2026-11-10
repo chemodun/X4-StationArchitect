@@ -516,6 +516,7 @@ end
 ---@async
 local function commit(g, rec, best)
   local node, pose, R = best.node, best.pose, g.R
+  g.commits = g.commits + 1
   local f = { R * node[1], R * node[2], R * node[3] }
   for _, off in ipairs(pose.cells) do
     g.focc[fkey(g, f[1] + off[1], f[2] + off[2], f[3] + off[3])] = rec
@@ -764,7 +765,8 @@ local function place(g, rec, wide)
       end
     end
   end
-  if not g.root then
+  -- a seed without crosses grows from its ports only
+  if not g.root and not g.seeded then
     for x = 0, g.sx - 1 do
       for z = 0, g.sz - 1 do
         for di = 1, 6 do consider("root", { x, 0, z }, di, 1) end
@@ -1625,6 +1627,16 @@ local function emit(g, run, D)
   return items
 end
 
+local NO_PLACEMENT = { node = { 0, 0, 0 }, kind = "port", pose = { ccells = {}, ports = {}, tlo = { 0, 0, 0 }, thi = { -1, -1, -1 } } }
+
+-- Whether the tree reaches the free space above everything now; approach zones over the whole footprint close it
+-- for good, and then no placement can close it.
+---@async
+local function openAbove(g)
+  if g.openAt ~= g.commits then g.openAt, g.open = g.commits, keepsAccess(g, NO_PLACEMENT) end
+  return g.open
+end
+
 -- Lowest floor first; a placement that closes the way up is banned and the next best taken. A failure
 -- leaves the floor where it was.
 ---@async
@@ -1634,7 +1646,7 @@ local function findPlace(g, rec)
   while true do
     local best = place(g, rec)
     if best then
-      if keepsAccess(g, best) then return best end
+      if keepsAccess(g, best) or not openAbove(g) then return best end
       local k = key(g, best.node[1], best.node[2], best.node[3])
       rec.banned[best.pose] = rec.banned[best.pose] or {}
       rec.banned[best.pose][k] = true
@@ -1680,8 +1692,54 @@ local function cellRange(box, c0, u, eps)
   return lo, hi
 end
 
--- run.seed for pack, false when the plan has no lattice with a free attach point.
-function grid.Seed(run)
+local function onLattice(p, c0, u)
+  local r = {}
+  for i = 1, 3 do
+    local f = (p[i] - c0[i]) / u[i]
+    r[i] = math.floor(f + 0.5)
+    if math.abs(f - r[i]) * u[i] > 1 then return nil end
+  end
+  return r
+end
+
+-- A plan without kit crosses: the lattice of a cross on a free connection, the one most free connections land
+-- on; a cross there must keep clear of every body and approach zone.
+local function looseLattice(run, a, cc)
+  local cands = {}
+  for _, f in ipairs(run.conns) do
+    local pose = run.poses[f.entryIdx]
+    local di = not f.used and pose and axisAligned(pose.rows) and dirIndex(f.dir)
+    if di then
+      local p = { f.pos[1] + a[1] * f.dir[1], f.pos[2] + a[2] * f.dir[2], f.pos[3] + a[3] * f.dir[3] }
+      local box = { min = { p[1] - a[1], p[2] - a[2], p[3] - a[3] }, max = { p[1] + a[1], p[2] + a[2], p[3] + a[3] } }
+      local clear = true
+      for idx, b in pairs(run.boxes) do
+        if hit(box, b) then clear = false break end
+        for _, z in ipairs(run.zones[idx] or {}) do
+          if hit(box, z) then clear = false break end
+        end
+        if not clear then break end
+      end
+      if clear then cands[#cands + 1] = { p = p, idx = f.entryIdx, name = f.name } end
+    end
+  end
+  table.sort(cands, function(x, y) return x.idx < y.idx or (x.idx == y.idx and x.name < y.name) end)
+  local best, most = nil, 0
+  for _, A in ipairs(cands) do
+    local n = 0
+    for _, B in ipairs(cands) do
+      if onLattice(B.p, A.p, run.kit.cell) then n = n + 1 end
+    end
+    if n > most then best, most = A, n end
+  end
+  if not best then return nil end
+  sab.Debug("grid: no kit cross on the plan; %d of %d clear free connections on the lattice of %s's %s", most, #cands, run.macros[best.idx], best.name)
+  return { o = best.p, c = { best.p[1] + cc[1], best.p[2] + cc[2], best.p[3] + cc[3] } }
+end
+
+-- run.seed for pack, false when the plan has no lattice with a free attach point. loose: the lattice from the
+-- free connections (looseLattice), every entry an obstacle.
+function grid.Seed(run, loose)
   run.seed = nil
   local geo, kit = sab.geo, run.kit
   local u, a = kit.cell, kit.arms
@@ -1693,37 +1751,33 @@ function grid.Seed(run)
   local centres = {}
   for _, idx in ipairs(ids) do
     local pose = run.poses[idx]
-    if run.macros[idx] == kit.cross.macro and pose and axisAligned(pose.rows) and not (run.stacked and run.stackedIdx[idx]) then
+    if not loose and run.macros[idx] == kit.cross.macro and pose and axisAligned(pose.rows) and not (run.stacked and run.stackedIdx[idx]) then
       local c = geo.rotate(cc, pose.rows)
-      centres[#centres + 1] = { idx = idx, c = { pose.x + c[1], pose.y + c[2], pose.z + c[3] } }
+      centres[#centres + 1] = { idx = idx, c = { pose.x + c[1], pose.y + c[2], pose.z + c[3] }, o = { pose.x, pose.y, pose.z } }
     end
-  end
-  local function onLattice(p, c0)
-    local r = {}
-    for i = 1, 3 do
-      local f = (p[i] - c0[i]) / u[i]
-      r[i] = math.floor(f + 0.5)
-      if math.abs(f - r[i]) * u[i] > 1 then return nil end
-    end
-    return r
   end
   local ref, members
   for _, A in ipairs(centres) do
     local list = {}
     for _, B in ipairs(centres) do
-      local r = onLattice(B.c, A.c)
+      local r = onLattice(B.c, A.c, u)
       if r then list[#list + 1] = { idx = B.idx, r = r } end
     end
     if not members or #list > #members then ref, members = A, list end
   end
-  if not members then
+  if loose then
+    ref, members = looseLattice(run, a, cc), {}
+    if not ref then
+      sab.Debug("grid: no free connection keeps a cross clear of the station")
+      return false
+    end
+  elseif not members then
     sab.Debug("grid: no %s on the plan", kit.cross.macro)
     return false
   end
   local c0 = ref.c
   -- modules, ports and zones count from where the arms meet (the cross's origin), as poses() does
-  local p0 = run.poses[ref.idx]
-  local o0 = { p0.x, p0.y, p0.z }
+  local o0 = ref.o
   local byEntry = {}
   for _, f in ipairs(run.conns) do
     byEntry[f.entryIdx] = byEntry[f.entryIdx] or {}
@@ -1778,7 +1832,7 @@ function grid.Seed(run)
       local own = not run.stacked or ownPart[run.comp[idx] or idx]
       for _, f in ipairs(own and byEntry[idx] or {}) do
         local di = not f.used and dirIndex(f.dir)
-        local r = di and onLattice({ f.pos[1] + a[1] * f.dir[1], f.pos[2] + a[2] * f.dir[2], f.pos[3] + a[3] * f.dir[3] }, o0)
+        local r = di and onLattice({ f.pos[1] + a[1] * f.dir[1], f.pos[2] + a[2] * f.dir[2], f.pos[3] + a[3] * f.dir[3] }, o0, u)
         if r then
           E.ports[#E.ports + 1] = { name = f.name, r = r, di = di }
           attach = attach + 1
@@ -1788,10 +1842,11 @@ function grid.Seed(run)
       S.entries[#S.entries + 1] = E
     end
   end
-  if attach == 0 then
+  if attach == 0 or S.lo[1] > S.hi[1] then
     sab.Debug("grid: the lattice of %d %s has no free arm or port", #S.crosses, kit.cross.macro)
     return false
   end
+  S.loose = loose
   S.size = { S.hi[1] - S.lo[1] + 1, S.hi[2] - S.lo[2] + 1, S.hi[3] - S.lo[3] + 1 }
   S.cells = 0
   for _ in pairs(cells) do S.cells = S.cells + 1 end
@@ -1816,13 +1871,14 @@ local function seedGrid(g, S)
   end
   -- the dock stage's frame: the root cross's origin at g.origin less its centre offset
   local shift = { S.cc[1] - g.origin[1], S.cc[2] - g.origin[2], S.cc[3] - g.origin[3] }
-  local function mark(lo, hi, M)
+  -- an approach zone blocks its cells but is no body: a 100 km lane upward must not raise the layout's top
+  local function mark(lo, hi, M, zone)
     for x = math.max(0, lo[1] + d[1]), math.min(g.sx - 1, hi[1] + d[1]) do
       for y = math.max(0, lo[2] + d[2]), hi[2] + d[2] do
         for z = math.max(0, lo[3] + d[3]), math.min(g.sz - 1, hi[3] + d[3]) do
           local k = key(g, x, y, z)
           if not g.occ[k] then g.occ[k] = M end
-          if y > g.top then g.top = y end
+          if not zone and y > g.top then g.top = y end
         end
       end
     end
@@ -1858,7 +1914,7 @@ local function seedGrid(g, S)
     mark(E.lo, E.hi, M)
     fmark(flo, fhi, M)
     for _, zc in ipairs(E.zoneCells) do
-      mark(zc[1], zc[2], M)
+      mark(zc[1], zc[2], M, true)
       fmark({ R * (zc[1][1] + d[1]), R * (zc[1][2] + d[2]), R * (zc[1][3] + d[3]) },
         { R * (zc[2][1] + d[1]) + R - 1, R * (zc[2][2] + d[2]) + R - 1, R * (zc[2][3] + d[3]) + R - 1 }, M)
     end
@@ -1885,6 +1941,7 @@ local function seedGrid(g, S)
   end
   g.existingCrosses = #S.crosses
   g.free = S.size[2] - 1
+  g.seeded = true
 end
 
 -- One layout of every module at the current weights; seed: the plan's entries (grid.Seed); R: occupancy cells
@@ -1892,7 +1949,7 @@ end
 ---@async
 local function layout(kit, base, sx, sz, tallest, progress, seed, R)
   local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, occ = {}, focc = {}, dirty = {},
-    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {},
+    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, commits = 0,
     started = getElapsedTime() }
   if seed then seedGrid(g, seed) end
   rebuildSums(g)
@@ -2141,6 +2198,12 @@ local function pack(run)
     end
   end
   W_COST = wCost
+  if S and S.loose and #cands[1].failed > 0 then
+    sab.Debug("grid: %d modules find no place on the station's free connections, a detached grid instead", #cands[1].failed)
+    run.seed = nil
+    if sab.DetachedRoot(run) then return pack(run) end
+    run.seed = S
+  end
   -- best first, each with its docks until one hangs every dock: fewest docks without a place, then fewest free;
   -- the free drops wait until no layout hangs every dock
   table.sort(cands, better)
@@ -2168,7 +2231,7 @@ local function pack(run)
   end
   grid.lastDocks = D
   for _, M in ipairs(g.modules) do M.item.gridRec = M end
-  if run.detached and not detach(g, D, run) then error("no side of the stacked station keeps the layout clear within the plot cap", 0) end
+  if run.detached and not detach(g, D, run) then error("no side of the station keeps the layout clear within the plot cap", 0) end
   applyDocks(g, D)
   local box = layoutBox(D)
   -- per axis, the shift that fits the layout into the plot's faces, else onto whole km faces, when that saves plot km

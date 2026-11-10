@@ -169,8 +169,12 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 - Added
   - Production modules for intermediate wares can be unticked in the planned modules; their ware is bought instead
   - **Keep storage hours for later stations** saves the storage hours for the next plans
+- Changed
+  - A station without connection structures is upgraded on the grid too: from its free connections, or beside it when they have no room
 - Fixed
   - **Modules race** and **Workforce race** listed only the races you have met, so your modules of another race could not be picked
+  - An upgrade beside a pier whose approach lanes point up refused its new docks as past the plot limit, and planned slowly
+  - Planning could run on for hours when approach lanes covered all the space above the station
 
 ### [1.21] - 2026-11-09
 

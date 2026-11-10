@@ -1648,9 +1648,8 @@ local function approaches(macro)
   return n
 end
 
--- The root of a stacked station's detached grid: the bill's pier with the fewest approach directions, else one
--- owned pier more (the plan's race first, then the fewest approach directions, then the most docks up to a big
--- pier).
+-- The root of a detached grid: the bill's pier with the fewest approach directions, else one owned pier more
+-- (the plan's race first, then the fewest approach directions, then the most docks up to a big pier).
 local function rootPier(run)
   local best
   for _, it in ipairs(run.items) do
@@ -1679,8 +1678,18 @@ local function rootPier(run)
   local it = { macro = pick, pack = true, outer = outerClass(pick), column = columnClass(pick), turn = run.items[1] and run.items[1].turn,
     group = groupOf(pick), volume = size and size.maxX * size.maxY * size.maxZ or 0, extra = true }
   run.items[#run.items + 1] = it
-  sab.Debug("stacked station: no pier in the bill, one %s more as the root", pick)
+  sab.Debug("detached grid: no pier in the bill, one %s more as the root", pick)
   return it
+end
+
+-- The upgrade packed as a grid of its own beside the station, rooted on a free pier; false without one.
+function sab.DetachedRoot(run)
+  local pier = rootPier(run)
+  if not pier then return false end
+  pier.rootPier = true
+  run.rootPier, run.detached = pier, true
+  sab.Debug("a detached grid rooted on %s", pier.macro)
+  return true
 end
 
 -- The greedy route keeps the turns but places a turn's outer modules after its inner ones, so an early pier's
@@ -1744,14 +1753,10 @@ local function finishLayout(run)
     run.phase = "begin"
     return
   end
-  -- an upgrade packs on the grid only around crosses that already stand on one; a stacked station without them
-  -- gets a grid of its own beside it, rooted on a free pier
-  if not run.fromEmpty and not (run.kit and (sab.grid.Seed(run) or reseed(run))) then
-    run.rootPier = run.kit and run.stacked and rootPier(run)
-    if run.rootPier then
-      run.rootPier.rootPier = true
-      run.detached = true
-      sab.Debug("stacked station: a detached grid rooted on %s", run.rootPier.macro)
+  -- an upgrade grows on the crosses of its lattice, else on its free connections (not on a stacked station);
+  -- with neither, or modules left without a place there (grid pack), a grid of its own beside it
+  if not run.fromEmpty and not (run.kit and (sab.grid.Seed(run) or reseed(run) or (not run.stacked and sab.grid.Seed(run, true)))) then
+    if run.kit and sab.DetachedRoot(run) then
       sab.grid.Start(run)
       return
     end

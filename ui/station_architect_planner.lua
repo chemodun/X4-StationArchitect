@@ -69,7 +69,7 @@ local planner = {
   basePierDocks = 3,          -- a station without docks gets at least this, as vanilla's smallest prefabs
   baseDockAreas = 1,
   bigPier = 3,               -- piers with more docks: one per station at most, at the bottom
-  livingStart = 0.4,          -- share of the turns done before the habitats and what only feeds them
+  livingStart = 0.3,          -- share of the turns done before the habitats and what only feeds them
   idleFactor = 10,            -- a producer over this many times its demand: a better fit, else a warning
   -- set -> catalogue of owned module blueprints
   catalogue = {},
