@@ -56,6 +56,7 @@
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
       <t id="165">为以后的空间站保留仓储小时数</t>
+      <t id="166">额外的规划许可证费用</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">空间站建筑师</t>

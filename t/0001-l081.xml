@@ -56,6 +56,7 @@
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
       <t id="165">保管庫の時間数を今後のステーションにも使用</t>
+      <t id="166">追加のプロットライセンス料</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">ステーション建築家</t>

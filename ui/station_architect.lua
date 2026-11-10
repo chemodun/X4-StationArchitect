@@ -1291,8 +1291,8 @@ function plot.facesText(e)
     e.pos[3] / 1000, e.neg[3] / 1000)
 end
 
--- The runs' growth no plan needs any more undone: faces back towards the record's before, never below box (station
--- frame, nil: none) nor a faction sector's paid plot, never outwards.
+-- The runs' growth no plan needs any more undone: faces back to the record's before, never below box (station
+-- frame, nil: none) nor a faction sector's paid plot; a face a fit moved inside before goes back out to it.
 function plot.shrinkGrowth(why, box)
   local menu, rec = sab.menu, sab.plotGrowth
   if sab.run or not menu or menu.container == 0 or not rec or rec.container ~= menu.container then return end
@@ -1309,10 +1309,14 @@ function plot.shrinkGrowth(why, box)
   if box then atLeast(plot.boxFaces(box)) end
   local free = plot.isFree(GetComponentData(menu.container, "sectorid"))
   if not free then atLeast(plot.paid()) end
+  local function back(k, h, b)
+    if h > k then return k - h end
+    return math.max(0, b - h)
+  end
   local pos, neg, change = { x = 0, y = 0, z = 0 }, { x = 0, y = 0, z = 0 }, false
   for i, axis in ipairs(AXES) do
-    pos[axis], neg[axis] = math.min(0, keep.pos[i] - have.pos[i]), math.min(0, keep.neg[i] - have.neg[i])
-    if pos[axis] < -1 or neg[axis] < -1 then change = true end
+    pos[axis], neg[axis] = back(keep.pos[i], have.pos[i], rec.before.pos[i]), back(keep.neg[i], have.neg[i], rec.before.neg[i])
+    if math.abs(pos[axis]) > 1 or math.abs(neg[axis]) > 1 then change = true end
   end
   if change then
     if not C.ExtendBuildPlot(menu.container, pos, neg, true) then
@@ -3030,7 +3034,7 @@ local function feeTable(frame, tabOrder, y, buttonHeight)
   if not fee then return y end
   local ftable = frame:addTable(2, { tabOrder = tabOrder, highlightMode = "off", reserveScrollBar = false, y = y })
   local row = ftable:addRow(true, {})
-  row[1]:createText(ReadText(1001, 9242) .. ReadText(1001, 120) .. " " .. ConvertMoneyString(fee, false, true, 0, true) .. " " .. ReadText(1001, 101),
+  row[1]:createText(ReadText(PAGE, 166) .. ReadText(1001, 120) .. " " .. ConvertMoneyString(fee, false, true, 0, true) .. " " .. ReadText(1001, 101),
     { halign = "left", minRowHeight = buttonHeight })
   row[2]:createButton({ height = buttonHeight, active = function() return GetPlayerMoney() >= fee end }):setText(ReadText(1001, 9233), { halign = "center" })
   row[2].handlers.onClick = sab.BuyPlot

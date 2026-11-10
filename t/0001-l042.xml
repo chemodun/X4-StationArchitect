@@ -56,6 +56,7 @@
       <t id="163">Placement failed twice at %s, every placed module was removed</t>
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
       <t id="165">Ponechat hodiny skladu pro další stanice</t>
+      <t id="166">Dodatečný poplatek za licenci parcely</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architekt stanic</t>

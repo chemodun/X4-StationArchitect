@@ -80,6 +80,8 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 
 ![The Wares tab: two Hull Part Production modules with the full cycle and the workforce](docs/images/panel_target.png)
 
+![The same target with Graphene Production unticked: its row stays, the station buys 320 Graphene per hour, and one habitat less is planned](docs/images/panel_buy.png)
+
 ![An existing claytronics station: its target starts at the station's own count, the docks show what it has, and the plan covers its shortfalls](docs/images/panel_existing.png)
 
 ### Ships
@@ -115,7 +117,7 @@ Their scrap metal feeds the scrap recycling modules that make your target wares 
 ![The build menu during a run: the new modules appear on the station one by one](docs/images/build_menu_run.png)
 
 3. If the game's editor still refuses a module after a few retries, the run removes every module it placed and starts the placement over, once. A second refusal removes everything again, and the folded panel names the module.
-4. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press **Confirm module changes** as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has. While a plot's licence is still due (a new plot before its run, or after a **Bill** run, which grows the plot without asking), the panel shows the fee with its own **Buy licence**.
+4. When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press **Confirm module changes** as usual. **Optimize plot** fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. **Reset** starts the target over from what the station has. While a plot's licence is still due (a new plot before its run, or after a **Bill** run, which grows the plot without asking), the panel shows it as an additional licence fee, on top of what was paid, with its own **Buy licence**.
 
 ![A finished run: 192 modules placed, 0 failed, the plan waiting for Confirm module changes](docs/images/build_menu_done.png)
 
@@ -172,6 +174,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 - Changed
   - A station without connection structures is upgraded on the grid too: from its free connections, or beside it when they have no room
   - The plot grown for a plan goes back to its earlier size when the plan is cancelled, left unconfirmed at closing, or no longer needs it at the next run; a paid plot is kept
+  - The licence still due after a run is shown as an additional fee
 - Fixed
   - **Modules race** and **Workforce race** listed only the races you have met, so your modules of another race could not be picked
   - An upgrade beside a pier whose approach lanes point up refused its new docks as past the plot limit, and planned slowly
