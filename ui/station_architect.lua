@@ -43,6 +43,8 @@ ffi.cdef [[
   bool ExtendBuildPlot(UniverseID stationid, Coord3D poschange, Coord3D negchange, bool allowreduction);
   void UpdateConstructionMapBuildPlot(UniverseID holomapid);
   void PayBuildPlotSize(UniverseID stationid, Coord3D plotsize, Coord3D plotcenter);
+  Coord3D GetPaidBuildPlotSize(UniverseID stationid);
+  Coord3D GetPaidBuildPlotCenterOffset(UniverseID stationid);
   UniverseID ReserveBuildPlot(UniverseID sectorid, const char* factionid, const char* set, UIPosRot location, float x, float y, float z);
   void SetConstructionMapCollisionDetection(UniverseID holomapid, bool value);
   void SetStationModuleLoadoutLevel(UniverseID stationid, float value);
@@ -63,9 +65,13 @@ local PLAN_ENTRIES = ffi.typeof("UIConstructionPlanEntry[?]")
 local BOOL1 = ffi.typeof("bool[1]")
 local RACES = ffi.typeof("RaceInfo[?]")
 
+-- the build plot's helpers (one local: the main chunk is near Lua's 200-local cap)
+local plot = {}
 -- 9.00 only; 8.00 has no such export, its build menu never grows the plot
-local hasUpdatePlot, updatePlot = pcall(function() return C.UpdateConstructionMapBuildPlot end)
-if not hasUpdatePlot then updatePlot = nil end
+do
+  local ok, f = pcall(function() return C.UpdateConstructionMapBuildPlot end)
+  plot.update = ok and f or nil
+end
 
 local sab = {
   configBlackboard = "$StationArchitectConfig",
@@ -1146,11 +1152,9 @@ local function readPlanState(run, editor)
   readPlot(run)
 end
 
--- The plot's face distances from the station's position in metres, { pos = { x, y, z }, neg = { x, y, z } };
+-- A plot's face distances from the station's position in metres, { pos = { x, y, z }, neg = { x, y, z } };
 -- a map-reserved plot has faces half a step out.
-local function plotExtents()
-  local menu = sab.menu
-  local size, centre = C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container)
+function plot.extentsOf(size, centre)
   local e = { pos = {}, neg = {} }
   for i, axis in ipairs(AXES) do
     e.pos[i] = size[axis] / 2 + centre[axis]
@@ -1159,12 +1163,50 @@ local function plotExtents()
   return e
 end
 
+function plot.extents()
+  local menu = sab.menu
+  return plot.extentsOf(C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container))
+end
+
+-- The plot box drawn anew after a plot change: at once on 9.00, on 8.00 by plot.flush once no run is on.
+function plot.redraw()
+  if plot.update then plot.update(sab.menu.holomap) else plot.stale = true end
+end
+
+-- 8.00: the construction map rebuilt as vanilla's loadout editor leaves it (plan and camera kept, planned modules
+-- then drawn as holograms); it draws the plot as it is now.
+function plot.flush()
+  local menu = sab.menu
+  if not plot.stale or sab.run or not (menu and menu.holomap and menu.holomap ~= 0) then return end
+  plot.stale = nil
+  C.StoreConstructionMapState(menu.holomap)
+  local state = ffi.new("HoloMapState")
+  C.GetMapState(menu.holomap, state)
+  C.ShowConstructionMap(menu.holomap, menu.container, "", true)
+  menu.applySettings()
+  C.SetMapState(menu.holomap, state)
+  sab.Debug("plot box redrawn: construction map restored")
+end
+
+-- The plot the licence was paid for (vanilla's Reset size); all 0 when none was.
+function plot.paid()
+  local menu = sab.menu
+  return plot.extentsOf(C.GetPaidBuildPlotSize(menu.container), C.GetPaidBuildPlotCenterOffset(menu.container))
+end
+
+function plot.sameFaces(a, b)
+  for i = 1, 3 do
+    if math.abs(a.pos[i] - b.pos[i]) > 1 or math.abs(a.neg[i] - b.neg[i]) > 1 then return false end
+  end
+  return true
+end
+
 -- Each face of the plot moved on its own to whole steps from the station's position that cover box (station
 -- coordinates; the station's position stays inside); shrink lets faces move inwards. Capped per axis.
 -- Returns the face moves (metres per axis), whether any face moves, the new faces in steps and the longest axis
 -- the box needs before the cap, in metres.
-local function plotChange(box, shrink, quiet)
-  local have = plotExtents()
+function plot.change(box, shrink, quiet)
+  local have = plot.extents()
   local pos, neg, change = { x = 0, y = 0, z = 0 }, { x = 0, y = 0, z = 0 }, false
   local faces, need = { pos = {}, neg = {}, uncapped = {} }, 0
   for i, axis in ipairs(AXES) do
@@ -1191,7 +1233,7 @@ end
 
 -- The whole-km faces the plot grows to for box (station frame), capped; uncapped: steps per axis before the cap.
 function sab.PlotFaces(box)
-  return select(4, plotChange(box, false, true))
+  return select(4, plot.change(box, false, true))
 end
 
 -- Per axis, the shift of box (metres) that leaves the plot the least growth: its low face just inside a whole km
@@ -1203,7 +1245,7 @@ function sab.PlotShift(box)
     local moved = { min = { box.min[1], box.min[2], box.min[3] }, max = { box.max[1], box.max[2], box.max[3] } }
     local function total(s)
       moved.min[i], moved.max[i] = lo + s, hi + s
-      return select(4, plotChange(moved, false, true)).uncapped[i]
+      return select(4, plot.change(moved, false, true)).uncapped[i]
     end
     local best, bestTotal = 0, total(0)
     for n = 0, math.ceil((hi - lo) / PLOT_STEP) + 2 do
@@ -1217,32 +1259,98 @@ function sab.PlotShift(box)
 end
 
 -- Vanilla's licence rule: free where the sector owner is nobody, the Xenon or the player.
-local function plotIsFree(sector)
+function plot.isFree(sector)
   local owner = GetComponentData(sector, "owner")
   return owner == "ownerless" or owner == "xenon" or GetComponentData(sector, "isplayerowned")
 end
 
+-- The whole-step faces that hold box (station frame), as plot.change grows them.
+function plot.boxFaces(box)
+  local e = { pos = {}, neg = {} }
+  for i = 1, 3 do
+    e.pos[i] = math.max(0, math.ceil((box.max[i] + PLOT_MARGIN) / PLOT_STEP)) * PLOT_STEP
+    e.neg[i] = math.max(0, math.ceil((PLOT_MARGIN - box.min[i]) / PLOT_STEP)) * PLOT_STEP
+  end
+  return e
+end
+
+-- sab.plotGrowth = { container, before, after }: the faces ahead of the runs' growth and as this mod last left the
+-- plot; a plot unlike after was resized by hand. After each change this mod makes (have: the faces before it).
+function plot.noteChange(have, growing)
+  local menu, rec = sab.menu, sab.plotGrowth
+  if not (rec and rec.container == menu.container and plot.sameFaces(have, rec.after)) then
+    if not growing then return end
+    rec = { container = menu.container, before = have }
+    sab.plotGrowth = rec
+  end
+  rec.after = plot.extents()
+end
+
+function plot.facesText(e)
+  return string.format("x +%.1f -%.1f, y +%.1f -%.1f, z +%.1f -%.1f km", e.pos[1] / 1000, e.neg[1] / 1000, e.pos[2] / 1000, e.neg[2] / 1000,
+    e.pos[3] / 1000, e.neg[3] / 1000)
+end
+
+-- The runs' growth no plan needs any more undone: faces back towards the record's before, never below box (station
+-- frame, nil: none) nor a faction sector's paid plot, never outwards.
+function plot.shrinkGrowth(why, box)
+  local menu, rec = sab.menu, sab.plotGrowth
+  if sab.run or not menu or menu.container == 0 or not rec or rec.container ~= menu.container then return end
+  local have = plot.extents()
+  if not plot.sameFaces(have, rec.after) then
+    sab.Debug("plot growth kept (%s): the plot was resized by hand", why)
+    sab.plotGrowth = nil
+    return
+  end
+  local keep = { pos = { rec.before.pos[1], rec.before.pos[2], rec.before.pos[3] }, neg = { rec.before.neg[1], rec.before.neg[2], rec.before.neg[3] } }
+  local function atLeast(e)
+    for i = 1, 3 do keep.pos[i], keep.neg[i] = math.max(keep.pos[i], e.pos[i]), math.max(keep.neg[i], e.neg[i]) end
+  end
+  if box then atLeast(plot.boxFaces(box)) end
+  local free = plot.isFree(GetComponentData(menu.container, "sectorid"))
+  if not free then atLeast(plot.paid()) end
+  local pos, neg, change = { x = 0, y = 0, z = 0 }, { x = 0, y = 0, z = 0 }, false
+  for i, axis in ipairs(AXES) do
+    pos[axis], neg[axis] = math.min(0, keep.pos[i] - have.pos[i]), math.min(0, keep.neg[i] - have.neg[i])
+    if pos[axis] < -1 or neg[axis] < -1 then change = true end
+  end
+  if change then
+    if not C.ExtendBuildPlot(menu.container, pos, neg, true) then
+      sab.Debug("plot growth kept (%s): the change was refused", why)
+      return
+    end
+    plot.redraw()
+    if free then C.PayBuildPlotSize(menu.container, C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container)) end
+    sab.panelDirty = true
+  end
+  rec.after = plot.extents()
+  if change then sab.Debug("plot growth undone (%s): faces %s, before the runs %s", why, plot.facesText(rec.after), plot.facesText(rec.before)) end
+  if plot.sameFaces(rec.after, rec.before) then sab.plotGrowth = nil end
+end
+
 function sab.FitPlot(box, shrink)
   local menu = sab.menu
-  local pos, neg, change = plotChange(box, shrink)
+  local pos, neg, change = plot.change(box, shrink)
   if not change then return false end
+  local have = plot.extents()
   if not C.ExtendBuildPlot(menu.container, pos, neg, true) then
     sab.Debug("plot change refused: +%.0f %.0f %.0f / -%.0f %.0f %.0f m", pos.x, pos.y, pos.z, neg.x, neg.y, neg.z)
     return false
   end
-  if updatePlot then updatePlot(menu.holomap) end
-  if plotIsFree(GetComponentData(menu.container, "sectorid")) then
+  plot.noteChange(have, sab.run ~= nil and not shrink)
+  plot.redraw()
+  if plot.isFree(GetComponentData(menu.container, "sectorid")) then
     C.PayBuildPlotSize(menu.container, C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container))
   end
   if sab.run then readPlot(sab.run) end
-  local e = plotExtents()
+  local e = plot.extents()
   sab.Debug("plot faces now x +%.1f -%.1f, y +%.1f -%.1f, z +%.1f -%.1f km", e.pos[1] / 1000, e.neg[1] / 1000, e.pos[2] / 1000, e.neg[2] / 1000,
     e.pos[3] / 1000, e.neg[3] / 1000)
   return true
 end
 
 -- The licence still to pay for the plot as it is now (vanilla's plot menu price).
-local function plotPrice(sector)
+function plot.price(sector)
   local menu = sab.menu
   local size, buf = C.GetBuildPlotSize(menu.container), ffi.new(BOOL1, 0)
   local full = tonumber(C.GetBuildPlotPrice(sector, C.GetObjectPositionInSector(menu.container), size.x, size.y, size.z, "player"))
@@ -1255,7 +1363,7 @@ function sab.OfferPlot(run)
   local menu, box = sab.menu, run.plotBox
   local sector = ConvertIDTo64Bit(GetComponentData(menu.container, "sectorid"))
   local pos, neg, change, f, need
-  if box then pos, neg, change, f, need = plotChange(box, false, true) end
+  if box then pos, neg, change, f, need = plot.change(box, false, true) end
   -- a layout past the plot cap would leave modules outside: nothing is placed
   if need and need > MAX_PLOT then
     sab.StopRun(string.format("the layout needs %.0f km, above the plot cap", need / 1000))
@@ -1269,16 +1377,16 @@ function sab.OfferPlot(run)
     sab.lastRun = { placed = 0, failed = 0, noRoom = { g.dockFailed, g.dockTotal } }
     return
   end
-  if not box or plotIsFree(sector) then
+  if not box or plot.isFree(sector) then
     run.phase = "begin"
     return
   end
   local size = { x = (f.pos[1] + f.neg[1]) * PLOT_STEP, y = (f.pos[2] + f.neg[2]) * PLOT_STEP, z = (f.pos[3] + f.neg[3]) * PLOT_STEP }
-  -- the predicted plot, not the current one: plotPrice reads the plot as it is
+  -- the predicted plot, not the current one: plot.price reads the plot as it is
   local buf = ffi.new(BOOL1, 0)
   local full = tonumber(C.GetBuildPlotPrice(sector, C.GetObjectPositionInSector(menu.container), size.x, size.y, size.z, "player"))
   local price = full - tonumber(C.GetBuildPlotPayment(menu.container, buf))
-  local e = plotExtents()
+  local e = plot.extents()
   sab.Debug("plot after the pack: %.0f x %.0f x %.0f km, licence %d Cr to pay; plot now x +%.1f -%.1f, y +%.1f -%.1f, z +%.1f -%.1f km, layout x %.1f..%.1f, y %.1f..%.1f, z %.1f..%.1f km",
     size.x / 1000, size.y / 1000, size.z / 1000, price, e.pos[1] / 1000, e.neg[1] / 1000, e.pos[2] / 1000, e.neg[2] / 1000, e.pos[3] / 1000, e.neg[3] / 1000,
     box.min[1] / 1000, box.max[1] / 1000, box.min[2] / 1000, box.max[2] / 1000, box.min[3] / 1000, box.max[3] / 1000)
@@ -1304,14 +1412,16 @@ function sab.AnswerPlot(accept)
   end
   if GetPlayerMoney() < o.price then return end
   local menu = sab.menu
+  local have = plot.extents()
   if o.change and not C.ExtendBuildPlot(menu.container, o.pos, o.neg, true) then
     sab.Debug("plot change refused: +%.0f %.0f %.0f / -%.0f %.0f %.0f m", o.pos.x, o.pos.y, o.pos.z, o.neg.x, o.neg.y, o.neg.z)
     sab.StopRun("plot change refused")
     return
   end
-  if updatePlot then updatePlot(menu.holomap) end
+  if o.change then plot.noteChange(have, true) end
+  plot.redraw()
   -- the plot as extended is what gets paid; the offer was its prediction
-  local price = math.min(o.price, plotPrice(o.sector))
+  local price = math.min(o.price, plot.price(o.sector))
   if price > 0 then TransferPlayerMoneyTo(price, ConvertStringTo64Bit(tostring(C.GetSectorControlStation(o.sector)))) end
   C.PayBuildPlotSize(menu.container, C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container))
   sab.Debug("plot licence paid: %d Cr (offered %d)", price, o.price)
@@ -1325,8 +1435,8 @@ function sab.PlotFee()
   local menu = sab.menu
   if sab.run or not menu or menu.container == 0 then return nil end
   local sector = ConvertIDTo64Bit(GetComponentData(menu.container, "sectorid"))
-  if plotIsFree(sector) then return nil end
-  local price = plotPrice(sector)
+  if plot.isFree(sector) then return nil end
+  local price = plot.price(sector)
   return price > 0 and price or nil
 end
 
@@ -1363,13 +1473,16 @@ end
 -- Offered only when the fit would move a face of the plot.
 function sab.CanOptimizePlot()
   local box = optimizeBox(false)
-  return box ~= nil and select(3, plotChange(box, true, true))
+  return box ~= nil and select(3, plot.change(box, true, true))
 end
 
 -- The plot fitted to the plan's modules on each side; on an empty plan one step each side of the station's position.
 function sab.OptimizePlot()
   local box = optimizeBox(true)
-  if box and sab.FitPlot(box, true) then sab.panelDirty = true end
+  if box and sab.FitPlot(box, true) then
+    plot.flush()
+    sab.panelDirty = true
+  end
 end
 
 -- The box around every plan entry with a known size, nil on an empty plan.
@@ -2183,6 +2296,9 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
     sab.Error("the Extra Data API cannot read module data on this build")
     return false
   end
+  -- growth no plan holds any more is undone before the run reads the plot
+  local box = optimizeBox(false)
+  if box then plot.shrinkGrowth("a new run", box) end
   local run = { items = items, next = 1, phase = "begin", placed = 0, failed = 0, connector = connector, turns = turns,
     stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, moduleRace = opts and opts.moduleRace,
     subdivide = opts and opts.subdivide, started = getElapsedTime(), frames = 0, searchFrames = 0, searches = 0 }
@@ -2232,6 +2348,7 @@ function sab.StopRun(reason)
     local box = sab.PlanBox()
     if box then sab.FitPlot(box, true) end
   end
+  plot.flush()
   sab.lastRun = { placed = run.placed, failed = run.failed }
   -- the panel folds to its title and this result until expanded
   sab.expanded, sab.panelDirty = false, true
@@ -3789,8 +3906,25 @@ local function hookMenu()
     end
     return viewCreated(layer, ...)
   end
+  -- a confirmed plan keeps its plot: the growth is the station's
+  local buttonConfirm = menu.buttonConfirm
+  menu.buttonConfirm = function(...)
+    if sab.plotGrowth and sab.plotGrowth.container == menu.container then sab.plotGrowth = nil end
+    return buttonConfirm(...)
+  end
+  local buttonCancelConfirm = menu.buttonCancelConfirm
+  -- shrunk first: vanilla's cancel rebuilds the map, which draws the plot as it is then
+  menu.buttonCancelConfirm = function(...)
+    plot.shrinkGrowth("plan cancelled")
+    buttonCancelConfirm(...)
+    plot.stale = nil
+  end
   local cleanup = menu.cleanup
   menu.cleanup = function(...)
+    -- unconfirmed changes are thrown away with the menu, and the growth they needed with them
+    local discarded = menu.haschanges
+    sab.run, plot.stale = nil, nil
+    if discarded then plot.shrinkGrowth("build menu closed") end
     sab.run, sab.lastRun, sab.panelDirty, sab.panelTables, sab.panelFrame = nil, nil, nil, nil, nil
     sab.formTables, sab.topRows = nil, {}
     sab.expanded = false

@@ -30,6 +30,8 @@ local FILL = 1.6
 local EPS = 0.05
 -- a box reaching deeper than this into a cell leans into it; two boxes meet past twice this (sab.BoxesClear's margin)
 local LEAN = 0.25
+-- the clearance a body keeps to an approach zone
+local ZONE_MARGIN = sab.geo.zoneMargin
 -- occupancy cells per cross cell along each axis: modules pack at u / R, crosses keep whole cells; a layout the
 -- editor refuses at R 2 is packed again at R 1 (sab.Tick)
 grid.subdivide = 2
@@ -501,6 +503,20 @@ local function evaluate(g, node, pose, cost, path, on)
     local n = path[i][1]
     if inBox(n[1], n[2], n[3], tx0, tx1, ty0, ty1, tz0, tz1) then return nil end
   end
+  -- an upgrade's approach zones block only the cells they enter: the box itself keeps clear of them
+  local zones = g.zones
+  if zones then
+    local b, u, m = pose.box, g.u, ZONE_MARGIN
+    local bx0, bx1 = b.min[1] + node[1] * u[1] - m, b.max[1] + node[1] * u[1] + m
+    local by0, by1 = b.min[2] + node[2] * u[2] - m, b.max[2] + node[2] * u[2] + m
+    local bz0, bz1 = b.min[3] + node[3] * u[3] - m, b.max[3] + node[3] * u[3] + m
+    for _, Z in ipairs(zones) do
+      if bx0 < Z.max[1] and bx1 > Z.min[1] and by0 < Z.max[2] and by1 > Z.min[2] and bz0 < Z.max[3] and bz1 > Z.min[3] then
+        g.laneRefused = g.laneRefused + 1
+        return nil
+      end
+    end
+  end
   local sx, sy, sz = x1 - x0 + 1, y1 - y0 + 1, z1 - z0 + 1
   local contacts = boxSum(g, x0, x1, y1 + 1, y1 + 1, z0, z1)
   contacts = contacts + (x0 == 0 and sy * sz or boxSum(g, x0 - 1, x0 - 1, y0, y1, z0, z1))
@@ -922,7 +938,6 @@ local function hit(a, b)
   return true
 end
 
-local ZONE_MARGIN = sab.geo.zoneMargin
 local function nearZone(a, z)
   for i = 1, 3 do
     if a.min[i] >= z.max[i] + ZONE_MARGIN or a.max[i] <= z.min[i] - ZONE_MARGIN then return false end
@@ -1856,6 +1871,16 @@ function grid.Seed(run, loose)
   return true
 end
 
+-- Cross cells whose cross, arms on every face, would come within ZONE_MARGIN of zone Z take no new cross.
+local function laneTouched(g, Z)
+  local u, a, lo, hi = g.u, g.a, {}, {}
+  for i = 1, 3 do
+    lo[i] = math.floor((Z.min[i] - ZONE_MARGIN - a[i]) / u[i]) + 1
+    hi[i] = math.ceil((Z.max[i] + ZONE_MARGIN + a[i]) / u[i]) - 1
+  end
+  markTouched(g, lo, hi, NONE)
+end
+
 -- The plan's entries in a new grid: the block centred in the footprint on floor 0, the origin on the lattice.
 local function seedGrid(g, S)
   local u = g.u
@@ -1936,7 +1961,11 @@ local function seedGrid(g, S)
     local t1 = { E.thi[1] + d[1], E.thi[2] + d[2], E.thi[3] + d[3] }
     markTouched(g, t0, t1, own)
     markLean(g, ftlo, fthi, flo, fhi, M)
-    for _, z in ipairs(E.zones or {}) do g.zones[#g.zones + 1] = shifted(z, shift) end
+    for _, z in ipairs(E.zones or {}) do
+      local Z = shifted(z, shift)
+      g.zones[#g.zones + 1] = Z
+      laneTouched(g, Z)
+    end
     g.modules[#g.modules + 1] = M
   end
   g.existingCrosses = #S.crosses
@@ -1949,7 +1978,7 @@ end
 ---@async
 local function layout(kit, base, sx, sz, tallest, progress, seed, R)
   local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, occ = {}, focc = {}, dirty = {},
-    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, commits = 0,
+    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, commits = 0, laneRefused = 0,
     started = getElapsedTime() }
   if seed then seedGrid(g, seed) end
   rebuildSums(g)
@@ -2000,9 +2029,9 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R)
   g.used = { (hi[1] - lo[1] + 1) / R, (hi[2] - lo[2] + 1) / R, (hi[3] - lo[3] + 1) / R }
   g.box = g.used[1] * g.used[2] * g.used[3]
   g.cost = W_COST
-  sab.Debug("grid: footprint %d x %d, cost %g: %d placed, %d failed, connectors %d (%d crosses, %d saved by struts), used %.1f x %.1f x %.1f km, module cells %.0f%%, %d placements refused for closing the way up, %d frames, %.1f s",
+  sab.Debug("grid: footprint %d x %d, cost %g: %d placed, %d failed, connectors %d (%d crosses, %d saved by struts), used %.1f x %.1f x %.1f km, module cells %.0f%%, %d placements refused for closing the way up, %d poses at an approach zone, %d frames, %.1f s",
     g.sx, g.sz, W_COST, #g.modules, #g.failed, g.connectors, crosses, g.saved, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000,
-    100 * modCells / g.box, g.banned, g.frames, getElapsedTime() - g.started)
+    100 * modCells / g.box, g.banned, g.laneRefused, g.frames, getElapsedTime() - g.started)
   return g
 end
 
