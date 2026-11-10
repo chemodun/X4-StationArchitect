@@ -92,6 +92,8 @@ Open the build menu of one of your stations. The Station Architect panel sits un
 [/list]
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_target.png[/img]
 
+[img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_buy.png[/img]
+
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_existing.png[/img]
 
 [size=3][u][i]Ships[/i][/u][/size]
@@ -127,7 +129,7 @@ Their scrap metal feeds the scrap recycling modules that make your target wares 
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/build_menu_run.png[/img]
 [list=1]
 [*] If the game's editor still refuses a module after a few retries, the run removes every module it placed and starts the placement over, once. A second refusal removes everything again, and the folded panel names the module.
-[*] When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press [b]Confirm module changes[/b] as usual. [b]Optimize plot[/b] fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. [b]Reset[/b] starts the target over from what the station has. While a plot's licence is still due (a new plot before its run, or after a [b]Bill[/b] run, which grows the plot without asking), the panel shows the fee with its own [b]Buy licence[/b].
+[*] When the run ends the panel folds to its result (placed, failed). Check the plan, change what you like by hand, and press [b]Confirm module changes[/b] as usual. [b]Optimize plot[/b] fits the plot to the planned modules, so a plot the run grew is not paid larger than needed. [b]Reset[/b] starts the target over from what the station has. While a plot's licence is still due (a new plot before its run, or after a [b]Bill[/b] run, which grows the plot without asking), the panel shows it as an additional licence fee, on top of what was paid, with its own [b]Buy licence[/b].
 [/list]
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/build_menu_done.png[/img]
 
@@ -189,6 +191,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [list]
 [*] A station without connection structures is upgraded on the grid too: from its free connections, or beside it when they have no room
 [*] The plot grown for a plan goes back to its earlier size when the plan is cancelled, left unconfirmed at closing, or no longer needs it at the next run; a paid plot is kept
+[*] The licence still due after a run is shown as an additional fee
 [/list]
 [*] Fixed
 [list]
