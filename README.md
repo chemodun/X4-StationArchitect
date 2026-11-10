@@ -7,7 +7,7 @@ Tell the build menu what your station should produce or build: this extension wo
 - **Target planner**: say what the station should make, not which modules: wares on the **Wares** tab, ships to build or resupply per hour on the **Ships** tab; several targets in one plan.
 - **Compact layout**: production, storage and habitats packed tight on connection modules; build modules on the sides with clear approach lanes; docks and piers outward.
 - **Full cycle and workforce**: optionally every intermediate ware down to raw resources and energy, habitats for the workforce, and its food and medicine.
-- **Buy instead of make**: untick any production module the plan adds for an intermediate ware; that ware is bought and the rest of the plan follows.
+- **Buy instead of make**: untick a production module the plan adds for anything but a target; its ware is bought and the rest of the plan follows.
 - **Read from the game**: production rates, sunlight and workforce bonuses, module sizes, docking bays, ship build times and the production lines of every build module; docks sized for the planned traffic.
 - **Docking**: the dock areas and piers the planned trade needs, each count on a slider you can lower.
 - **Special resource modules**: Scrap Processors fed by tugs; with **Full cycle** their scrap metal goes into your target wares and your ships' wares before any regular production.
@@ -110,7 +110,7 @@ Their scrap metal feeds the scrap recycling modules that make your target wares 
 
 ![A run waiting for the plot licence](docs/images/panel_licence.png)
 
-2. The run places the modules one after another, in turns from the bottom up: the station works after its first turn and every turn adds output, its storage and production chain from energy up, the final product last, then the dock areas and piers its trade needs. A new station opens its first turn with one pier and one dock area and grows from that pier; habitats and the modules that only feed them come after 40 % of the turns, spread evenly over the rest. The panel shows the progress and the turn, and **Stop** halts the run after the current module. Changing the plan by hand stops the run too, and closing the build menu ends it. The menu's lists are rebuilt once when the run ends, not after every module.
+2. The run places the modules one after another, in turns from the bottom up: the station works after its first turn and every turn adds output, its storage and production chain from energy up, the final product last, then the dock areas and piers its trade needs. A new station opens its first turn with one pier and one dock area and grows from that pier; habitats and the modules that only feed them come after 30 % of the turns, spread evenly over the rest. The panel shows the progress and the turn, and **Stop** halts the run after the current module. Changing the plan by hand stops the run too, and closing the build menu ends it. The menu's lists are rebuilt once when the run ends, not after every module.
 
 ![A run in progress](docs/images/panel_running.png)
 
@@ -166,15 +166,16 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 
 ## Changelog
 
-### [1.22] - 2026-11-??
+### [1.30] - 2026-11-10
 
 - Added
-  - Production modules for intermediate wares can be unticked in the planned modules; their ware is bought instead
+  - Production modules planned for anything but a target can be unticked in the planned modules; their ware is bought instead
   - **Keep storage hours for later stations** saves the storage hours for the next plans
 - Changed
   - A station without connection structures is upgraded on the grid too: from its free connections, or beside it when they have no room
   - The plot grown for a plan goes back to its earlier size when the plan is cancelled, left unconfirmed at closing, or no longer needs it at the next run; a paid plot is kept
   - The licence still due after a run is shown as an additional fee
+  - Habitats and the modules that only feed them come earlier in a run
 - Fixed
   - **Modules race** and **Workforce race** listed only the races you have met, so your modules of another race could not be picked
   - An upgrade beside a pier whose approach lanes point up refused its new docks as past the plot limit, and planned slowly
