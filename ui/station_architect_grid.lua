@@ -54,6 +54,10 @@ grid.footprintRatios = { 1, 2, 1 / 2 }
 grid.footprintScales = { 1 }
 -- the root crosses stand above the deepest hanging pose, so the bottom row carries modules below itself too
 grid.sandwich = true
+-- the root cross's down arm and the cells of the root pier's column, held while the layout runs (taken for every
+-- check; rootUnder knows the arm marker)
+local PIER_ARM = "pier"
+local PIER_REC = { pier = true }
 
 -- Score weights from eval, for layout experiments: { top, cost, contact, centre }, nil keeps a weight; a cost
 -- packs that cost only, costs = { ... } sets the list.
@@ -585,6 +589,7 @@ local function commit(g, rec, best)
     if best.kind == "root" then
       X = addCross(g, node, { kind = "root" })
       g.root = X
+      if g.pierItem then X.arms[4] = PIER_ARM end
     elseif best.kind == "new" then
       -- the path from the tree outward: each new cross on its parent
       local path = best.path
@@ -808,9 +813,18 @@ local function place(g, rec, wide)
   end
   -- a seed without crosses grows from its ports only
   if not g.root and not g.seeded then
+    -- a reserved pier column fixes the root node
+    if g.rootNode then
+      for di = 1, 6 do
+        if di ~= 4 then consider("root", g.rootNode, di, 1) end
+      end
+      return best
+    end
     for x = 0, g.sx - 1 do
       for z = 0, g.sz - 1 do
-        for di = 1, 6 do consider("root", { x, g.rootY, z }, di, 1) end
+        for di = 1, 6 do
+          if di ~= 4 or not g.pierItem then consider("root", { x, g.rootY, z }, di, 1) end
+        end
       end
     end
     return best
@@ -1011,6 +1025,67 @@ local function dockShape(macro, pose)
   for _, z in ipairs(pose.zones) do
     if z.dir[2] < -0.99 then pose.down = pose.down + 1 end
   end
+end
+
+-- The sandwich fills the floors under the root row, where the root pier hangs: before the layout its column under
+-- a fixed root node (the footprint centre) is taken, in the pose rootUnder would pick; released when nothing roots there.
+---@async
+local function reservePier(g)
+  local it = g.pierItem
+  if not (it and g.rootY > 0) then return end
+  local best
+  for _, pose in ipairs(poses(g, it.macro)) do
+    if pose.di == 4 then
+      dockShape(it.macro, pose)
+      local up = #pose.zones - pose.down
+      if not best or up < best.up then best = { pose = pose, up = up } end
+    end
+  end
+  if not best then return end
+  local R, u, pose = g.R, g.u, best.pose
+  local node = { math.floor((g.sx - 1) / 2), g.rootY, math.floor((g.sz - 1) / 2) }
+  local f, fkeys, keys = { R * node[1], R * node[2], R * node[3] }, {}, {}
+  -- a box in the pose's frame, grown by margin, as the cells of poses(): below the root row, inside the block
+  local function take(box, margin)
+    local lo, hi = {}, {}
+    for i = 1, 3 do
+      local h = u[i] / R
+      lo[i] = f[i] + math.floor((box.min[i] - margin + EPS * h) / h + R / 2)
+      hi[i] = f[i] + math.floor((box.max[i] + margin - EPS * h) / h + R / 2)
+    end
+    for x = math.max(0, lo[1]), math.min(g.fx - 1, hi[1]) do
+      for y = math.max(0, lo[2]), math.min(f[2] - 1, hi[2]) do
+        for z = math.max(0, lo[3]), math.min(g.fz - 1, hi[3]) do
+          local k = fkey(g, x, y, z)
+          if not g.focc[k] then
+            g.focc[k] = PIER_REC
+            fkeys[#fkeys + 1] = k
+          end
+          local ck = key(g, math.floor(x / R), math.floor(y / R), math.floor(z / R))
+          if not g.occ[ck] then
+            g.occ[ck] = PIER_REC
+            keys[#keys + 1] = ck
+          end
+        end
+      end
+    end
+  end
+  take(pose.body, 0)
+  for _, z in ipairs(pose.zones) do take(z, ZONE_MARGIN) end
+  g.rootNode, g.pierCells = node, { f = fkeys, c = keys }
+  markDirty(g, 1, 0, 0, 0, f[2])
+  rebuildSums(g)
+  sab.Trace("grid: %s column of %d cells held under the root node %d %d %d", it.macro, #fkeys, node[1], node[2], node[3])
+end
+
+---@async
+local function releasePier(g)
+  for _, k in ipairs(g.pierCells.f) do g.focc[k] = nil end
+  for _, k in ipairs(g.pierCells.c) do g.occ[k] = nil end
+  g.rootNode, g.pierCells = nil, nil
+  markDirty(g, 1, 0, 0, 0, g.R * g.rootY)
+  rebuildSums(g)
+  sab.Debug("grid: nothing roots over the pier column, %s docks as usual", g.pierItem.macro)
 end
 
 -- Whole km of one axis from the station's position to both faces of the layout grown to lo..hi.
@@ -1455,7 +1530,11 @@ end
 ---@async
 local function rootUnder(g, D, it)
   local u, X = g.u, g.root
-  if not X or X.arms[4] then return false end
+  if not X then return false end
+  if X.arms[4] and X.arms[4] ~= PIER_ARM then
+    sab.Debug("grid: the root cross's down arm is taken, %s docks as usual", it.macro)
+    return false
+  end
   local o = { X.node[1] * u[1], X.node[2] * u[2], X.node[3] * u[3] }
   ---@async
   local function blocked(box, isZone)
@@ -1478,6 +1557,7 @@ local function rootUnder(g, D, it)
     end
   end
   if not best then
+    if X.arms[4] == PIER_ARM then X.arms[4] = nil end
     sab.Debug("grid: %s has no pose under the root cross, it docks as usual", it.macro)
     return false
   end
@@ -2010,17 +2090,22 @@ end
 -- One layout of every module at the current weights; seed: the plan's entries (grid.Seed); R: occupancy cells
 -- per cross cell; rootY: the root cross's floor, above the deepest hanging pose.
 ---@async
-local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY)
-  local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, rootY = rootY or 0, occ = {}, focc = {}, dirty = {},
+local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pierItem)
+  local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, rootY = rootY or 0, pierItem = pierItem, occ = {}, focc = {}, dirty = {},
     crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, commits = 0, laneRefused = 0,
     started = getElapsedTime() }
   if seed then seedGrid(g, seed) end
   rebuildSums(g)
+  reservePier(g)
   for i, b in ipairs(base) do
     progress.module = i
     local rec = { item = b.item, poses = b.poses, volume = b.volume }
     g.why = {}
     local best = findPlace(g, rec)
+    if not best and g.pierCells and not g.root then
+      releasePier(g)
+      best = findPlace(g, rec)
+    end
     if not best then
       -- last resort: a path as long as the way out needs, then on the tree of any item up to its turn's end
       -- (emit places such a parent first)
@@ -2261,7 +2346,7 @@ local function pack(run)
     for _, cost in ipairs(costs) do
       W_COST = cost
       run.packProgress.pack = packs + 1
-      local g = layout(kit, base, shape[1], shape[2], tallest, run.packProgress, S, probe.R, grid.sandwich and math.ceil(below / probe.R) or 0)
+      local g = layout(kit, base, shape[1], shape[2], tallest, run.packProgress, S, probe.R, grid.sandwich and math.ceil(below / probe.R) or 0, run.rootPier)
       frames, packs = frames + g.frames, packs + 1
       -- a seeded grid keeps the lattice's origin
       if not S then
