@@ -166,6 +166,16 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 
 ## Changelog
 
+### [1.31] - 2026-11-??
+
+- Added
+  - The panel says when a run stopped on an error, with the detail in the game log
+- Changed
+  - The grid packs every module on one block: fewer connection structures, a smaller plan box, every floor filled before a higher one
+- Fixed
+  - Large modules could be left without a grid place and go to the editor's own search far from the block
+  - A connection structure with diagonal arms was taken as a grid cross and the run stopped before placing anything
+
 ### [1.30] - 2026-11-10
 
 - Added

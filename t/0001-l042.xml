@@ -57,6 +57,7 @@
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
       <t id="165">Ponechat hodiny skladu pro další stanice</t>
       <t id="166">Dodatečný poplatek za licenci parcely</t>
+      <t id="167">Zastaveno kvůli chybě, viz protokol: umístěno %s, selhalo %s</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architekt stanic</t>

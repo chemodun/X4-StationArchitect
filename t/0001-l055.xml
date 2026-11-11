@@ -57,6 +57,7 @@
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
       <t id="165">Manter as horas de armazenamento para as próximas estações</t>
       <t id="166">Taxa adicional de licença de terreno</t>
+      <t id="167">Interrompido por um erro, veja o registro: %s colocados, %s falhos</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Arquiteto de Estações</t>

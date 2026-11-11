@@ -57,6 +57,7 @@
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
       <t id="165">Lagerstunden für spätere Stationen beibehalten</t>
       <t id="166">Zusätzliche Gebühr für die Baugrundlizenz</t>
+      <t id="167">Wegen eines Fehlers angehalten, siehe Protokoll: %s platziert, %s fehlgeschlagen</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Stationsarchitekt</t>

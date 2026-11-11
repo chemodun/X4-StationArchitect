@@ -57,6 +57,7 @@
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
       <t id="165">Mantieni le ore di magazzino per le stazioni successive</t>
       <t id="166">Tassa aggiuntiva per la licenza del lotto</t>
+      <t id="167">Interrotto per un errore, vedere il registro: %s posizionati, %s falliti</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architetto di stazioni</t>

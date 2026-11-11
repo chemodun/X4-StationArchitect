@@ -57,6 +57,7 @@
       <t id="164">%s of %s docks and piers find no room within the %s km plot limit: nothing placed</t>
       <t id="165">저장 공간 시간 수를 이후 스테이션에도 유지</t>
       <t id="166">추가 부지 면허 수수료</t>
+      <t id="167">오류로 중지됨, 로그를 확인하세요: 배치 %s, 실패 %s</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">스테이션 건축가</t>

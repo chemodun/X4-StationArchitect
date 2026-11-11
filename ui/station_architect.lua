@@ -1536,6 +1536,15 @@ local function armOf(conns, dir)
   return nil
 end
 
+-- A grid cross has an arm on each of the six axis directions (a Boron cross has diagonal arms and none up or down).
+local ARM_DIRS = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
+local function sixArms(conns)
+  for _, d in ipairs(ARM_DIRS) do
+    if not armOf(conns, d) then return false end
+  end
+  return true
+end
+
 -- Two opposed collinear connections on a thin body make a strut: length, own axis, end names.
 local function strutOf(macro, conns)
   if #conns ~= 2 then return nil end
@@ -1583,7 +1592,9 @@ local function connectorKit(race, only, items, R)
     local conns = sab.macroConns[m]
     if conns and IsMacroClass(m, "connectionmodule") then
       local tier = (m == only and -1) or ((race ~= nil and raceOf(m) == race) and 0 or 1)
-      if #conns >= 6 then
+      if #conns >= 6 and not sixArms(conns) then
+        sab.Trace("kit: %s has no arm on every axis, not a cross", m)
+      elseif #conns >= 6 then
         local arms, arm, cell = crossShape(conns)
         local volume, cur = math.floor(cell[1] + 0.5) * math.floor(cell[2] + 0.5) * math.floor(cell[3] + 0.5), kit.cross
         local misfits, names = 0, {}
@@ -2330,7 +2341,8 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
   return true
 end
 
-function sab.StopRun(reason)
+-- failed: the run stopped on an error; the panel's result line says so
+function sab.StopRun(reason, failed)
   local run = sab.run
   if not run then return end
   local menu = sab.menu
@@ -2353,7 +2365,7 @@ function sab.StopRun(reason)
     if box then sab.FitPlot(box, true) end
   end
   plot.flush()
-  sab.lastRun = { placed = run.placed, failed = run.failed }
+  sab.lastRun = { placed = run.placed, failed = run.failed, error = failed or nil }
   -- the panel folds to its title and this result until expanded
   sab.expanded, sab.panelDirty = false, true
   sab.planRefresh = nil
@@ -2453,7 +2465,7 @@ function sab.Tick(chained)
     return
   end
   if engine == false then
-    sab.StopRun("engine access lost")
+    sab.StopRun("engine access lost", true)
     return
   end
   -- an entry added, removed or replaced by the player (list pick, undo, plan load) leaves the run's state stale
@@ -2511,7 +2523,7 @@ function sab.Tick(chained)
       sab.Debug("%s failed every retry: the %d placed entries come out, the placement starts over", item.macro, run.placed)
       run.restarted = true
       if restartPlacement(run) then return end
-      sab.StopRun("the editor is not reachable for the restart")
+      sab.StopRun("the editor is not reachable for the restart", true)
       return
     end
     removePlaced(run)
@@ -2953,6 +2965,7 @@ local function progressText()
   if last and last.failedTwice then return string.format(tostring(ReadText(PAGE, 163)), last.failedTwice) end
   if last and last.tooLarge then return string.format(tostring(ReadText(PAGE, 147)), last.tooLarge, MAX_PLOT / 1000) end
   if last and last.noRoom then return string.format(tostring(ReadText(PAGE, 164)), last.noRoom[1], last.noRoom[2], MAX_PLOT / 1000) end
+  if last and last.error then return string.format(tostring(ReadText(PAGE, 167)), last.placed, last.failed) end
   if last and last.changed then return string.format(tostring(ReadText(PAGE, 154)), last.placed, last.failed) end
   if last then return string.format(tostring(ReadText(PAGE, 107)), last.placed, last.failed) end
   return ""

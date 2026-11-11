@@ -2359,7 +2359,7 @@ function grid.Step(run)
   grid.boost = 1
   if not ok then
     sab.Error("grid layout failed: %s", tostring(err))
-    sab.StopRun("grid layout failed")
+    sab.StopRun("grid layout failed", true)
     return
   end
   if coroutine.status(run.packer) == "dead" then run.packed = getElapsedTime() end
