@@ -932,6 +932,8 @@ sab.maxPlotKm = MAX_PLOT / 1000
 local AXES = { "x", "y", "z" }
 local STRAIGHT = 0.9
 local SPUR_GAP = 500
+-- candidates sort by their level from the run's base first (levels run.levelH apart): a level fills before the next
+local W_LEVEL = 1e10
 -- classes with approach zones the engine keeps free (exclusionzones)
 local COLUMN = { "dockarea", "pier", "buildmodule" }
 local GROUP_CLASSES = { { "production", "production" }, { "processingmodule", "production" }, { "buildmodule", "build" },
@@ -942,11 +944,6 @@ local function groupOf(macro)
     if IsMacroClass(macro, g[1]) then return g[2] end
   end
   return "other"
-end
-
-local function dist2(a, b)
-  local d = { a[1] - b[1], a[2] - b[2], a[3] - b[3] }
-  return dot(d, d)
 end
 
 local function outerClass(macro)
@@ -1942,8 +1939,9 @@ local function buildCandidates(run, item)
               local cc = rotate({ size.cX, size.cY, size.cZ }, pose.rows)
               c = { c[1] + cc[1], c[2] + cc[2], c[3] + cc[3] }
             end
-            local score = dist2(c, anchor)
-            if item.reach then score = -score end
+            local dx, dy, dz = c[1] - anchor[1], c[2] - run.levelY, c[3] - anchor[3]
+            local flat = dx * dx + dz * dz
+            local score = math.floor(math.abs(dy) / run.levelH + 0.5) * W_LEVEL + (item.reach and -flat or flat + dy * dy)
             if chain and f.entryIdx == chain and dot(f.dir, spur.dir) > STRAIGHT then
               score = score - 4e15
             elseif tip and f.entryIdx == tip then
@@ -2308,6 +2306,8 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
     subdivide = opts and opts.subdivide, started = getElapsedTime(), frames = 0, searchFrames = 0, searches = 0 }
   readPlanState(run, editor)
   if engine == false then return false end
+  local cs = connector and sab.sizes[connector.macro]
+  run.levelY, run.levelH = anchorOf(run)[2], cs and 2 * cs.maxY or 400
   run.planCount = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
   run.fromEmpty = run.n == 0
   run.gridRoute = gridRoute

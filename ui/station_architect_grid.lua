@@ -37,6 +37,9 @@ local ZONE_MARGIN = sab.geo.zoneMargin
 grid.subdivide = 2
 -- a new cross costs as much as a floor: fewer connectors over a denser block
 local W_TOP, W_COST, W_CONTACT, W_CENTRE = 1000, 1000, 6, 1
+-- the level (the floor a module's box bottom lies in) first: above every other term, so a level fills before any
+-- pose a level higher is taken
+local W_LEVEL = 1e6
 -- eval override for layout experiments: a list of new-cross costs, each packed
 ---@type number[]?
 grid.costs = nil
@@ -411,6 +414,11 @@ local function topCost(g, y)
   return y > g.free and (y - g.free) * W_TOP or 0
 end
 
+-- y0: the box bottom in occupancy cells
+local function levelCost(g, y0)
+  return math.floor(y0 / g.R) * W_LEVEL
+end
+
 -- A pose's cells are a box: free test and contacts (occupied or off-grid neighbours) from the running sums.
 ---@async
 local function evaluate(g, node, pose, cost, path, on)
@@ -526,7 +534,7 @@ local function evaluate(g, node, pose, cost, path, on)
   contacts = contacts + (y0 == 0 and sx * sz or boxSum(g, x0, x1, y0 - 1, y0 - 1, z0, z1))
   -- in cross cell units, as at R = 1
   local cx, cz = (x0 + x1 - nx + 1) / (2 * R), (z0 + z1 - nz + 1) / (2 * R)
-  return topCost(g, y1 / R) + cost * W_COST - contacts / (R * R) * W_CONTACT + math.sqrt(cx * cx + cz * cz) * W_CENTRE
+  return levelCost(g, y0) + topCost(g, y1 / R) + cost * W_COST - contacts / (R * R) * W_CONTACT + math.sqrt(cx * cx + cz * cz) * W_CENTRE
 end
 
 ---@async
@@ -727,14 +735,16 @@ local function keepsAccess(g, best)
 end
 
 -- The best place for one module: on a free cross arm, on a free port of a placed module, or on a new cross
--- a short path away; lowest floor first, then fewest new crosses, most contact, nearest the footprint centre.
+-- a short path away; lowest attach level first, then lowest top, fewest new crosses, most contact, nearest the
+-- footprint centre.
 ---@async
 local function place(g, rec, wide)
   if not rec.byDi then
-    rec.byDi, rec.bound, rec.minTop, rec.banned, rec.union = { {}, {}, {}, {}, {}, {} }, math.huge, math.huge, {}, {}
+    rec.byDi, rec.bound, rec.minTop, rec.minLo, rec.banned, rec.union = { {}, {}, {}, {}, {}, {} }, math.huge, math.huge, math.huge, {}, {}
     for _, pose in ipairs(rec.poses) do
       table.insert(rec.byDi[pose.di], pose)
       rec.minTop = math.min(rec.minTop, pose.top)
+      rec.minLo = math.min(rec.minLo, pose.lo[2])
       rec.bound = math.min(rec.bound, -pose.faces * W_CONTACT)
       -- per arm direction: the box all its poses lie in, the fewest cells one needs, whether each covers the cell facing the arm
       local d = DIRS[pose.di]
@@ -771,7 +781,7 @@ local function place(g, rec, wide)
     end
     for _, pose in ipairs(rec.byDi[di]) do
       -- a wrapping body hangs on a cross only
-      if not (pose.wrap and kind == "port") and (not best or topCost(g, node[2] + pose.top) + cost * W_COST - pose.faces * W_CONTACT < best.score)
+      if not (pose.wrap and kind == "port") and (not best or levelCost(g, g.R * node[2] + pose.lo[2]) + topCost(g, node[2] + pose.top) + cost * W_COST - pose.faces * W_CONTACT < best.score)
           and not (banned[pose] and banned[pose][key(g, node[1], node[2], node[3])]) then
         local score = evaluate(g, node, pose, cost, extra and extra.path, extra and extra.module)
         if score and (not best or score < best.score) then
@@ -814,6 +824,9 @@ local function place(g, rec, wide)
   if best then
     local room = best.score - rec.bound - W_COST
     yTop = room > 0 and math.min(yhi, math.floor(g.free - rec.minTop + room / W_TOP)) or -1
+    -- no node whose lowest pose starts above the best's level beats it
+    local level = math.floor((g.R * best.node[2] + best.pose.lo[2]) / g.R)
+    yTop = math.min(yTop, math.floor((g.R * (level + 1) - 1 - rec.minLo) / g.R))
   end
   if yTop >= ylo then
     local dist, from = distances(g, ylo, math.min(yhi, yTop + g.maxPath - 1), seq)
@@ -830,7 +843,7 @@ local function place(g, rec, wide)
       else
         n = q.port.node
       end
-      if not best or topCost(g, n[2] + rec.minTop) + rec.bound + d * W_COST < best.score then
+      if not best or levelCost(g, g.R * n[2] + rec.minLo) + topCost(g, n[2] + rec.minTop) + rec.bound + d * W_COST < best.score then
         local path = pathOf(g, from, n)
         local back = path[1][2]
         local usedArm = back.kind ~= "port" and OPPOSITE[back.di] or (back.kind == "port" and OPPOSITE[back.port.di])
@@ -1656,12 +1669,18 @@ end
 -- leaves the floor where it was.
 ---@async
 local function findPlace(g, rec)
+  -- a macro starts where its last one found a place: the bands below held nothing for it
+  local macro = rec.item.macro
+  g.floor = math.max(g.floor, g.floorOf[macro] or 0)
   local floor = g.floor
   local checked = false
   while true do
     local best = place(g, rec)
     if best then
-      if keepsAccess(g, best) or not openAbove(g) then return best end
+      if keepsAccess(g, best) or not openAbove(g) then
+        g.floorOf[macro] = g.floor
+        return best
+      end
       local k = key(g, best.node[1], best.node[2], best.node[3])
       rec.banned[best.pose] = rec.banned[best.pose] or {}
       rec.banned[best.pose][k] = true
@@ -1978,7 +1997,7 @@ end
 ---@async
 local function layout(kit, base, sx, sz, tallest, progress, seed, R)
   local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, occ = {}, focc = {}, dirty = {},
-    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, commits = 0, laneRefused = 0,
+    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, commits = 0, laneRefused = 0,
     started = getElapsedTime() }
   if seed then seedGrid(g, seed) end
   rebuildSums(g)
@@ -1999,7 +2018,8 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R)
       g.failed[#g.failed + 1] = rec.item.macro
       sab.Debug("grid: cost %g: no place for %s", W_COST, rec.item.macro)
     end
-    -- the lowest floor that still has a free cell
+    -- the next item starts at the lowest floor that still has a free cell
+    g.floor = 0
     while g.floor < g.top do
       local open = false
       for x = 0, g.sx - 1 do
