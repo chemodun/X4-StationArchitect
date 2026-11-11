@@ -180,6 +180,22 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [/list]
 [size=3][u][b]Changelog[/b][/u][/size]
 
+[size=3][u][i][1.31] - 2026-11-??[/i][/u][/size]
+[list]
+[*] Added
+[list]
+[*] The panel says when a run stopped on an error, with the detail in the game log
+[/list]
+[*] Changed
+[list]
+[*] The grid packs every module on one block: fewer connection structures, a smaller plan box, every floor filled before a higher one
+[/list]
+[*] Fixed
+[list]
+[*] Large modules could be left without a grid place and go to the editor's own search far from the block
+[*] A connection structure with diagonal arms was taken as a grid cross and the run stopped before placing anything
+[/list]
+[/list]
 [size=3][u][i][1.30] - 2026-11-10[/i][/u][/size]
 [list]
 [*] Added
