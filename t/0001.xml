@@ -58,6 +58,8 @@
       <t id="165">Keep storage hours for later stations</t>
       <t id="166">Additional plot licence fee</t>
       <t id="167">Stopped by an error, see the log: %s placed, %s failed</t>
+      <t id="168">%s of %s docks and piers find no room within the %s km plot limit</t>
+      <t id="169">%s docks and piers left out for lack of room</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Station Architect</t>

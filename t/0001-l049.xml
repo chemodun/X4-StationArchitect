@@ -58,6 +58,8 @@
       <t id="165">Lagerstunden für spätere Stationen beibehalten</t>
       <t id="166">Zusätzliche Gebühr für die Baugrundlizenz</t>
       <t id="167">Wegen eines Fehlers angehalten, siehe Protokoll: %s platziert, %s fehlgeschlagen</t>
+      <t id="168">%s of %s docks and piers find no room within the %s km plot limit</t>
+      <t id="169">%s docks and piers left out for lack of room</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Stationsarchitekt</t>

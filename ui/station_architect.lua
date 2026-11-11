@@ -1359,7 +1359,8 @@ function plot.price(sector)
 end
 
 -- After the pack: the plot the layout grows to (run.plotBox, station frame) and its licence price less what is
--- paid; a price to pay waits in phase "confirm" for the panel's answer, else the placement begins.
+-- paid, and the docks the layout found no room for within the plot cap (they are out of the items already);
+-- either waits in phase "confirm" for the panel's answer, else the placement begins.
 function sab.OfferPlot(run)
   local menu, box = sab.menu, run.plotBox
   local sector = ConvertIDTo64Bit(GetComponentData(menu.container, "sectorid"))
@@ -1371,62 +1372,67 @@ function sab.OfferPlot(run)
     sab.lastRun = { placed = 0, failed = 0, tooLarge = need / 1000 }
     return
   end
-  -- a dock the layout found no room for within the plot cap would fail after the rest: nothing is placed
   local g = run.grid
-  if g and g.dockFailed > 0 then
-    sab.StopRun(string.format("%d of %d docks find no room within the plot cap", g.dockFailed, g.dockTotal))
-    sab.lastRun = { placed = 0, failed = 0, noRoom = { g.dockFailed, g.dockTotal } }
-    return
+  local noRoom = g and g.dockFailed > 0 and { g.dockFailed, g.dockTotal } or nil
+  if noRoom then sab.Debug("%d of %d docks find no room within the plot cap: the player decides whether the rest is placed", noRoom[1], noRoom[2]) end
+  local offer = { sector = sector, price = 0, noRoom = noRoom }
+  if box and not plot.isFree(sector) then
+    local size = { x = (f.pos[1] + f.neg[1]) * PLOT_STEP, y = (f.pos[2] + f.neg[2]) * PLOT_STEP, z = (f.pos[3] + f.neg[3]) * PLOT_STEP }
+    -- the predicted plot, not the current one: plot.price reads the plot as it is
+    local buf = ffi.new(BOOL1, 0)
+    local full = tonumber(C.GetBuildPlotPrice(sector, C.GetObjectPositionInSector(menu.container), size.x, size.y, size.z, "player"))
+    local price = full - tonumber(C.GetBuildPlotPayment(menu.container, buf))
+    local e = plot.extents()
+    sab.Debug("plot after the pack: %.0f x %.0f x %.0f km, licence %d Cr to pay; plot now x +%.1f -%.1f, y +%.1f -%.1f, z +%.1f -%.1f km, layout x %.1f..%.1f, y %.1f..%.1f, z %.1f..%.1f km",
+      size.x / 1000, size.y / 1000, size.z / 1000, price, e.pos[1] / 1000, e.neg[1] / 1000, e.pos[2] / 1000, e.neg[2] / 1000, e.pos[3] / 1000, e.neg[3] / 1000,
+      box.min[1] / 1000, box.max[1] / 1000, box.min[2] / 1000, box.max[2] / 1000, box.min[3] / 1000, box.max[3] / 1000)
+    offer.pos, offer.neg, offer.change, offer.size, offer.price = pos, neg, change, size, price
   end
-  if not box or plot.isFree(sector) then
+  if offer.price <= 0 and not noRoom then
     run.phase = "begin"
     return
   end
-  local size = { x = (f.pos[1] + f.neg[1]) * PLOT_STEP, y = (f.pos[2] + f.neg[2]) * PLOT_STEP, z = (f.pos[3] + f.neg[3]) * PLOT_STEP }
-  -- the predicted plot, not the current one: plot.price reads the plot as it is
-  local buf = ffi.new(BOOL1, 0)
-  local full = tonumber(C.GetBuildPlotPrice(sector, C.GetObjectPositionInSector(menu.container), size.x, size.y, size.z, "player"))
-  local price = full - tonumber(C.GetBuildPlotPayment(menu.container, buf))
-  local e = plot.extents()
-  sab.Debug("plot after the pack: %.0f x %.0f x %.0f km, licence %d Cr to pay; plot now x +%.1f -%.1f, y +%.1f -%.1f, z +%.1f -%.1f km, layout x %.1f..%.1f, y %.1f..%.1f, z %.1f..%.1f km",
-    size.x / 1000, size.y / 1000, size.z / 1000, price, e.pos[1] / 1000, e.neg[1] / 1000, e.pos[2] / 1000, e.neg[2] / 1000, e.pos[3] / 1000, e.neg[3] / 1000,
-    box.min[1] / 1000, box.max[1] / 1000, box.min[2] / 1000, box.max[2] / 1000, box.min[3] / 1000, box.max[3] / 1000)
-  if price <= 0 then
-    run.phase = "begin"
-    return
-  end
-  run.offer = { pos = pos, neg = neg, change = change, size = size, price = price, sector = sector }
-  run.phase = "confirm"
+  run.skipped = noRoom and noRoom[1] or 0
+  run.offer, run.phase = offer, "confirm"
   sab.expanded, sab.panelDirty = true, true
 end
 
--- The panel's answer to the offer: pay and place, or stop with nothing placed.
+-- The panel's answer to the offer, one question at a time: the docks left out first, then the licence; accept
+-- pays (when due) and places, decline stops with nothing placed.
 function sab.AnswerPlot(accept)
   ---@type table?
   local run = sab.run
   local o = run and run.offer
   if not o then return end
   if not accept then
-    sab.StopRun("plot licence declined")
-    sab.lastRun = { placed = 0, failed = 0, declined = true }
+    sab.StopRun(o.noRoom and "docks without room declined" or "plot licence declined")
+    sab.lastRun = { placed = 0, failed = 0, declined = not o.noRoom or nil, noRoom = o.noRoom }
+    return
+  end
+  if o.noRoom and o.price > 0 then
+    sab.Debug("%d docks left out agreed; the licence is the next question", o.noRoom[1])
+    o.noRoom = nil
+    sab.panelDirty = true
     return
   end
   if GetPlayerMoney() < o.price then return end
-  local menu = sab.menu
-  local have = plot.extents()
-  if o.change and not C.ExtendBuildPlot(menu.container, o.pos, o.neg, true) then
-    sab.Debug("plot change refused: +%.0f %.0f %.0f / -%.0f %.0f %.0f m", o.pos.x, o.pos.y, o.pos.z, o.neg.x, o.neg.y, o.neg.z)
-    sab.StopRun("plot change refused")
-    return
+  if o.price > 0 then
+    local menu = sab.menu
+    local have = plot.extents()
+    if o.change and not C.ExtendBuildPlot(menu.container, o.pos, o.neg, true) then
+      sab.Debug("plot change refused: +%.0f %.0f %.0f / -%.0f %.0f %.0f m", o.pos.x, o.pos.y, o.pos.z, o.neg.x, o.neg.y, o.neg.z)
+      sab.StopRun("plot change refused")
+      return
+    end
+    if o.change then plot.noteChange(have, true) end
+    plot.redraw()
+    -- the plot as extended is what gets paid; the offer was its prediction
+    local price = math.min(o.price, plot.price(o.sector))
+    if price > 0 then TransferPlayerMoneyTo(price, ConvertStringTo64Bit(tostring(C.GetSectorControlStation(o.sector)))) end
+    C.PayBuildPlotSize(menu.container, C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container))
+    sab.Debug("plot licence paid: %d Cr (offered %d)", price, o.price)
+    readPlot(run)
   end
-  if o.change then plot.noteChange(have, true) end
-  plot.redraw()
-  -- the plot as extended is what gets paid; the offer was its prediction
-  local price = math.min(o.price, plot.price(o.sector))
-  if price > 0 then TransferPlayerMoneyTo(price, ConvertStringTo64Bit(tostring(C.GetSectorControlStation(o.sector)))) end
-  C.PayBuildPlotSize(menu.container, C.GetBuildPlotSize(menu.container), C.GetBuildPlotCenterOffset(menu.container))
-  sab.Debug("plot licence paid: %d Cr (offered %d)", price, o.price)
-  readPlot(run)
   run.offer, run.phase = nil, "begin"
   sab.panelDirty = true
 end
@@ -2355,7 +2361,7 @@ function sab.StopRun(reason, failed)
   sab.run = nil
   -- the player's module overlap setting again
   menu.applySettings()
-  sab.Debug("run %s: %d placed, %d failed", reason or "finished", run.placed, run.failed)
+  sab.Debug("run %s: %d placed, %d failed, %d docks left out", reason or "finished", run.placed, run.failed, run.skipped or 0)
   local now = getElapsedTime()
   sab.Debug("run times: probe %.1f s, pack %.1f s, placement %.1f s in %d frames, %d of them in %d editor searches", run.probed - run.started,
     run.packed and run.packed - run.probed or 0, run.placing and now - run.placing or 0, run.frames, run.searchFrames, run.searches)
@@ -2365,7 +2371,7 @@ function sab.StopRun(reason, failed)
     if box then sab.FitPlot(box, true) end
   end
   plot.flush()
-  sab.lastRun = { placed = run.placed, failed = run.failed, error = failed or nil }
+  sab.lastRun = { placed = run.placed, failed = run.failed, error = failed or nil, skipped = (run.skipped or 0) > 0 and run.skipped or nil }
   -- the panel folds to its title and this result until expanded
   sab.expanded, sab.panelDirty = false, true
   sab.planRefresh = nil
@@ -2965,16 +2971,17 @@ local function progressText()
   if last and last.failedTwice then return string.format(tostring(ReadText(PAGE, 163)), last.failedTwice) end
   if last and last.tooLarge then return string.format(tostring(ReadText(PAGE, 147)), last.tooLarge, MAX_PLOT / 1000) end
   if last and last.noRoom then return string.format(tostring(ReadText(PAGE, 164)), last.noRoom[1], last.noRoom[2], MAX_PLOT / 1000) end
-  if last and last.error then return string.format(tostring(ReadText(PAGE, 167)), last.placed, last.failed) end
-  if last and last.changed then return string.format(tostring(ReadText(PAGE, 154)), last.placed, last.failed) end
-  if last then return string.format(tostring(ReadText(PAGE, 107)), last.placed, last.failed) end
-  return ""
+  if not last then return "" end
+  local line = string.format(tostring(ReadText(PAGE, last.error and 167 or last.changed and 154 or 107)), last.placed, last.failed)
+  if last.skipped then line = line .. ". " .. string.format(tostring(ReadText(PAGE, 169)), last.skipped) end
+  return line
 end
 
 -- the item in work and how far its candidate list is; the plot offer while it waits
 local function progressDetail()
   local run = sab.run
   local o = run and run.phase == "confirm" and run.offer
+  if o and o.noRoom then return string.format(tostring(ReadText(PAGE, 168)), o.noRoom[1], o.noRoom[2], MAX_PLOT / 1000) end
   if o then
     return string.format(tostring(ReadText(PAGE, 142)), math.floor(o.size.x / 1000 + 0.5), math.floor(o.size.y / 1000 + 0.5), math.floor(o.size.z / 1000 + 0.5),
       ConvertMoneyString(o.price, false, true, 0, true) .. " " .. ReadText(1001, 101))
@@ -3565,7 +3572,7 @@ function sab.DisplayPanel()
       valueColor = Color["slider_value"], posChangeColor = Color["statusbar_diff_neg_default"], markerColor = Color["statusbar_marker_hidden"],
       width = width - 2 * Helper.borderSize, height = Helper.scaleY(Helper.standardTextHeight), x = Helper.borderSize, scaling = false })
     prow = status:addRow(true, {})
-    prow[1]:createText(progressDetail, { halign = "left", minRowHeight = buttonHeight })
+    prow[1]:createText(progressDetail, { halign = "left", minRowHeight = buttonHeight, wordwrap = true })
   end
   contentY = status.properties.y + status:getVisibleHeight() + Helper.borderSize
 
@@ -3594,8 +3601,9 @@ function sab.DisplayPanel()
   local offer = sab.run and sab.run.phase == "confirm" and sab.run.offer
   if offer then
     row = btable:addRow(true, {})
-    row[1]:setColSpan(2):createButton({ height = buttonHeight, active = function() return GetPlayerMoney() >= offer.price end })
-        :setText(ReadText(1001, 9233), { halign = "center" })
+    -- Continue (docks left out) or Buy licence; the offer table is the same across both questions
+    row[1]:setColSpan(2):createButton({ height = buttonHeight, active = function() return offer.noRoom ~= nil or GetPlayerMoney() >= offer.price end })
+        :setText(ReadText(1001, offer.noRoom and 9235 or 9233), { halign = "center" })
     row[1].handlers.onClick = function() sab.AnswerPlot(true) end
     row[3]:setColSpan(2):createButton({ height = buttonHeight }):setText(ReadText(1001, 64), { halign = "center" })
     row[3].handlers.onClick = function() sab.AnswerPlot(false) end
@@ -3621,14 +3629,15 @@ function sab.DisplayPanel()
       sab.bill = {}
       sab.panelDirty = true
     end
-    local function canRun() return sab.run == nil and #sab.bill > 0 and sab.RouteOk() end
-    row[3]:createButton({ height = buttonHeight, active = canRun }):setText(ReadText(PAGE, 103), { halign = "center" })
-    row[3].handlers.onClick = sab.RunBill
-    row[4]:createButton({ height = buttonHeight, active = function() return sab.run ~= nil end }):setText(ReadText(PAGE, 104), { halign = "center" })
-    row[4].handlers.onClick = function() sab.StopRun("stopped") end
-    row = btable:addRow(true, {})
-    row[1]:createButton({ height = buttonHeight, active = canOptimize }):setText(ReadText(PAGE, 105), { halign = "center" })
-    row[1].handlers.onClick = sab.OptimizePlot
+    -- one button: Run while idle, Stop while a run is on (the panel is rebuilt at both changes)
+    local running = sab.run ~= nil
+    local function canRun() return sab.run ~= nil or (#sab.bill > 0 and sab.RouteOk()) end
+    row[3]:createButton({ height = buttonHeight, active = canRun }):setText(ReadText(PAGE, running and 104 or 103), { halign = "center" })
+    row[3].handlers.onClick = function()
+      if sab.run then sab.StopRun("stopped") else sab.RunBill() end
+    end
+    row[4]:createButton({ height = buttonHeight, active = canOptimize }):setText(ReadText(PAGE, 105), { halign = "center" })
+    row[4].handlers.onClick = sab.OptimizePlot
   end
 
   frame:display()

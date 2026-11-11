@@ -58,6 +58,8 @@
       <t id="165">Zachowaj godziny magazynu dla kolejnych stacji</t>
       <t id="166">Dodatkowa opłata za licencję na działkę</t>
       <t id="167">Zatrzymano z powodu błędu, zobacz dziennik: umieszczono %s, nieudane %s</t>
+      <t id="168">%s of %s docks and piers find no room within the %s km plot limit</t>
+      <t id="169">%s docks and piers left out for lack of room</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architekt stacji</t>

@@ -43,21 +43,17 @@ local W_LEVEL = 1e6
 -- eval override for layout experiments: a list of new-cross costs, each packed
 ---@type number[]?
 grid.costs = nil
--- footprint variants packed: steps to the estimated side, x-to-z side ratios at the same area; the layout with
--- the fewest connectors is built
+-- footprint variants packed: steps to the estimated side, x-to-z side ratios at the same area, in this order;
+-- the first shape with nothing failed is built, else the one with the fewest failed, then the fewest connectors
 ---@type number[]
 grid.footprintSteps = { 0 }
 ---@type number[]
-grid.footprintRatios = { 1, 2, 1 / 2 }
+grid.footprintRatios = { 2, 1 / 2, 1 }
 -- side multipliers of each shape
 ---@type number[]
 grid.footprintScales = { 1 }
 -- the root crosses stand above the deepest hanging pose, so the bottom row carries modules below itself too
 grid.sandwich = true
--- the root cross's down arm and the cells of the root pier's column, held while the layout runs (taken for every
--- check; rootUnder knows the arm marker)
-local PIER_ARM = "pier"
-local PIER_REC = { pier = true }
 
 -- Score weights from eval, for layout experiments: { top, cost, contact, centre }, nil keeps a weight; a cost
 -- packs that cost only, costs = { ... } sets the list.
@@ -589,7 +585,6 @@ local function commit(g, rec, best)
     if best.kind == "root" then
       X = addCross(g, node, { kind = "root" })
       g.root = X
-      if g.pierItem then X.arms[4] = PIER_ARM end
     elseif best.kind == "new" then
       -- the path from the tree outward: each new cross on its parent
       local path = best.path
@@ -813,18 +808,9 @@ local function place(g, rec, wide)
   end
   -- a seed without crosses grows from its ports only
   if not g.root and not g.seeded then
-    -- a reserved pier column fixes the root node
-    if g.rootNode then
-      for di = 1, 6 do
-        if di ~= 4 then consider("root", g.rootNode, di, 1) end
-      end
-      return best
-    end
     for x = 0, g.sx - 1 do
       for z = 0, g.sz - 1 do
-        for di = 1, 6 do
-          if di ~= 4 or not g.pierItem then consider("root", { x, g.rootY, z }, di, 1) end
-        end
+        for di = 1, 6 do consider("root", { x, g.rootY, z }, di, 1) end
       end
     end
     return best
@@ -950,21 +936,25 @@ local function compress(g, kit)
 end
 
 -- *** docking ***
--- After the pack, piers and then dock areas hang outside the block: on a free cross arm or on a short new chain
--- of crosses under the block or beyond a face in grid.pierFaces, never wholly past the opposite faces or above.
--- A candidate's body and approach zones (exclusionzones) are boxes in the grid frame; the body may touch no
--- body or zone, a zone no body. Piers: least plot growth, then zones pointing outward; a big pier only under
--- the block. Dock areas: under the block with every zone down, then least plot growth. The first of each sits
--- nearest the first built modules, the others take the fewest new crosses. No anchor: crosses past the growth
--- faces, else a free drop out of snap reach.
+-- Piers, dock areas and build modules are grid items placed in bill order, each hung on the dock row: crosses
+-- one cell under the block, chained from the tree through nodes outside it. A body and its approach zones stay
+-- outside the block prism, the body clear of every other dock's zones and the row, a zone clear of every body, by
+-- box. Spots lie under the block in rows across the first dock's width from the root column, the nearest free
+-- one taken; the bottom full, the faces of grid.pierFaces in turn, a third only when needed; the top carries none.
+-- A new station's root is the row cross under the lattice centre, the bill's first pier beneath it, a column of
+-- crosses up to the floor the lattice grows from.
 
+-- nodes outside the block within this many cells of it may carry a chain cross
 local DOCK_REACH = 4
--- the editor's largest snap radius: a free drop nearer to a free connection snaps onto it
+-- the editor's largest snap radius: a detached layout's root keeps out of it
 local SNAP_REACH = 2000
--- one face per horizontal axis carries side piers, the opposite ones stay free for growth (DIRS indices)
+-- the vertical faces that carry docks once the bottom is full, in turn; the first one's opposite comes third, so
+-- one face stays free for growth (DIRS indices)
 ---@type integer[]
 grid.pierFaces = { 1, 5 }
 local IDENTITY = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }
+-- the dock row's floor, in cross cells
+local ROW = -1
 
 local function nkey(n) return n[1] .. "," .. n[2] .. "," .. n[3] end
 
@@ -987,6 +977,11 @@ local function nearZone(a, z)
   return true
 end
 
+local function union(a, b)
+  return { min = { math.min(a.min[1], b.min[1]), math.min(a.min[2], b.min[2]), math.min(a.min[3], b.min[3]) },
+    max = { math.max(a.max[1], b.max[1]), math.max(a.max[2], b.max[2]), math.max(a.max[3], b.max[3]) } }
+end
+
 -- Whether box touches a box of list, and the tests made.
 local function touchesAny(touch, box, list)
   for k = 1, #list do
@@ -995,200 +990,72 @@ local function touchesAny(touch, box, list)
   return false, #list
 end
 
--- Whether box touches a solid, and the tests made: the last solid hit first; a box beyond a face of the footprint
--- box can touch only the solids leaning past that face.
-local function touchesSolid(D, box, isZone)
-  local touch = isZone and nearZone or hit
-  if not touch(box, D.hull) then return false, 1 end
-  if D.lastHit and touch(box, D.lastHit) then return true, 2 end
-  local F, list = D.F, D.solid
-  for i = 1, 3 do
-    if isZone then
-      if box.min[i] >= F.max[i] + ZONE_MARGIN then list = D.lean[2 * i - 1] break end
-      if box.max[i] <= F.min[i] - ZONE_MARGIN then list = D.lean[2 * i] break end
-    else
-      if box.min[i] + 1 >= F.max[i] then list = D.lean[2 * i - 1] break end
-      if box.max[i] - 1 <= F.min[i] then list = D.lean[2 * i] break end
-    end
+-- The body and approach zone boxes of a pose around the node it hangs on; returns its zones pointing out of face fi.
+local function dockShape(macro, pose, fi)
+  if not pose.body then
+    pose.body = pose.box
+    pose.zones = sab.geo.zoneBoxes(macro, pose.pos, pose.rows)
+    pose.out = {}
   end
-  local found, k = touchesAny(touch, box, list)
-  if found then D.lastHit = list[k] end
-  return found, k + 2
-end
-
--- The body and approach zone boxes of a pose around the cross it hangs on.
-local function dockShape(macro, pose)
-  local geo = sab.geo
-  pose.body = pose.box
-  pose.zones = geo.zoneBoxes(macro, pose.pos, pose.rows)
-  pose.down = 0
-  for _, z in ipairs(pose.zones) do
-    if z.dir[2] < -0.99 then pose.down = pose.down + 1 end
-  end
-end
-
--- The sandwich fills the floors under the root row, where the root pier hangs: before the layout its column under
--- a fixed root node (the footprint centre) is taken, in the pose rootUnder would pick; released when nothing roots there.
----@async
-local function reservePier(g)
-  local it = g.pierItem
-  if not (it and g.rootY > 0) then return end
-  local best
-  for _, pose in ipairs(poses(g, it.macro)) do
-    if pose.di == 4 then
-      dockShape(it.macro, pose)
-      local up = #pose.zones - pose.down
-      if not best or up < best.up then best = { pose = pose, up = up } end
+  if not pose.out[fi] then
+    local d, n = DIRS[fi], 0
+    for _, z in ipairs(pose.zones) do
+      if z.dir[1] * d[1] + z.dir[2] * d[2] + z.dir[3] * d[3] > 0.99 then n = n + 1 end
     end
+    pose.out[fi] = n
   end
-  if not best then return end
-  local R, u, pose = g.R, g.u, best.pose
-  local node = { math.floor((g.sx - 1) / 2), g.rootY, math.floor((g.sz - 1) / 2) }
-  local f, fkeys, keys = { R * node[1], R * node[2], R * node[3] }, {}, {}
-  -- a box in the pose's frame, grown by margin, as the cells of poses(): below the root row, inside the block
-  local function take(box, margin)
-    local lo, hi = {}, {}
-    for i = 1, 3 do
-      local h = u[i] / R
-      lo[i] = f[i] + math.floor((box.min[i] - margin + EPS * h) / h + R / 2)
-      hi[i] = f[i] + math.floor((box.max[i] + margin - EPS * h) / h + R / 2)
-    end
-    for x = math.max(0, lo[1]), math.min(g.fx - 1, hi[1]) do
-      for y = math.max(0, lo[2]), math.min(f[2] - 1, hi[2]) do
-        for z = math.max(0, lo[3]), math.min(g.fz - 1, hi[3]) do
-          local k = fkey(g, x, y, z)
-          if not g.focc[k] then
-            g.focc[k] = PIER_REC
-            fkeys[#fkeys + 1] = k
-          end
-          local ck = key(g, math.floor(x / R), math.floor(y / R), math.floor(z / R))
-          if not g.occ[ck] then
-            g.occ[ck] = PIER_REC
-            keys[#keys + 1] = ck
-          end
-        end
-      end
-    end
-  end
-  take(pose.body, 0)
-  for _, z in ipairs(pose.zones) do take(z, ZONE_MARGIN) end
-  g.rootNode, g.pierCells = node, { f = fkeys, c = keys }
-  markDirty(g, 1, 0, 0, 0, f[2])
-  rebuildSums(g)
-  sab.Trace("grid: %s column of %d cells held under the root node %d %d %d", it.macro, #fkeys, node[1], node[2], node[3])
+  return pose.out[fi]
 end
 
----@async
-local function releasePier(g)
-  for _, k in ipairs(g.pierCells.f) do g.focc[k] = nil end
-  for _, k in ipairs(g.pierCells.c) do g.occ[k] = nil end
-  g.rootNode, g.pierCells = nil, nil
-  markDirty(g, 1, 0, 0, 0, g.R * g.rootY)
-  rebuildSums(g)
-  sab.Debug("grid: nothing roots over the pier column, %s docks as usual", g.pierItem.macro)
-end
-
--- Whole km of one axis from the station's position to both faces of the layout grown to lo..hi.
-local function axisKm(D, i, lo, hi)
-  lo, hi = math.min(lo, D.all.min[i]) + D.shift[i], math.max(hi, D.all.max[i]) + D.shift[i]
-  return math.max(0, math.ceil(hi / 1000 - 0.001)) + math.max(0, math.ceil(-lo / 1000 - 0.001))
-end
-
--- Paid plot volume of the layout grown to a grid-frame box, in whole km per face; nil past the cap.
-local function grownKm3(D, x0, y0, z0, x1, y1, z1)
-  local nx, ny, nz = axisKm(D, 1, x0, x1), axisKm(D, 2, y0, y1), axisKm(D, 3, z0, z1)
-  local cap = D.maxPlot
-  if nx > cap or ny > cap or nz > cap then return nil end
-  return math.max(1, nx) * math.max(1, ny) * math.max(1, nz)
-end
-
--- Whether x0..x1 / z0..z1 lies wholly past the face of DIRS index fi of box F.
-local function beyond(fi, F, x0, z0, x1, z1)
-  local d = DIRS[fi]
-  if d[1] > 0 then return x0 >= F.max[1] - 1 end
-  if d[1] < 0 then return x1 <= F.min[1] + 1 end
-  if d[3] > 0 then return z0 >= F.max[3] - 1 end
-  return z1 <= F.min[3] + 1
-end
-
--- Whether direction d runs level and along the face of DIRS index fi.
-local function levelAlong(d, fi)
-  if not fi or math.abs(d[2]) >= 0.1 then return false end
-  local n = DIRS[fi]
-  return math.abs(d[1] * n[1] + d[3] * n[3]) < 0.1
-end
-
-local function union(a, b)
-  return { min = { math.min(a.min[1], b.min[1]), math.min(a.min[2], b.min[2]), math.min(a.min[3], b.min[3]) },
-    max = { math.max(a.max[1], b.max[1]), math.max(a.max[2], b.max[2]), math.max(a.max[3], b.max[3]) } }
-end
-
-local function dockState(g, kit)
-  local u, a, geo = g.u, g.a, sab.geo
+-- The layout's dock state: the block prism, the faces in turn, the row's crosses and boxes, the docks' bodies and zones.
+local function dockInit(g, kit)
+  local u, a = g.u, g.a
   local cs = sab.sizes[kit.cross.macro]
   -- a cross keeps to its cell, its arms on every face: a model box reaching past them is loose (8.00), in any rotation
-  local cb = cs and geo.worldBox(cs, { 0, 0, 0 }, IDENTITY) or { min = { -a[1], -a[2], -a[3] }, max = { a[1], a[2], a[3] } }
+  local cb = cs and sab.geo.worldBox(cs, { 0, 0, 0 }, IDENTITY) or { min = { -a[1], -a[2], -a[3] }, max = { a[1], a[2], a[3] } }
   for i = 1, 3 do cb.min[i], cb.max[i] = math.max(cb.min[i], -a[i]), math.min(cb.max[i], a[i]) end
-  local D = { solid = {}, bodies = {}, zones = {}, crosses = {}, poses = {}, piers = 0, areas = 0, crossBox = cb,
-    F = { min = { -a[1], -a[2], -a[3] }, max = { (g.sx - 1) * u[1] + a[1], g.top * u[2] + a[2], (g.sz - 1) * u[3] + a[3] } },
-    maxPlot = sab.maxPlotKm }
-  -- grid frame to station frame: the root cross's origin sits at g.origin less its centre offset
-  D.shift = { g.origin[1] - (cs and cs.cX or 0), g.origin[2] - (cs and cs.cY or 0), g.origin[3] - (cs and cs.cZ or 0) }
-  local seen = {}
-  for _, v in pairs(g.occ) do
-    -- crosses, those a strut replaced included
-    if v.arms and not seen[v] then
-      seen[v] = true
-      D.solid[#D.solid + 1] = shifted(D.crossBox, { v.node[1] * u[1], v.node[2] * u[2], v.node[3] * u[3] })
-    end
-  end
-  ---@type number[]
-  local sum = { 0, 0, 0 }
-  local first, n = math.huge, 0
-  for _, M in ipairs(g.modules) do
-    if M.pose.box then
-      M.box = shifted(M.pose.box, { M.node[1] * u[1], M.node[2] * u[2], M.node[3] * u[3] })
-    else
-      local p = { M.node[1] * u[1] + M.pose.pos[1], M.node[2] * u[2] + M.pose.pos[2], M.node[3] * u[3] + M.pose.pos[3] }
-      M.box = geo.worldBox(sab.sizes[M.item.macro], p, M.pose.rows)
-    end
-    D.solid[#D.solid + 1] = M.box
-    first = math.min(first, M.item.turn or 0)
-  end
-  -- the first built modules: the first production chain
-  for _, M in ipairs(g.modules) do
-    if (M.item.turn or 0) == first then
-      for i = 1, 3 do sum[i] = sum[i] + (M.box.min[i] + M.box.max[i]) / 2 end
-      n = n + 1
-    end
-  end
-  for _, z in ipairs(g.zones or {}) do D.zones[#D.zones + 1] = z end
-  D.firstAt = n > 0 and { sum[1] / n, sum[2] / n, sum[3] / n } or { (D.F.min[1] + D.F.max[1]) / 2, 0, (D.F.min[3] + D.F.max[3]) / 2 }
-  D.all = D.F
-  -- solids lean past the footprint box by up to EPS
-  D.hull = D.F
-  for _, s in ipairs(D.solid) do D.hull = union(D.hull, s) end
-  -- the solids past each face of the footprint box, in DIRS order
-  D.lean = {}
-  for side = 1, 6 do
-    local i, list = axisOf(side), {}
-    for _, s in ipairs(D.solid) do
-      if (DIRS[side][i] > 0 and s.max[i] > D.F.max[i]) or (DIRS[side][i] < 0 and s.min[i] < D.F.min[i]) then list[#list + 1] = s end
-    end
-    D.lean[side] = list
-  end
-  return D
+  local F = { min = { -a[1], -a[2], -a[3] }, max = { (g.sx - 1) * u[1] + a[1], math.huge, (g.sz - 1) * u[3] + a[3] } }
+  local faces = { 4 }
+  for _, fi in ipairs(grid.pierFaces) do faces[#faces + 1] = fi end
+  faces[#faces + 1] = OPPOSITE[grid.pierFaces[1]]
+  g.dock = { crossBox = cb, F = F, bound = F, faces = faces, c = { math.floor((g.sx - 1) / 2), ROW, math.floor((g.sz - 1) / 2) },
+    crosses = {}, boxes = {}, bodies = {}, zones = {}, poses = {}, poseOf = {}, total = 0, failed = 0, newCrosses = 0 }
+  g.docks = {}
 end
 
--- New crosses go outside the block: under it, or past a pier face, within reach; relaxed, past any face, clear
--- of the solids the growth faces may lean.
+-- A cross outside the block, keyed by name (cell keys serve the block only); under the block its up arm stays the
+-- block's.
+local function addOutsideCross(g, node, parent)
+  local D, u = g.dock, g.u
+  local X = { node = node, key = "out:" .. nkey(node), arms = {}, parent = parent, modules = 0, seq = parentSeq(parent), outside = true }
+  if node[2] == ROW and node[1] >= 0 and node[1] < g.sx and node[3] >= 0 and node[3] < g.sz then X.arms[3] = true end
+  g.crosses[X.key] = X
+  D.crosses[nkey(node)] = X
+  D.boxes[#D.boxes + 1] = shifted(D.crossBox, { node[1] * u[1], node[2] * u[2], node[3] * u[3] })
+  return X
+end
+
+-- A new station rooted on a pier: the root on the row under the lattice centre, the pier to hang beneath it, a
+-- column of crosses up to the root floor.
+local function spine(g)
+  local c = g.dock.c
+  local prev = addOutsideCross(g, c, { kind = "root" })
+  g.root = prev
+  g.dock.reserved = true
+  for y = 0, g.rootY do
+    local X = addCross(g, { c[1], y, c[3] }, { kind = "cross", cross = prev, di = 3 })
+    prev.arms[3], X.arms[4] = true, true
+    prev = X
+  end
+end
+
+-- Whether a chain cross may stand at n: on the row or below it, or above it past a face of grid.pierFaces, within
+-- reach, its box clear of every dock body and zone.
 ---@async
-local function dockNode(g, D, n, relaxed)
-  local x, y, z = n[1], n[2], n[3]
-  if x < -DOCK_REACH or x >= g.sx + DOCK_REACH or z < -DOCK_REACH or z >= g.sz + DOCK_REACH or y < -DOCK_REACH or y > g.top then return false end
-  local inside = x >= 0 and x < g.sx and z >= 0 and z < g.sz and y >= 0
-  if inside then return false end
-  if y >= 0 and not relaxed then
+local function dockNode(g, n)
+  local D, x, y, z = g.dock, n[1], n[2], n[3]
+  if x < -DOCK_REACH or x >= g.sx + DOCK_REACH or z < -DOCK_REACH or z >= g.sz + DOCK_REACH or y <= ROW - DOCK_REACH or y > g.top then return false end
+  if y > ROW then
     local past = false
     for _, fi in ipairs(grid.pierFaces) do
       local d = DIRS[fi]
@@ -1198,296 +1065,254 @@ local function dockNode(g, D, n, relaxed)
   end
   if D.crosses[nkey(n)] then return false end
   local b = shifted(D.crossBox, { x * g.u[1], y * g.u[2], z * g.u[3] })
-  local found, tests, k = false, 0, 0
-  if relaxed then found, tests = touchesSolid(D, b, false) end
-  if not found then found, k = touchesAny(hit, b, D.bodies) tests = tests + k end
+  local found, k = touchesAny(hit, b, D.bodies)
+  local tests = k
   if not found then found, k = touchesAny(nearZone, b, D.zones) tests = tests + k end
+  if not found and g.zones then found, k = touchesAny(nearZone, b, g.zones) tests = tests + k end
   work(g, tests)
   return not found
 end
 
--- Nodes by steps from the tree: crosses' free arms and modules' outward ports are one step away.
----@async
-local function dockReach(g, D, seq, relaxed)
-  local levels, from = {}, {}
-  ---@async
-  local function push(n, d, ref)
-    local k = nkey(n)
-    if from[k] or not dockNode(g, D, n, relaxed) then return end
-    from[k] = ref
-    levels[d] = levels[d] or {}
-    levels[d][#levels[d] + 1] = n
-  end
-  for _, X in pairs(g.crosses) do
-    for di, d in ipairs((X.seq or 0) <= seq and DIRS or NONE) do
-      if not X.arms[di] then push({ X.node[1] + d[1], X.node[2] + d[2], X.node[3] + d[3] }, 1, { kind = "cross", cross = X, di = di }) end
-    end
+-- The nodes a chain may start on, one step from the tree, with the step: a module's free connection pointing onto
+-- the row, a floor cross's free down arm, an outside cross's free arm. Items up to seq.
+local function entries(g, seq)
+  local D, list = g.dock, {}
+  local function add(n, ref)
+    if not D.crosses[nkey(n)] then list[#list + 1] = { node = n, ref = ref } end
   end
   for _, M in ipairs(g.modules) do
-    for _, pt in ipairs((M.seq or 0) <= seq and M.outPorts or NONE) do
-      if not pt.used then push(pt.node, 1, { kind = "port", module = M, port = pt, di = pt.di }) end
-    end
-  end
-  for d = 1, DOCK_REACH - 1 do
-    for _, n in ipairs(levels[d] or {}) do
-      for di, dd in ipairs(DIRS) do push({ n[1] + dd[1], n[2] + dd[2], n[3] + dd[3] }, d + 1, { kind = "new", node = n, di = di }) end
-      work(g, 6)
-    end
-  end
-  return levels, from
-end
-
--- Lexicographic: lower is better.
-local function less(a, b)
-  for i = 1, #a do
-    if a[i] ~= b[i] then return a[i] < b[i] end
-  end
-  return false
-end
-
--- The least and greatest min and max per axis of the poses' bodies.
-local function bodySpan(list, s)
-  s = s or { minLo = { math.huge, math.huge, math.huge }, maxLo = { -math.huge, -math.huge, -math.huge },
-    minHi = { math.huge, math.huge, math.huge }, maxHi = { -math.huge, -math.huge, -math.huge } }
-  for _, pose in ipairs(list) do
-    local b = pose.body
-    for i = 1, 3 do
-      if b.min[i] < s.minLo[i] then s.minLo[i] = b.min[i] end
-      if b.min[i] > s.maxLo[i] then s.maxLo[i] = b.min[i] end
-      if b.max[i] < s.minHi[i] then s.minHi[i] = b.max[i] end
-      if b.max[i] > s.maxHi[i] then s.maxHi[i] = b.max[i] end
-    end
-  end
-  return s
-end
-
--- a pier macro's docking bays: the Extra Data API reads them from the engine on every call
-local baysOf = {}
-
--- The best place for one dock item, or nil; defer: nil, nil, true when only a free drop is left.
----@async
-local function dockPlace(g, D, it, defer)
-  local u, F = g.u, D.F
-  local uMean = (u[1] + u[2] + u[3]) / 3
-  local byDi = D.poses[it.macro]
-  if not byDi then
-    byDi = { {}, {}, {}, {}, {}, {} }
-    for _, pose in ipairs(poses(g, it.macro)) do
-      dockShape(it.macro, pose)
-      table.insert(byDi[pose.di], pose)
-    end
-    D.poses[it.macro] = byDi
-  end
-  local isPier, isBuild = IsMacroClass(it.macro, "pier"), IsMacroClass(it.macro, "buildmodule")
-  if isPier and not baysOf[it.macro] then baysOf[it.macro] = #(ExtraData and ExtraData.GetMacroDataEx(it.macro, "dockingbays") or {}) end
-  local big = isPier and baysOf[it.macro] > sab.planner.bigPier
-  local firstOfKind = not isBuild and (isPier and D.piers or D.areas) == 0
-  local A = D.all
-  local baseKm3 = grownKm3(D, A.min[1], A.min[2], A.min[3], A.max[1], A.max[2], A.max[3])
-  local centre = { (F.min[1] + F.max[1]) / 2, (F.min[2] + F.max[2]) / 2, (F.min[3] + F.max[3]) / 2 }
-  local otherFaces = {}
-  for _, fi in ipairs({ 1, 2, 5, 6 }) do
-    local pierFace = false
-    for _, pf in ipairs(grid.pierFaces) do if pf == fi then pierFace = true end end
-    if not pierFace then otherFaces[#otherFaces + 1] = fi end
-  end
-  local best = {}
-  ---@async
-  local function blocked(box, boxes, isZone)
-    local touch = isZone and nearZone or hit
-    local found, tests = touchesSolid(D, box, isZone)
-    local k
-    if not found then found, k = touchesAny(touch, box, D.bodies) tests = tests + k end
-    if not found and not isZone then found, k = touchesAny(nearZone, box, D.zones) tests = tests + k end
-    if not found then found, k = touchesAny(touch, box, boxes) tests = tests + k end
-    work(g, tests)
-    return found
-  end
-  ---@async
-  local function try(node, di, cost, extra)
-    local ox, oy, oz = node[1] * u[1], node[2] * u[2], node[3] * u[3]
-    local o
-    for _, pose in ipairs(byDi[di]) do
-      work(g, 40)
-      local pb = pose.body
-      local x0, y0, z0 = pb.min[1] + ox, pb.min[2] + oy, pb.min[3] + oz
-      local x1, y1, z1 = pb.max[1] + ox, pb.max[2] + oy, pb.max[3] + oz
-      -- outside the block: under it or past a pier face (a build module only past one), never wholly past the
-      -- other faces or above
-      local under = y1 <= F.min[2] + 1
-      local past, f1, f2 = false, nil, nil
-      for _, fi in ipairs(grid.pierFaces) do
-        if beyond(fi, F, x0, z0, x1, z1) then
-          past = true
-          if f1 then f2 = fi else f1 = fi end
-        end
-      end
-      local away = y0 >= F.max[2] - 1
-      for _, fi in ipairs(otherFaces) do
-        if beyond(fi, F, x0, z0, x1, z1) then away = true end
-      end
-      local cl = extra.clear
-      if cl and x0 + 1 < cl.max[1] and x1 - 1 > cl.min[1] and y0 + 1 < cl.max[2] and y1 - 1 > cl.min[2] and z0 + 1 < cl.max[3] and z1 - 1 > cl.min[3] then
-        away = true
-      end
-      -- a build module's approach zones run level along a face it is past
-      local off = 0
-      if isBuild then
-        for _, z in ipairs(pose.zones) do
-          if not (levelAlong(z.dir, f1) or levelAlong(z.dir, f2)) then off = off + 1 end
-        end
-      end
-      local wanted
-      if isBuild then
-        wanted = off == 0
-      elseif isPier then
-        wanted = not big or under
-      else
-        wanted = under and pose.down == #pose.zones
-      end
-      local rank = wanted and 1 or 2
-      local cur = best[rank]
-      local outside = past or (under and not isBuild)
-      local km3 = outside and not away and not (rank == 2 and best[1]) and grownKm3(D, x0, y0, z0, x1, y1, z1)
-      -- the plot growth leads the order: a worse one needs no further keys
-      if km3 and not (cur and km3 - baseKm3 > cur.order[1]) then
-        local bx, by, bz = (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2
-        local order = { km3 - baseKm3 }
-        if isPier then
-          local cx, cy, cz = bx - centre[1], by - centre[2], bz - centre[3]
-          local len = math.sqrt(cx * cx + cy * cy + cz * cz)
-          local inward = 0
-          for _, z in ipairs(pose.zones) do
-            if len == 0 or (z.dir[1] * cx + z.dir[2] * cy + z.dir[3] * cz) / len < 0.5 then inward = inward + 1 end
-          end
-          order[2] = inward
-        elseif isBuild then
-          order[2] = off
-        end
-        local near = math.sqrt((bx - D.firstAt[1]) ^ 2 + (by - D.firstAt[2]) ^ 2 + (bz - D.firstAt[3]) ^ 2) / uMean
-        if firstOfKind then order[#order + 1] = near; order[#order + 1] = cost else order[#order + 1] = cost; order[#order + 1] = near end
-        if not cur or less(order, cur.order) then
-          o = o or { ox, oy, oz }
-          local body = shifted(pb, o)
-          local boxes = extra.boxes or NONE
-          local ok = not blocked(body, boxes, false)
-          if ok then
-            for _, z in ipairs(pose.zones) do
-              local zb = shifted(z, o)
-              if blocked(zb, boxes, true) then ok = false break end
-            end
-          end
-          if ok then best[rank] = { order = order, node = node, di = di, pose = pose, cost = cost, cross = extra.cross, path = extra.path, from = extra.from, free = extra.free } end
-        end
+    if (M.seq or 0) <= seq then
+      for _, pt in ipairs(M.outPorts) do
+        if not pt.used and pt.node[2] == ROW then add(pt.node, { kind = "port", module = M, port = pt, di = pt.di }) end
       end
     end
   end
-  -- keys never go below 0: no place d new crosses away beats a wanted one with no growth, no inward or off
-  -- zone and fewer
-  local function settled(d)
-    local b = best[1]
-    if not b or firstOfKind or b.order[1] > 0 then return false end
-    if isPier or isBuild then return b.order[2] == 0 and b.order[3] < d end
-    return b.order[2] < d
-  end
-  local seq = it.seq or math.huge
   for _, X in pairs(g.crosses) do
-    for di = 1, (X.seq or 0) <= seq and 6 or 0 do
-      if not X.arms[di] then try(X.node, di, 0, { cross = X }) end
-    end
-  end
-  ---@async
-  local function chains(relaxed)
-    local levels, from = {}, {}
-    if not settled(1) then levels, from = dockReach(g, D, seq, relaxed) end
-    for d = 1, DOCK_REACH do
-      if settled(d) then break end
-      for _, n in ipairs(levels[d] or {}) do
-        local path, m = {}, n
-        while true do
-          path[#path + 1] = m
-          local ref = from[nkey(m)]
-          if ref.kind ~= "new" then break end
-          m = ref.node
-        end
-        local boxes = {}
-        for i, p in ipairs(path) do boxes[i] = shifted(D.crossBox, { p[1] * u[1], p[2] * u[2], p[3] * u[3] }) end
-        local extra = { path = path, from = from, boxes = boxes }
-        local back = OPPOSITE[from[nkey(n)].di]
-        for di = 1, 6 do
-          if di ~= back then try(n, di, d, extra) end
-        end
+    if (X.seq or 0) <= seq then
+      local n = X.node
+      for di, d in ipairs(DIRS) do
+        if not X.arms[di] and (X.outside or (n[2] == 0 and di == 4)) then add({ n[1] + d[1], n[2] + d[2], n[3] + d[3] }, { kind = "cross", cross = X, di = di }) end
       end
     end
   end
-  chains(false)
-  -- every chain kept off the growth faces: one may pass them, the dock itself still outside as above
-  if not (best[1] or best[2]) then chains(true) end
-  if not (best[1] or best[2]) and defer then return nil, nil, true end
-  if not (best[1] or best[2]) then
-    -- no chain at all: a free drop out of snap reach of everything standing (it is placed alone)
-    local L, R = D.hull, SNAP_REACH
-    for _, b in ipairs(D.bodies) do L = union(L, b) end
-    local clear = { min = { L.min[1] - R, L.min[2] - R, L.min[3] - R }, max = { L.max[1] + R, L.max[2] + R, L.max[3] + R } }
-    local far = DOCK_REACH + math.ceil(R / math.min(u[1], u[2], u[3]))
-    if not byDi.spans then
-      byDi.spans = {}
-      for di = 1, 6 do
-        if #byDi[di] > 0 then
-          byDi.spans[di] = bodySpan(byDi[di])
-          byDi.spans.all = bodySpan(byDi[di], byDi.spans.all)
+  return list
+end
+
+-- The chain of new crosses from the hang node m to the nearest entry: in to the row node n, along the row one axis
+-- at a time; nil when a node is blocked. Nodes from m inward, the step back from each.
+---@async
+local function chainTo(g, E, m, n)
+  -- the four nearest entries
+  local near = {}
+  for _, e in ipairs(E) do
+    local d = math.abs(e.node[1] - m[1]) + math.abs(e.node[2] - m[2]) + math.abs(e.node[3] - m[3])
+    local i = #near + 1
+    while i > 1 and near[i - 1].d > d do
+      near[i] = near[i - 1]
+      i = i - 1
+    end
+    if i <= 4 then near[i] = { e = e, d = d } end
+    near[5] = nil
+  end
+  for t = 1, #near do
+    local e = near[t].e
+    local goal = nkey(e.node)
+    for _, first in ipairs({ 1, 3 }) do
+      local seq, p, done = { m }, { m[1], m[2], m[3] }, nkey(m) == goal
+      local function walk(axis, to)
+        while not done and p[axis] ~= to do
+          p[axis] = p[axis] + (to > p[axis] and 1 or -1)
+          seq[#seq + 1] = { p[1], p[2], p[3] }
+          done = nkey(p) == goal
         end
       end
+      walk(2, n[2])
+      walk(first, e.node[first])
+      walk(first == 1 and 3 or 1, e.node[first == 1 and 3 or 1])
+      if done then
+        local from, ok = {}, true
+        for i, q in ipairs(seq) do
+          if not dockNode(g, q) then ok = false break end
+          if i < #seq then
+            local r = seq[i + 1]
+            from[nkey(q)] = { kind = "new", node = r, di = dirIndex({ q[1] - r[1], q[2] - r[2], q[3] - r[3] }) }
+          else
+            from[nkey(q)] = e.ref
+          end
+        end
+        if ok then return seq, from end
+      end
     end
-    local spans, cb, cmin, cmax = byDi.spans, D.crossBox, clear.min, clear.max
-    -- whether some pose within the span at the node can pass try()'s tests, each test on the span's bounds
-    ---@async
-    local function mayDrop(s, ox, oy, oz)
-      work(g, 8)
-      if s.minLo[2] + oy >= F.max[2] - 1 then return false end
-      for _, fi in ipairs(otherFaces) do
-        if beyond(fi, F, s.minLo[1] + ox, s.minLo[3] + oz, s.maxHi[1] + ox, s.maxHi[3] + oz) then return false end
-      end
-      local x0, y0, z0, x1, y1, z1 = s.maxLo[1] + ox, s.maxLo[2] + oy, s.maxLo[3] + oz, s.minHi[1] + ox, s.minHi[2] + oy, s.minHi[3] + oz
-      local outside = not isBuild and y1 <= F.min[2] + 1
-      for _, fi in ipairs(grid.pierFaces) do
-        if beyond(fi, F, x0, z0, x1, z1) then outside = true end
-      end
-      if not outside then return false end
-      if not (x0 + 1 >= cmax[1] or x1 - 1 <= cmin[1] or y0 + 1 >= cmax[2] or y1 - 1 <= cmin[2] or z0 + 1 >= cmax[3] or z1 - 1 <= cmin[3]) then return false end
-      -- the least plot growth a pose there takes, against the wanted place found
-      if best[1] then
-        local km3 = grownKm3(D, x0, y0, z0, x1, y1, z1)
-        if not km3 or km3 - baseKm3 > best[1].order[1] then return false end
-      end
-      return true
-    end
-    local extra = { free = true, clear = clear }
-    for x = -far, g.sx + far - 1 do
-      local ox = x * u[1]
-      for y = -far, g.top do
-        local oy = y * u[2]
-        for z = -far, g.sz + far - 1 do
-          local oz = z * u[3]
-          work(g, 2)
-          -- the node's cross box out of the reach
-          if (cb.min[1] + ox + 1 >= cmax[1] or cb.max[1] + ox - 1 <= cmin[1] or cb.min[2] + oy + 1 >= cmax[2] or cb.max[2] + oy - 1 <= cmin[2]
-                or cb.min[3] + oz + 1 >= cmax[3] or cb.max[3] + oz - 1 <= cmin[3]) and spans.all and mayDrop(spans.all, ox, oy, oz) then
-            local node = { x, y, z }
-            for di = 1, 6 do
-              if spans[di] and mayDrop(spans[di], ox, oy, oz) then try(node, di, 0, extra) end
-            end
+  end
+  return nil
+end
+
+-- Cells out from a row spot the pose's node must stand for its body to clear the block prism on face fi.
+local function depthOf(g, fi, n, pose)
+  local d, F, u = DIRS[fi], g.dock.F, g.u
+  local ax = axisOf(fi)
+  local at, b = n[ax] * u[ax], pose.body
+  local k = d[ax] < 0 and (at + b.max[ax] + 1 - F.min[ax]) / u[ax] or (F.max[ax] + 1 - b.min[ax] - at) / u[ax]
+  return math.max(0, math.ceil(k - 1e-6))
+end
+
+-- The spot nodes of face fi, the nearest the root column first, both sides in turn: under the block, rows across
+-- axis w (the first dock's width) by rows along the other; past a vertical face, along it on the row.
+local function spots(g, fi)
+  local D, list = g.dock, {}
+  local function sides(i) return i == 0 and { 1 } or { 1, -1 } end
+  if fi == 4 then
+    local w = D.w or 1
+    local l = w == 1 and 3 or 1
+    local nw, nl = w == 1 and g.sx or g.sz, l == 1 and g.sx or g.sz
+    for j = 0, nl do
+      for _, sj in ipairs(sides(j)) do
+        for i = 0, nw do
+          for _, si in ipairs(sides(i)) do
+            local n = { D.c[1], ROW, D.c[3] }
+            n[w], n[l] = n[w] + si * i, n[l] + sj * j
+            list[#list + 1] = n
           end
         end
       end
     end
+  else
+    local d = DIRS[fi]
+    local along = d[1] ~= 0 and 3 or 1
+    local n0 = { D.c[1], ROW, D.c[3] }
+    if d[1] > 0 then n0[1] = g.sx elseif d[1] < 0 then n0[1] = -1 elseif d[3] > 0 then n0[3] = g.sz else n0[3] = -1 end
+    for t = 0, along == 1 and g.sx or g.sz do
+      for _, s in ipairs(sides(t)) do
+        local n = { n0[1], ROW, n0[3] }
+        n[along] = n[along] + s * t
+        list[#list + 1] = n
+      end
+    end
   end
-  return best[1] or best[2], best[1] ~= nil
+  return list
 end
 
--- The chosen place joins the tree: new crosses from the tree outward, the module on the last one.
-local function dockCommit(g, D, it, best)
-  local u = g.u
+-- Whether the pose hung at m, out from the row spot n on face fi, passes: the body outside the prism and within the
+-- face's bound, a chain to the tree, body and zones clear of everything standing and the chain, the zones outside
+-- the prism, the plot cap.
+---@async
+local function dockFits(g, fi, n, m, pose, E)
+  local D, u, F = g.dock, g.u, g.dock.F
+  local o = { m[1] * u[1], m[2] * u[2], m[3] * u[3] }
+  local body = shifted(pose.body, o)
+  if hit(body, F) then return refuse(g, "in the block") end
+  if fi ~= 4 or D.w then
+    local B = D.bound
+    for _, i in ipairs(fi == 4 and { 1, 3 } or { DIRS[fi][1] ~= 0 and 3 or 1 }) do
+      if body.min[i] + 1 < B.min[i] or body.max[i] - 1 > B.max[i] then return refuse(g, "past the bound") end
+    end
+  end
+  local X, path, from = D.crosses[nkey(m)], nil, nil
+  if X then
+    if X.arms[fi] then return refuse(g, "the arm taken") end
+  else
+    path, from = chainTo(g, E, m, n)
+    if not path then return refuse(g, "no chain") end
+  end
+  local boxes = {}
+  for i, p in ipairs(path or NONE) do boxes[i] = shifted(D.crossBox, { p[1] * u[1], p[2] * u[2], p[3] * u[3] }) end
+  local found, k = touchesAny(hit, body, D.bodies)
+  local tests, why = k, "the body at a body"
+  if not found then found, k = touchesAny(hit, body, D.boxes) tests = tests + k why = "the body at a cross" end
+  if not found then found, k = touchesAny(hit, body, boxes) tests = tests + k end
+  if not found then found, k = touchesAny(nearZone, body, D.zones) tests = tests + k why = "the body in a zone" end
+  if not found and g.zones then found, k = touchesAny(nearZone, body, g.zones) tests = tests + k end
+  local zones = {}
+  for i, z in ipairs(pose.zones) do
+    if found then break end
+    local zb = shifted(z, o)
+    zones[i] = zb
+    found, why = nearZone(zb, F), "a zone in the block"
+    if not found then found, k = touchesAny(nearZone, zb, D.bodies) tests = tests + k why = "a zone at a body" end
+    if not found then found, k = touchesAny(nearZone, zb, D.boxes) tests = tests + k why = "a zone at a cross" end
+    if not found then found, k = touchesAny(nearZone, zb, boxes) tests = tests + k end
+  end
+  work(g, tests + 4)
+  if found then return refuse(g, why) end
+  local all = union({ min = { F.min[1], F.min[2], F.min[3] }, max = { F.max[1], g.top * u[2] + g.a[2], F.max[3] } }, D.all or body)
+  all = union(all, body)
+  for i = 1, 3 do
+    if all.max[i] - all.min[i] > sab.maxPlotKm * 1000 then return refuse(g, "past the plot cap") end
+  end
+  return { node = m, di = fi, face = fi, pose = pose, body = body, zones = zones, cross = X, path = path, from = from }
+end
+
+-- The place of one dock: the first spot that fits on the first face with one; the macro's pose on that face first,
+-- then the others, the most zones outward and the thinnest first. The root pier takes the root's spot.
+---@async
+local function dockPlace(g, it)
+  local D = g.dock
+  local macro = it.macro
+  local list = D.poses[macro]
+  if not list then
+    list = poses(g, macro)
+    D.poses[macro] = list
+  end
+  local E = entries(g, it.seq or math.huge)
+  ---@async
+  local function search(rootOnly)
+    for _, fi in ipairs(D.faces) do
+      local ranked, fixed, ax = {}, D.poseOf[fi] and D.poseOf[fi][macro], axisOf(fi)
+      for _, pose in ipairs(list) do
+        if pose.di == fi then
+          local out = dockShape(macro, pose, fi)
+          ranked[#ranked + 1] = { pose = pose, out = out, thick = pose.body.max[ax] - pose.body.min[ax], i = #ranked }
+        end
+      end
+      table.sort(ranked, function(a, b)
+        if (a.pose == fixed) ~= (b.pose == fixed) then return a.pose == fixed end
+        if a.out ~= b.out then return a.out > b.out end
+        if a.thick ~= b.thick then return a.thick < b.thick end
+        return a.i < b.i
+      end)
+      local d = DIRS[fi]
+      -- a pose wider than the face's bound fits no spot of it
+      if fi ~= 4 or D.w then
+        local B, kept = D.bound, {}
+        for _, r in ipairs(ranked) do
+          local fits = true
+          for _, i in ipairs(fi == 4 and { 1, 3 } or { DIRS[fi][1] ~= 0 and 3 or 1 }) do
+            if r.pose.body.max[i] - r.pose.body.min[i] - 2 > B.max[i] - B.min[i] then fits = false end
+          end
+          if fits then kept[#kept + 1] = r else refuse(g, "wider than the bound") end
+        end
+        ranked = kept
+      end
+      for _, n in ipairs(rootOnly and { D.c } or spots(g, fi)) do
+        if not (D.reserved and fi == 4 and n[1] == D.c[1] and n[3] == D.c[3]) then
+          for _, r in ipairs(ranked) do
+            local k = depthOf(g, fi, n, r.pose)
+            if k < DOCK_REACH then
+              local best = dockFits(g, fi, n, { n[1] + k * d[1], n[2] + k * d[2], n[3] + k * d[3] }, r.pose, E)
+              if best then return best end
+            end
+          end
+        end
+      end
+      if rootOnly then return nil end
+    end
+    return nil
+  end
+  if g.pierItem == it and D.reserved then
+    D.reserved = nil
+    local best = search(true)
+    if best then
+      best.underRoot = true
+      return best
+    end
+    sab.Debug("grid: %s has no pose under the root, it docks as the others", macro)
+  end
+  return search(false)
+end
+
+-- The chosen place joins the tree: new crosses from the tree outward, the dock on the last one.
+local function dockCommit(g, rec, best)
+  local D, it = g.dock, rec.item
   local X = best.cross
   if best.path then
     for i = #best.path, 1, -1 do
@@ -1502,150 +1327,50 @@ local function dockCommit(g, D, it, best)
         P.arms[ref.di] = true
         parent = { kind = "cross", cross = P, di = ref.di }
       end
-      X = { node = n, key = "dock:" .. nkey(n), arms = { [OPPOSITE[ref.di]] = true }, parent = parent, modules = 0, seq = parentSeq(parent) }
-      g.crosses[X.key] = X
-      D.crosses[nkey(n)] = X
-      D.bodies[#D.bodies + 1] = shifted(D.crossBox, { n[1] * u[1], n[2] * u[2], n[3] * u[3] })
+      X = addOutsideCross(g, n, parent)
+      X.arms[OPPOSITE[ref.di]] = true
     end
-    D.newCrosses = (D.newCrosses or 0) + #best.path
+    D.newCrosses = D.newCrosses + #best.path
   end
-  local o = { best.node[1] * u[1], best.node[2] * u[2], best.node[3] * u[3] }
-  local body = shifted(best.pose.body, o)
-  D.bodies[#D.bodies + 1] = body
-  for _, z in ipairs(best.pose.zones) do D.zones[#D.zones + 1] = shifted(z, o) end
-  D.all = union(D.all, body)
-  -- the item takes it only if this layout is kept (applyDocks)
-  if best.free then
-    local p = best.pose.pos
-    g.dockOut[it] = { rows = best.pose.rows, pos = { o[1] + p[1], o[2] + p[2], o[3] + p[3] } }
-  else
-    X.arms[best.di] = true
-    X.modules = X.modules + 1
-    g.dockOut[it] = { gridRec = { item = it, attach = { kind = "cross", cross = X, di = best.di }, pose = best.pose, node = best.node, dock = true } }
+  X.arms[best.di] = true
+  X.modules = X.modules + 1
+  rec.attach, rec.pose, rec.node, rec.box, rec.dock, rec.face = { kind = "cross", cross = X, di = best.di }, best.pose, best.node, best.body, true, best.face
+  D.bodies[#D.bodies + 1] = best.body
+  for _, z in ipairs(best.zones) do D.zones[#D.zones + 1] = z end
+  D.all = D.all and union(D.all, best.body) or best.body
+  D.poseOf[best.face] = D.poseOf[best.face] or {}
+  D.poseOf[best.face][it.macro] = D.poseOf[best.face][it.macro] or best.pose
+  if best.face == 4 and not D.w then
+    local b = best.body
+    D.w = (b.max[1] - b.min[1] <= b.max[3] - b.min[3]) and 1 or 3
+    D.bound = union(D.F, b)
   end
+  -- only a pier under the root anchors the station; one that docked elsewhere is emitted from its own spot
+  if g.pierItem == it and best.underRoot then g.rootPier = { item = it, pose = best.pose, body = best.body } end
+  g.docks[#g.docks + 1] = rec
 end
 
--- A root pier (a new station's first, a detached grid's) hangs under the root cross, the pose with the most
--- approach zones pointing down; emit places it first, free, and the root cross on it.
----@async
-local function rootUnder(g, D, it)
-  local u, X = g.u, g.root
-  if not X then return false end
-  if X.arms[4] and X.arms[4] ~= PIER_ARM then
-    sab.Debug("grid: the root cross's down arm is taken, %s docks as usual", it.macro)
-    return false
-  end
-  local o = { X.node[1] * u[1], X.node[2] * u[2], X.node[3] * u[3] }
-  ---@async
-  local function blocked(box, isZone)
-    local found, tests = touchesSolid(D, box, isZone)
-    work(g, tests)
-    return found
-  end
-  local best
-  for _, pose in ipairs(poses(g, it.macro)) do
-    if pose.di == 4 then
-      dockShape(it.macro, pose)
-      local up = #pose.zones - pose.down
-      if not (best and up >= best.up) and not blocked(shifted(pose.body, o)) then
-        local ok = true
-        for _, z in ipairs(pose.zones) do
-          if blocked(shifted(z, o), true) then ok = false break end
-        end
-        if ok then best = { pose = pose, up = up } end
-      end
+-- The kept layout's boxes in the grid frame, for the plot box, a detached offset and the placer's reserve: every
+-- cross, module and dock body, every approach zone.
+local function dockState(g, kit)
+  local u, D = g.u, g.dock
+  local cs = sab.sizes[kit.cross.macro]
+  local S = { solid = {}, bodies = D.bodies, zones = {}, crossBox = D.crossBox }
+  -- grid frame to station frame: the root cross's origin sits at g.origin less its centre offset
+  S.shift = { g.origin[1] - (cs and cs.cX or 0), g.origin[2] - (cs and cs.cY or 0), g.origin[3] - (cs and cs.cZ or 0) }
+  local seen = {}
+  for _, v in pairs(g.occ) do
+    -- crosses, those a strut replaced included
+    if v.arms and not seen[v] then
+      seen[v] = true
+      S.solid[#S.solid + 1] = shifted(D.crossBox, { v.node[1] * u[1], v.node[2] * u[2], v.node[3] * u[3] })
     end
   end
-  if not best then
-    if X.arms[4] == PIER_ARM then X.arms[4] = nil end
-    sab.Debug("grid: %s has no pose under the root cross, it docks as usual", it.macro)
-    return false
-  end
-  local body = shifted(best.pose.body, o)
-  D.bodies[#D.bodies + 1] = body
-  for _, z in ipairs(best.pose.zones) do D.zones[#D.zones + 1] = shifted(z, o) end
-  D.all = union(D.all, body)
-  D.piers = D.piers + 1
-  X.arms[4] = true
-  g.rootPier = { item = it, pose = best.pose, body = body }
-  sab.Debug("grid: root %s under the root cross, %d of %d approach zones down", it.macro, best.pose.down, #best.pose.zones)
-  return true
-end
-
--- Build modules first, then piers, then dock areas, each in bill order. g.dockFailed and g.dockFree count the
--- docks without a place and those dropped free, g.dockTotal all of them. defer: the stage stops at a dock with
--- no chain, before its free drop (g.dockStage); the next call goes on from that dock.
----@async
-local function docks(g, run, defer)
-  local S = g.dockStage
-  if not S then
-    local D = dockState(g, run.kit)
-    g.rootPier, g.dockOut, g.dockFailed, g.dockFree = nil, {}, 0, 0
-    if run.rootPier then rootUnder(g, D, run.rootPier) end
-    local list = {}
-    for pass = 1, 3 do
-      for _, it in ipairs(run.items) do
-        local kind = IsMacroClass(it.macro, "buildmodule") and 1 or it.column and (IsMacroClass(it.macro, "pier") and 2 or 3)
-        if kind == pass and not (g.rootPier and g.rootPier.item == it) then list[#list + 1] = it end
-      end
-    end
-    if #list == 0 then return D end
-    -- a layout already past the plot cap on an axis leaves the docks nothing to grow from; OfferPlot refuses it
-    local A = D.all
-    if not grownKm3(D, A.min[1], A.min[2], A.min[3], A.max[1], A.max[2], A.max[3]) then
-      g.dockFailed, g.dockTotal = #list, #list
-      return D
-    end
-    S = { D = D, list = list, next = 1, placed = 0, dropped = 0, failed = 0, frames = 0, seconds = 0 }
-    g.dockStage = S
-  end
-  local D, list = S.D, S.list
-  local started, frames = getElapsedTime(), g.frames
-  local progress = run.packProgress
-  progress.docks = #list
-  for i = S.next, #list do
-    local it = list[i]
-    progress.dock = i
-    local best, wanted, deferred = dockPlace(g, D, it, defer)
-    if deferred then
-      S.next, S.frames, S.seconds = i, S.frames + g.frames - frames, S.seconds + getElapsedTime() - started
-      sab.Debug("grid: footprint %d x %d docking: %s has no chain, its free drop waits, %.1f s", g.sx, g.sz, it.macro, S.seconds)
-      return D
-    end
-    if best then
-      dockCommit(g, D, it, best)
-      if IsMacroClass(it.macro, "pier") then
-        D.piers = D.piers + 1
-      elseif IsMacroClass(it.macro, "dockarea") then
-        D.areas = D.areas + 1
-      end
-      if best.free then S.dropped = S.dropped + 1 else S.placed = S.placed + 1 end
-      sab.Debug("grid: %s %s at %d %d %d arm %d, %d new crosses, plot +%d km3%s", it.macro, best.free and "free" or "hangs", best.node[1], best.node[2], best.node[3],
-        best.di, best.cost, best.order[1], wanted and "" or ", not the wanted place")
-    else
-      S.failed = S.failed + 1
-      sab.Debug("grid: no place for %s outside the block", it.macro)
-    end
-  end
-  g.dockStage = nil
-  local saved = compress(g, run.kit)
-  g.connectors = g.connectors + (D.newCrosses or 0) - saved
-  g.dockFailed, g.dockFree, g.dockTotal = S.failed, S.dropped, #list
-  sab.Debug("grid: footprint %d x %d docking %d hung, %d free, %d without a place, %d new crosses, %d saved by struts, %d frames, %.1f s", g.sx, g.sz, S.placed, S.dropped,
-    S.failed, D.newCrosses or 0, saved, S.frames + g.frames - frames, S.seconds + getElapsedTime() - started)
-  return D
-end
-
--- The kept layout's docks onto their items: a hung dock its grid record, a free one its pose in the station frame.
-local function applyDocks(g, D)
-  for it, r in pairs(g.dockOut or {}) do
-    if r.gridRec then
-      it.gridRec = r.gridRec
-    else
-      it.pack, it.free, it.alone, it.rows = nil, true, true, r.rows
-      it.pos = { x = r.pos[1] + D.shift[1], y = r.pos[2] + D.shift[2], z = r.pos[3] + D.shift[3] }
-    end
-  end
+  for _, b in ipairs(D.boxes) do S.solid[#S.solid + 1] = b end
+  for _, M in ipairs(g.modules) do S.solid[#S.solid + 1] = M.box end
+  for _, z in ipairs(g.zones or NONE) do S.zones[#S.zones + 1] = z end
+  for _, z in ipairs(D.zones) do S.zones[#S.zones + 1] = z end
+  return S
 end
 
 -- Every body of the layout (crosses, modules, docks) in one station-frame box.
@@ -1724,11 +1449,14 @@ local function emit(g, run, D)
     items[#items + 1] = it
     return it
   end
-  -- a dock dropped free keeps its turn; an item outside the grid keeps its bill position, clear of the layout's
-  -- bodies and approach zones (run.reserve, station frame), else the placer defers it to the end
+  -- a dock dropped free keeps its turn; a dock without room stays out (the plot offer asks whether to go on);
+  -- an item outside the grid keeps its bill position, clear of the layout's bodies and approach zones
+  -- (run.reserve, station frame), else the placer defers it to the end
   if g.root then emitCross(g.root) end
   for _, it in ipairs(run.items) do
-    if it.gridRec then
+    if g.dockLost[it] then
+      -- left out
+    elseif it.gridRec then
       emitModule(it.gridRec)
     elseif it.free and it.pos and not it.emitted then
       it.emitted = true
@@ -2092,18 +1820,35 @@ end
 ---@async
 local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pierItem)
   local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, rootY = rootY or 0, pierItem = pierItem, occ = {}, focc = {}, dirty = {},
-    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, commits = 0, laneRefused = 0,
+    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, dockLost = {}, commits = 0, laneRefused = 0,
     started = getElapsedTime() }
   if seed then seedGrid(g, seed) end
+  dockInit(g, kit)
+  if pierItem and not g.root then spine(g) end
   rebuildSums(g)
-  reservePier(g)
   for i, b in ipairs(base) do
     progress.module = i
     local rec = { item = b.item, poses = b.poses, volume = b.volume }
     g.why = {}
-    local best = findPlace(g, rec)
-    if not best and g.pierCells and not g.root then
-      releasePier(g)
+    local best
+    if b.dock then
+      local D = g.dock
+      D.total = D.total + 1
+      best = dockPlace(g, b.item)
+      if best then
+        dockCommit(g, rec, best)
+        sab.Trace("grid: %s on face %d at %d %d %d arm %d, %d new crosses", b.item.macro, best.face, best.node[1], best.node[2], best.node[3], best.di, best.path and #best.path or 0)
+      else
+        g.failed[#g.failed + 1] = b.item.macro
+        g.dockLost[b.item] = true
+        D.failed = D.failed + 1
+        local why = {}
+        for k, v in pairs(g.why) do why[#why + 1] = string.format("%s %d", k, v) end
+        table.sort(why)
+        sab.Debug("grid: no place for %s outside the block: %d poses, %s", b.item.macro, #(D.poses[b.item.macro] or NONE), table.concat(why, ", "))
+      end
+      best = true
+    else
       best = findPlace(g, rec)
     end
     if not best then
@@ -2119,7 +1864,9 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pier
       end
       g.maxPath = MAX_PATH
     end
-    if best then
+    if best == true then
+      -- a dock, done above
+    elseif best then
       commit(g, rec, best)
       sab.Trace("grid: %s on %s at %d %d %d, %d cells, cost %d", rec.item.macro, best.kind, best.node[1], best.node[2], best.node[3], #best.pose.cells, best.kind == "new" and #best.path or 0)
     else
@@ -2161,9 +1908,11 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pier
   g.used = { (hi[1] - lo[1] + 1) / R, (hi[2] - lo[2] + 1) / R, (hi[3] - lo[3] + 1) / R }
   g.box = g.used[1] * g.used[2] * g.used[3]
   g.cost = W_COST
-  sab.Debug("grid: footprint %d x %d, cost %g: %d placed, %d failed, connectors %d (%d crosses, %d saved by struts), used %.1f x %.1f x %.1f km, module cells %.0f%%, %d placements refused for closing the way up, %d on a later item's tree, %d poses at an approach zone, %d frames, %.1f s",
-    g.sx, g.sz, W_COST, #g.modules, #g.failed, g.connectors, crosses, g.saved, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000,
-    100 * modCells / g.box, g.banned, g.relaxed or 0, g.laneRefused, g.frames, getElapsedTime() - g.started)
+  local D = g.dock
+  g.dockFailed, g.dockTotal = D.failed, D.total
+  sab.Debug("grid: footprint %d x %d, cost %g: %d placed, %d failed, connectors %d (%d crosses, %d saved by struts), used %.1f x %.1f x %.1f km, module cells %.0f%%, %d placements refused for closing the way up, %d on a later item's tree, %d poses at an approach zone, %d of %d docks on the row, %d row crosses, %d frames, %.1f s",
+    g.sx, g.sz, W_COST, #g.modules + #g.docks, #g.failed, g.connectors, crosses, g.saved, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000,
+    100 * modCells / g.box, g.banned, g.relaxed or 0, g.laneRefused, D.total - D.failed, D.total, D.newCrosses, g.frames, getElapsedTime() - g.started)
   return g
 end
 
@@ -2308,12 +2057,19 @@ local function pack(run)
       else
         sab.Debug("grid: %s has no pose on the grid (no connections or size), packed outside", it.macro)
       end
+    elseif not it.isConnector and sab.macroConns[it.macro] and sab.sizes[it.macro] then
+      -- a dock: its body volume in cells ranks it in its turn
+      local s = sab.sizes[it.macro]
+      base[#base + 1] = { item = it, dock = true, volume = 8 * s.maxX * s.maxY * s.maxZ / (probe.u[1] * probe.u[2] * probe.u[3]) }
     end
   end
   local S = run.seed
   local s, minSide = math.ceil((cells * FILL + (S and S.cells or 0)) ^ (1 / 3)), spanXZ + 2
-  -- turn by turn, largest first: the early turns' small modules find the low lattice still theirs
+  -- the root pier first (a larger dock would cover its spot), then turn by turn, largest first: the early turns'
+  -- small modules find the low lattice still theirs
+  local pierItem = run.rootPier
   table.sort(base, function(a, b)
+    if (a.item == pierItem) ~= (b.item == pierItem) then return a.item == pierItem end
     if (a.item.turn or 0) ~= (b.item.turn or 0) then return (a.item.turn or 0) < (b.item.turn or 0) end
     if a.volume ~= b.volume then return a.volume > b.volume end
     if a.item.macro ~= b.item.macro then return a.item.macro < b.item.macro end
@@ -2345,7 +2101,8 @@ local function pack(run)
   for _, shape in ipairs(shapes) do
     for _, cost in ipairs(costs) do
       W_COST = cost
-      run.packProgress.pack = packs + 1
+      -- the module count restarts with the shape: its setup runs frames before the first module
+      run.packProgress.pack, run.packProgress.module = packs + 1, 0
       local g = layout(kit, base, shape[1], shape[2], tallest, run.packProgress, S, probe.R, grid.sandwich and math.ceil(below / probe.R) or 0, run.rootPier)
       frames, packs = frames + g.frames, packs + 1
       -- a seeded grid keeps the lattice's origin
@@ -2359,6 +2116,8 @@ local function pack(run)
         cands[#cands + 1] = g
       end
     end
+    -- a shape with nothing failed ends the search: the later shapes save connectors at best, at a full pack each
+    if #cands[1].failed == 0 then break end
   end
   W_COST = wCost
   if S and S.loose and #cands[1].failed > 0 then
@@ -2367,35 +2126,15 @@ local function pack(run)
     if sab.DetachedRoot(run) then return pack(run) end
     run.seed = S
   end
-  -- best first, each with its docks until one hangs every dock: fewest docks without a place, then fewest free;
-  -- the free drops wait until no layout hangs every dock
   table.sort(cands, better)
   ---@type table
-  local g
+  local g = cands[1]
   ---@type table
-  local D
-  for _, c in ipairs(cands) do
-    c.docked = docks(c, run, true)
-    if not c.dockStage then
-      g, D = c, c.docked
-      break
-    end
-  end
-  if not g then
-    for _, c in ipairs(cands) do
-      if c.dockStage then c.docked = docks(c, run, false) end
-      if not g or c.dockFailed < g.dockFailed or (c.dockFailed == g.dockFailed and c.dockFree < g.dockFree) then g, D = c, c.docked end
-      -- each of the others ends a dock free or without a place too
-      if g.dockFailed == 0 and g.dockFree == 1 then
-        sab.Debug("grid: footprint %d x %d docks with one free drop, no other footprint can do better", g.sx, g.sz)
-        break
-      end
-    end
-  end
+  local D = dockState(g, run.kit)
   grid.lastDocks = D
   for _, M in ipairs(g.modules) do M.item.gridRec = M end
+  for _, M in ipairs(g.docks) do M.item.gridRec = M end
   if run.detached and not detach(g, D, run) then error("no side of the station keeps the layout clear within the plot cap", 0) end
-  applyDocks(g, D)
   local box = layoutBox(D)
   -- per axis, the shift that fits the layout into the plot's faces, else onto whole km faces, when that saves plot km
   if box and not S and not run.detached then
@@ -2404,16 +2143,13 @@ local function pack(run)
       if shift[i] ~= 0 then
         g.origin[i] = g.origin[i] + shift[i]
         box.min[i], box.max[i] = box.min[i] + shift[i], box.max[i] + shift[i]
-        for it in pairs(g.dockOut or {}) do
-          if it.free and it.pos then it.pos[AXIS_NAMES[i]] = it.pos[AXIS_NAMES[i]] + shift[i] end
-        end
         sab.Debug("grid: shifted %.0f m on axis %d to save plot km", shift[i], i)
       end
     end
   end
   run.plotBox = box
   sab.Debug("grid: kept footprint %d x %d, cost %g: %d modules, %d failed, %d connectors, %.1f x %.1f x %.1f km, %d frames for %d packs",
-    g.sx, g.sz, g.cost, #g.modules, #g.failed, g.connectors, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000, frames, packs)
+    g.sx, g.sz, g.cost, #g.modules + #g.docks, #g.failed, g.connectors, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000, frames, packs)
   run.grid = g
   grid.last = g
   run.items = emit(g, run, D)

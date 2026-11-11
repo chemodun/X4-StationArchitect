@@ -58,6 +58,8 @@
       <t id="165">Conserver les heures de stockage pour les stations suivantes</t>
       <t id="166">Frais supplémentaires de licence de terrain</t>
       <t id="167">Arrêté sur une erreur, voir le journal : %s placés, %s échoués</t>
+      <t id="168">%s of %s docks and piers find no room within the %s km plot limit</t>
+      <t id="169">%s docks and piers left out for lack of room</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Architecte de station</t>

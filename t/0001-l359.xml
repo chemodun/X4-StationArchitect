@@ -58,6 +58,8 @@
       <t id="165">Запази часовете на склада за следващите станции</t>
       <t id="166">Допълнителна такса за лиценз за парцел</t>
       <t id="167">Спряно поради грешка, вижте дневника: поставени %s, неуспешни %s</t>
+      <t id="168">%s of %s docks and piers find no room within the %s km plot limit</t>
+      <t id="169">%s docks and piers left out for lack of room</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">Архитект на станции</t>

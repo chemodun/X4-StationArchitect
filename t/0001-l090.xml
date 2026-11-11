@@ -58,6 +58,8 @@
       <t id="165">Depolama saatlerini sonraki istasyonlar için koru</t>
       <t id="166">Ek arazi ruhsatı ücreti</t>
       <t id="167">Bir hata nedeniyle durduruldu, günlüğe bakın: yerleştirilen %s, başarısız %s</t>
+      <t id="168">%s of %s docks and piers find no room within the %s km plot limit</t>
+      <t id="169">%s docks and piers left out for lack of room</t>
 
       <!-- Section: Station Architect (90000) -->
       <t id="90000">İstasyon Mimarı</t>
