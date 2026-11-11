@@ -52,6 +52,8 @@ grid.footprintRatios = { 1, 2, 1 / 2 }
 -- side multipliers of each shape
 ---@type number[]
 grid.footprintScales = { 1 }
+-- the root crosses stand above the deepest hanging pose, so the bottom row carries modules below itself too
+grid.sandwich = true
 
 -- Score weights from eval, for layout experiments: { top, cost, contact, centre }, nil keeps a weight; a cost
 -- packs that cost only, costs = { ... } sets the list.
@@ -419,6 +421,13 @@ local function levelCost(g, y0)
   return math.floor(y0 / g.R) * W_LEVEL
 end
 
+-- counts why a pose was refused, for the no-place line
+local function refuse(g, why)
+  local W = g.why
+  if W then W[why] = (W[why] or 0) + 1 end
+  return nil
+end
+
 -- A pose's cells are a box: free test and contacts (occupied or off-grid neighbours) from the running sums.
 ---@async
 local function evaluate(g, node, pose, cost, path, on)
@@ -428,7 +437,7 @@ local function evaluate(g, node, pose, cost, path, on)
   local y0, y1 = R * node[2] + pose.lo[2], R * node[2] + pose.hi[2]
   local z0, z1 = R * node[3] + pose.lo[3], R * node[3] + pose.hi[3]
   local nx, nz = g.fx, g.fz
-  if x0 < 0 or z0 < 0 or y0 < 0 or x1 >= nx or z1 >= nz then return nil end
+  if x0 < 0 or z0 < 0 or y0 < 0 or x1 >= nx or z1 >= nz then return refuse(g, "off the block") end
   local taken = boxSum(g, x0, x1, y0, y1, z0, z1)
   if pose.wrap and taken > 0 then
     -- the cross it wraps holds its own cells
@@ -436,7 +445,7 @@ local function evaluate(g, node, pose, cost, path, on)
     taken = taken - boxSum(g, math.max(x0, b[1]), math.min(x1, b[1] + R - 1), math.max(y0, b[2]), math.min(y1, b[2] + R - 1),
       math.max(z0, b[3]), math.min(z1, b[3] + R - 1), g.csums)
   end
-  if taken > 0 then return nil end
+  if taken > 0 then return refuse(g, "cells taken") end
   -- cross cells the box enters (tx, in cross cells), occupancy cells it leans into (lx)
   local tx0, tx1 = node[1] + pose.tlo[1], node[1] + pose.thi[1]
   local ty0, ty1 = node[2] + pose.tlo[2], node[2] + pose.thi[2]
@@ -463,9 +472,9 @@ local function evaluate(g, node, pose, cost, path, on)
           for z = lz0, lz1 do
             if x < x0 or x > x1 or y < y0 or y > y1 or z < z0 or z > z1 then
               local k = fkey(g, x, y, z)
-              if leaning and meets(g.focc[k], on, bx0, bx1, by0, by1, bz0, bz1) then return nil end
+              if leaning and meets(g.focc[k], on, bx0, bx1, by0, by1, bz0, bz1) then return refuse(g, "boxes meet") end
               for _, M in ipairs(shared and g.lean[k] or NONE) do
-                if meets(M, on, bx0, bx1, by0, by1, bz0, bz1) then return nil end
+                if meets(M, on, bx0, bx1, by0, by1, bz0, bz1) then return refuse(g, "boxes meet") end
               end
             end
           end
@@ -479,7 +488,7 @@ local function evaluate(g, node, pose, cost, path, on)
             local L = g.lean[fkey(g, x, y, z)]
             if L then
               for _, M in ipairs(L) do
-                if meets(M, on, bx0, bx1, by0, by1, bz0, bz1) then return nil end
+                if meets(M, on, bx0, bx1, by0, by1, bz0, bz1) then return refuse(g, "boxes meet") end
               end
             end
           end
@@ -492,24 +501,24 @@ local function evaluate(g, node, pose, cost, path, on)
     if crossAt(g, node[1], node[2], node[3]) and inBox(node[1], node[2], node[3], tx0, tx1, ty0, ty1, tz0, tz1) then
       crosses = crosses - 1
     end
-    if crosses > 0 then return nil end
+    if crosses > 0 then return refuse(g, "a cross in the box") end
   end
   -- a cross or another free connection on one of its other connections closes a loop the editor refuses in
   -- some rolls
   for _, pt in ipairs(pose.ports) do
     local px, py, pz, d = node[1] + pt.node[1], node[2] + pt.node[2], node[3] + pt.node[3], DIRS[pt.di]
     if crossAt(g, px, py, pz) or faceTaken(g, px - d[1], py - d[2], pz - d[3], pt.di) then
-      return nil
+      return refuse(g, "a port faces a cross or a free connection")
     end
     for i = 2, #(path or {}) do
       local n = path[i][1]
-      if n[1] == node[1] + pt.node[1] and n[2] == node[2] + pt.node[2] and n[3] == node[3] + pt.node[3] then return nil end
+      if n[1] == node[1] + pt.node[1] and n[2] == node[2] + pt.node[2] and n[3] == node[3] + pt.node[3] then return refuse(g, "a port on the path") end
     end
   end
   -- path[1] is the new cross it hangs on
   for i = 2, #(path or NONE) do
     local n = path[i][1]
-    if inBox(n[1], n[2], n[3], tx0, tx1, ty0, ty1, tz0, tz1) then return nil end
+    if inBox(n[1], n[2], n[3], tx0, tx1, ty0, ty1, tz0, tz1) then return refuse(g, "the path in the box") end
   end
   -- an upgrade's approach zones block only the cells they enter: the box itself keeps clear of them
   local zones = g.zones
@@ -521,7 +530,7 @@ local function evaluate(g, node, pose, cost, path, on)
     for _, Z in ipairs(zones) do
       if bx0 < Z.max[1] and bx1 > Z.min[1] and by0 < Z.max[2] and by1 > Z.min[2] and bz0 < Z.max[3] and bz1 > Z.min[3] then
         g.laneRefused = g.laneRefused + 1
-        return nil
+        return refuse(g, "an approach zone")
       end
     end
   end
@@ -626,9 +635,9 @@ local function commit(g, rec, best)
 end
 
 -- After this placement, can the tree still reach the free space above everything? A placement that closes
--- the last way up leaves every later module without a place.
+-- the last way up leaves every later module without a place. seq: only the tree an item at that bill position may hang on.
 ---@async
-local function keepsAccess(g, best)
+local function keepsAccess(g, best, seq)
   local node, pose = best.node, best.pose
   local taken, top, nx, nz = {}, g.top, g.sx, g.sz
   local crossNodes = {}
@@ -706,7 +715,8 @@ local function keepsAccess(g, best)
   end
   for _, X in pairs(g.crosses) do
     local n = X.node
-    for di, d in ipairs(DIRS) do
+    for di = 1, (not seq or (X.seq or 0) <= seq) and 6 or 0 do
+      local d = DIRS[di]
       if not X.arms[di] and push(n[1] + d[1], n[2] + d[2], n[3] + d[3], OPPOSITE[di]) then return true end
     end
   end
@@ -716,7 +726,7 @@ local function keepsAccess(g, best)
     end
   end
   for _, M in ipairs(g.modules) do
-    for _, pt in ipairs(M.ports) do
+    for _, pt in ipairs((not seq or (M.seq or 0) <= seq) and M.ports or NONE) do
       if not pt.used and push(pt.node[1], pt.node[2], pt.node[3], OPPOSITE[pt.di]) then return true end
     end
   end
@@ -762,9 +772,14 @@ local function place(g, rec, wide)
   end
   local best
   local banned = rec.banned
-  local seq = rec.item.seq or math.huge
+  local seq = rec.seqLimit or rec.item.seq or math.huge
   ---@async
   local function consider(kind, node, di, cost, extra)
+    local W = g.why
+    if W then
+      W.nodes = (W.nodes or 0) + 1
+      if node[2] > (W.maxY or -1) then W.maxY = node[2] end
+    end
     -- no pose on this arm fits when the cell facing it is taken (all cover it) or the free cells in the box of all
     -- its poses are fewer than the smallest pose needs
     local U = rec.union[di]
@@ -795,7 +810,7 @@ local function place(g, rec, wide)
   if not g.root and not g.seeded then
     for x = 0, g.sx - 1 do
       for z = 0, g.sz - 1 do
-        for di = 1, 6 do consider("root", { x, 0, z }, di, 1) end
+        for di = 1, 6 do consider("root", { x, g.rootY, z }, di, 1) end
       end
     end
     return best
@@ -1993,10 +2008,10 @@ local function seedGrid(g, S)
 end
 
 -- One layout of every module at the current weights; seed: the plan's entries (grid.Seed); R: occupancy cells
--- per cross cell.
+-- per cross cell; rootY: the root cross's floor, above the deepest hanging pose.
 ---@async
-local function layout(kit, base, sx, sz, tallest, progress, seed, R)
-  local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, occ = {}, focc = {}, dirty = {},
+local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY)
+  local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, rootY = rootY or 0, occ = {}, focc = {}, dirty = {},
     crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, commits = 0, laneRefused = 0,
     started = getElapsedTime() }
   if seed then seedGrid(g, seed) end
@@ -2004,11 +2019,19 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R)
   for i, b in ipairs(base) do
     progress.module = i
     local rec = { item = b.item, poses = b.poses, volume = b.volume }
+    g.why = {}
     local best = findPlace(g, rec)
     if not best then
-      -- last resort: a path as long as the way out needs
+      -- last resort: a path as long as the way out needs, then on the tree of any item up to its turn's end
+      -- (emit places such a parent first)
       g.maxPath = g.sx + g.sz + g.tallest
       best = findPlace(g, rec)
+      if not best and b.turnEnd and b.turnEnd > (rec.item.seq or 0) then
+        rec.seqLimit = b.turnEnd
+        best = findPlace(g, rec)
+        rec.seqLimit = nil
+        if best then g.relaxed = (g.relaxed or 0) + 1 end
+      end
       g.maxPath = MAX_PATH
     end
     if best then
@@ -2016,7 +2039,11 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R)
       sab.Trace("grid: %s on %s at %d %d %d, %d cells, cost %d", rec.item.macro, best.kind, best.node[1], best.node[2], best.node[3], #best.pose.cells, best.kind == "new" and #best.path or 0)
     else
       g.failed[#g.failed + 1] = rec.item.macro
-      sab.Debug("grid: cost %g: no place for %s", W_COST, rec.item.macro)
+      local why = {}
+      for k, v in pairs(g.why) do why[#why + 1] = string.format("%s %d", k, v) end
+      table.sort(why)
+      sab.Debug("grid: cost %g: no place for %s (bill %s): %d poses, top %d, floor %d, way up %s, from its tree %s; %s", W_COST, rec.item.macro,
+        tostring(rec.item.seq), #rec.poses, g.top, g.floor, tostring(openAbove(g)), tostring(keepsAccess(g, NO_PLACEMENT, rec.item.seq)), table.concat(why, ", "))
     end
     -- the next item starts at the lowest floor that still has a free cell
     g.floor = 0
@@ -2049,9 +2076,9 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R)
   g.used = { (hi[1] - lo[1] + 1) / R, (hi[2] - lo[2] + 1) / R, (hi[3] - lo[3] + 1) / R }
   g.box = g.used[1] * g.used[2] * g.used[3]
   g.cost = W_COST
-  sab.Debug("grid: footprint %d x %d, cost %g: %d placed, %d failed, connectors %d (%d crosses, %d saved by struts), used %.1f x %.1f x %.1f km, module cells %.0f%%, %d placements refused for closing the way up, %d poses at an approach zone, %d frames, %.1f s",
+  sab.Debug("grid: footprint %d x %d, cost %g: %d placed, %d failed, connectors %d (%d crosses, %d saved by struts), used %.1f x %.1f x %.1f km, module cells %.0f%%, %d placements refused for closing the way up, %d on a later item's tree, %d poses at an approach zone, %d frames, %.1f s",
     g.sx, g.sz, W_COST, #g.modules, #g.failed, g.connectors, crosses, g.saved, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000,
-    100 * modCells / g.box, g.banned, g.laneRefused, g.frames, getElapsedTime() - g.started)
+    100 * modCells / g.box, g.banned, g.relaxed or 0, g.laneRefused, g.frames, getElapsedTime() - g.started)
   return g
 end
 
@@ -2170,7 +2197,8 @@ local function pack(run)
   local kit, started = run.kit, getElapsedTime()
   local probe = { u = kit.cell, a = kit.arms, R = run.subdivide or grid.subdivide }
   run.packR = probe.R
-  local base, cells, spanXZ, tallest, byMacro = {}, 0, 1, 1, {}
+  local base, cells, spanXZ, tallest, below, byMacro, turnEnd = {}, 0, 1, 1, 0, {}, {}
+  for i, it in ipairs(run.items) do turnEnd[it.turn or 0] = i end
   for i, it in ipairs(run.items) do
     it.gridRec, it.seq = nil, i
     if not it.isConnector and not it.column and not IsMacroClass(it.macro, "buildmodule") then
@@ -2183,12 +2211,13 @@ local function pack(run)
           local s = math.max(p.span[1], p.span[3])
           if s < minSpan then minSpan = s end
           if p.span[2] > tallest then tallest = p.span[2] end
+          if -p.lo[2] > below then below = -p.lo[2] end
         end
         m = { poses = ps, volume = minCells, span = minSpan }
         byMacro[it.macro] = m
       end
       if #m.poses > 0 then
-        base[#base + 1] = { item = it, poses = m.poses, volume = m.volume }
+        base[#base + 1] = { item = it, poses = m.poses, volume = m.volume, turnEnd = turnEnd[it.turn or 0] }
         cells = cells + m.volume
         if m.span > spanXZ then spanXZ = m.span end
       else
@@ -2232,7 +2261,7 @@ local function pack(run)
     for _, cost in ipairs(costs) do
       W_COST = cost
       run.packProgress.pack = packs + 1
-      local g = layout(kit, base, shape[1], shape[2], tallest, run.packProgress, S, probe.R)
+      local g = layout(kit, base, shape[1], shape[2], tallest, run.packProgress, S, probe.R, grid.sandwich and math.ceil(below / probe.R) or 0)
       frames, packs = frames + g.frames, packs + 1
       -- a seeded grid keeps the lattice's origin
       if not S then
