@@ -5,7 +5,7 @@ Tell the build menu what your station should produce or build: this extension wo
 [size=3][u][b]Features[/b][/u][/size]
 [list]
 [*] [b]Target planner[/b]: say what the station should make, not which modules: wares on the [b]Wares[/b] tab, ships to build or resupply per hour on the [b]Ships[/b] tab; several targets in one plan.
-[*] [b]Compact layout[/b]: production, storage and habitats packed tight on connection modules; build modules on the sides with clear approach lanes; docks and piers outward.
+[*] [b]Compact layout[/b]: production, storage and habitats packed tight on connection modules; build modules on the sides with clear approach lanes; docks and piers on a row under the block, their lanes clear.
 [*] [b]Full cycle and workforce[/b]: optionally every intermediate ware down to raw resources and energy, habitats for the workforce, and its food and medicine.
 [*] [b]Buy instead of make[/b]: untick a production module the plan adds for anything but a target; its ware is bought and the rest of the plan follows.
 [*] [b]Read from the game[/b]: production rates, sunlight and workforce bonuses, module sizes, docking bays, ship build times and the production lines of every build module; docks sized for the planned traffic.
@@ -118,7 +118,7 @@ Their scrap metal feeds the scrap recycling modules that make your target wares 
 
 [size=3][u][i]Run[/i][/u][/size]
 [list=1]
-[*] Press [b]Run[/b]. The run first finds a layout. Where the plot costs money, it then shows the plot size it needs and the licence price, and places nothing until you press [b]Buy licence[/b]; [b]Cancel[/b] ends the run.
+[*] Press [b]Run[/b]. The run first finds a layout. When a pier or dock area finds no room within the game's 20 km plot limit, the panel says how many and asks whether to [b]Continue[/b] without them; the result line counts the docks left out. Where the plot costs money, it then shows the plot size it needs and the licence price, and places nothing until you press [b]Buy licence[/b]; [b]Cancel[/b] ends the run at either question.
 [/list]
 [img]https://raw.githubusercontent.com/chemodun/X4-StationArchitect/refs/heads/main/docs/images/panel_licence.png[/img]
 [list=1]
@@ -180,16 +180,20 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [/list]
 [size=3][u][b]Changelog[/b][/u][/size]
 
-[size=3][u][i][1.31] - 2026-11-??[/i][/u][/size]
+[size=3][u][i][1.40] - 2026-11-12[/i][/u][/size]
 [list]
 [*] Added
 [list]
 [*] The panel says when a run stopped on an error, with the detail in the game log
 [*] When a pier or dock area finds no room within the plot limit, the panel asks whether to continue without it instead of stopping; the result line counts the docks left out
+[*] The plot questions come one at a time: the docks without room first, then the licence
 [/list]
 [*] Changed
 [list]
 [*] The pack stops at the first layout shape with nothing failed: about half the pack time on large plans
+[*] The pack itself runs about twice as fast on large plans and keeps the game at a playable frame rate while it runs
+[*] Piers of one kind are placed flush in pairs, so a row of piers takes less room
+[*] In a full cycle the ship build modules come right after the storage their wares need
 [*] The Bill tab has one Run / Stop button
 [*] The grid packs every module on one block: fewer connection structures, a smaller plan box, every floor filled before a higher one
 [*] Piers and dock areas are placed with the block, on a row under it, side by side with their approach lanes clear; the sides take over when the bottom is full: a faster pack and a smaller plot
@@ -199,6 +203,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] A build module larger than the station's first pier could take the pier's place under the centre; the pier was placed there anyway, the editor refused the overlap and the run fell back to the coarse grid
 [*] Large modules could be left without a grid place and go to the editor's own search far from the block
 [*] A connection structure with diagonal arms was taken as a grid cross and the run stopped before placing anything
+[*] The pack progress started a new layout shape at the previous shape's count
 [/list]
 [/list]
 [size=3][u][i][1.30] - 2026-11-10[/i][/u][/size]
