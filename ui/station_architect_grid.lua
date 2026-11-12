@@ -44,11 +44,12 @@ local W_LEVEL = 1e6
 ---@type number[]?
 grid.costs = nil
 -- footprint variants packed: steps to the estimated side, x-to-z side ratios at the same area, in this order;
--- the first shape with nothing failed is built, else the one with the fewest failed, then the fewest connectors
+-- the first shape with nothing failed is built, else the one with the fewest failed, then the fewest connectors.
+-- Deep first: piers lie along z under the block, a block long in z keeps them inside the plan box
 ---@type number[]
 grid.footprintSteps = { 0 }
 ---@type number[]
-grid.footprintRatios = { 2, 1 / 2, 1 }
+grid.footprintRatios = { 1 / 2, 2, 1 }
 -- side multipliers of each shape
 ---@type number[]
 grid.footprintScales = { 1 }
@@ -1242,6 +1243,113 @@ local function dockFits(g, fi, n, m, pose, E)
   return { node = m, di = fi, face = fi, pose = pose, body = body, zones = zones, cross = X, path = path, from = from }
 end
 
+-- A macro's snap connections on opposite body faces pointing apart: { out, back } hangs a like module by back on
+-- a placed one's out, flush, the same facing.
+local function snapPairs(macro)
+  local geo, conns, list = sab.geo, sab.macroConns[macro] or NONE, {}
+  for i, a in ipairs(conns) do
+    local da = geo.unit(a.dir)
+    for j, b in ipairs(conns) do
+      if i ~= j then
+        local db = geo.unit(b.dir)
+        local apart = da[1] * db[1] + da[2] * db[2] + da[3] * db[3] < -0.99
+        local behind = (b.pos[1] - a.pos[1]) * da[1] + (b.pos[2] - a.pos[2]) * da[2] + (b.pos[3] - a.pos[3]) * da[3] < -1
+        if apart and behind then list[#list + 1] = { out = a, back = b } end
+      end
+    end
+  end
+  return list
+end
+
+local function rowsAlike(a, b)
+  for i = 1, 3 do
+    if a[i][1] * b[i][1] + a[i][2] * b[i][2] + a[i][3] * b[i][3] < 0.999 then return false end
+  end
+  return true
+end
+
+-- A pier stacked on placed pier R: R's body and zones shifted by o. The editor's approach-zone test exempts the
+-- snap partner alone, both ways (the engine read in part 58): the body clear of every other dock's zones, its
+-- zones clear of every other body; a third like pier in the first one's lanes fails here, as it does in the editor.
+---@async
+local function stackFits(g, R, body, o)
+  local D, u, F, fi = g.dock, g.u, g.dock.F, R.face
+  if hit(body, F) then return refuse(g, "in the block") end
+  if fi ~= 4 or D.w then
+    local B = D.bound
+    for _, i in ipairs(fi == 4 and { 1, 3 } or { DIRS[fi][1] ~= 0 and 3 or 1 }) do
+      if body.min[i] + 1 < B.min[i] or body.max[i] - 1 > B.max[i] then return refuse(g, "past the bound") end
+    end
+  end
+  local skip = { [R.box] = true }
+  for _, z in ipairs(R.zones or NONE) do skip[z] = true end
+  local function touchesOther(touch, box, list)
+    local n = 0
+    for k = 1, #list do
+      if not skip[list[k]] then
+        n = n + 1
+        if touch(box, list[k]) then return true, n end
+      end
+    end
+    return false, n
+  end
+  local found, k = touchesOther(hit, body, D.bodies)
+  local tests, why = k, "the body at a body"
+  if not found then found, k = touchesAny(hit, body, D.boxes) tests = tests + k why = "the body at a cross" end
+  if not found then found, k = touchesOther(nearZone, body, D.zones) tests = tests + k why = "the body in a zone" end
+  if not found and g.zones then found, k = touchesAny(nearZone, body, g.zones) tests = tests + k end
+  local zones = {}
+  for i, z in ipairs(R.zones or NONE) do
+    if found then break end
+    local zb = shifted(z, o)
+    zones[i] = zb
+    found, why = nearZone(zb, F), "a zone in the block"
+    if not found then found, k = touchesOther(nearZone, zb, D.bodies) tests = tests + k why = "a zone at a body" end
+    if not found then found, k = touchesAny(nearZone, zb, D.boxes) tests = tests + k why = "a zone at a cross" end
+  end
+  work(g, tests + 4)
+  if found then return refuse(g, why) end
+  local all = union({ min = { F.min[1], F.min[2], F.min[3] }, max = { F.max[1], g.top * u[2] + g.a[2], F.max[3] } }, D.all or body)
+  all = union(all, body)
+  for i = 1, 3 do
+    if all.max[i] - all.min[i] > sab.maxPlotKm * 1000 then return refuse(g, "past the plot cap") end
+  end
+  return { node = R.node, di = 0, face = fi, pose = R.pose, body = body, zones = zones, stack = R }
+end
+
+-- The pier's place on a placed like pier's free opposed snap, the same facing (the roll that repeats the partner's
+-- rows); none when no partner, snap or roll gives one.
+---@async
+local function stackOn(g, it)
+  local u, macro = g.u, it.macro
+  local snaps = snapPairs(macro)
+  if #snaps == 0 then return nil end
+  for _, R in ipairs(g.docks) do
+    if R.item.macro == macro and R.box then
+      local P = R.pose
+      local at = { R.node[1] * u[1] + P.pos[1], R.node[2] * u[2] + P.pos[2], R.node[3] * u[3] + P.pos[3] }
+      R.used = R.used or { [P.conn] = true }
+      for _, sp in ipairs(snaps) do
+        if not R.used[sp.out.name] then
+          for _, roll in ipairs(ROLLS) do
+            local q = sab.PoseForPair({ x = at[1], y = at[2], z = at[3], rows = P.rows }, sp.out, sp.back, roll)
+            if rowsAlike(q.rows, P.rows) then
+              local o = { q.pos.x - at[1], q.pos.y - at[2], q.pos.z - at[3] }
+              local best = stackFits(g, R, shifted(R.box, o), o)
+              if best then
+                best.conn, best.own, best.roll = sp.out.name, sp.back.name, roll
+                return best
+              end
+              break
+            end
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
 -- The place of one dock: the first spot that fits on the first face with one; the macro's pose on that face first,
 -- then the others, the most zones outward and the thinnest first. The root pier takes the root's spot.
 ---@async
@@ -1295,6 +1403,10 @@ local function dockPlace(g, it)
         end
       end
       if rootOnly then return nil end
+      local why = {}
+      for k, v in pairs(g.why) do why[#why + 1] = string.format("%s %d", k, v) end
+      table.sort(why)
+      sab.Trace("grid: %s: no spot on face %d (so far %s)", macro, fi, table.concat(why, ", "))
     end
     return nil
   end
@@ -1307,12 +1419,28 @@ local function dockPlace(g, it)
     end
     sab.Debug("grid: %s has no pose under the root, it docks as the others", macro)
   end
+  if IsMacroClass(macro, "pier") then
+    local best = stackOn(g, it)
+    if best then return best end
+  end
   return search(false)
 end
 
 -- The chosen place joins the tree: new crosses from the tree outward, the dock on the last one.
 local function dockCommit(g, rec, best)
   local D, it = g.dock, rec.item
+  if best.stack then
+    local R = best.stack
+    R.used[best.conn] = true
+    rec.attach = { kind = "pier", rec = R, conn = best.conn, own = best.own, roll = best.roll }
+    rec.pose, rec.node, rec.box, rec.zones, rec.dock, rec.face, rec.used = best.pose, best.node, best.body, best.zones, true, best.face, { [best.own] = true }
+    D.bodies[#D.bodies + 1] = best.body
+    for _, z in ipairs(best.zones) do D.zones[#D.zones + 1] = z end
+    D.all = D.all and union(D.all, best.body) or best.body
+    D.stacked = (D.stacked or 0) + 1
+    g.docks[#g.docks + 1] = rec
+    return
+  end
   local X = best.cross
   if best.path then
     for i = #best.path, 1, -1 do
@@ -1334,7 +1462,7 @@ local function dockCommit(g, rec, best)
   end
   X.arms[best.di] = true
   X.modules = X.modules + 1
-  rec.attach, rec.pose, rec.node, rec.box, rec.dock, rec.face = { kind = "cross", cross = X, di = best.di }, best.pose, best.node, best.body, true, best.face
+  rec.attach, rec.pose, rec.node, rec.box, rec.zones, rec.dock, rec.face = { kind = "cross", cross = X, di = best.di }, best.pose, best.node, best.body, best.zones, true, best.face
   D.bodies[#D.bodies + 1] = best.body
   for _, z in ipairs(best.zones) do D.zones[#D.zones + 1] = z end
   D.all = D.all and union(D.all, best.body) or best.body
@@ -1436,15 +1564,17 @@ local function emit(g, run, D)
   emitModule = function(M)
     local it = M.item
     if it.emitted then return it end
-    local base, conn
-    if M.attach.kind == "cross" then
+    local base, conn, own, roll
+    if M.attach.kind == "pier" then
+      base, conn, own, roll = emitModule(M.attach.rec), M.attach.conn, M.attach.own, M.attach.roll
+    elseif M.attach.kind == "cross" then
       base, conn = emitCross(M.attach.cross), armName(M.attach.cross, M.attach.di)
     else
       base, conn = emitModule(M.attach.module), M.attach.port.name
     end
     it.pack = nil
-    it.pair = { entryIdx = base, predecessorConnection = conn, connection = M.pose.conn }
-    it.roll, it.after, it.emitted = M.pose.roll, base, true
+    it.pair = { entryIdx = base, predecessorConnection = conn, connection = own or M.pose.conn }
+    it.roll, it.after, it.emitted = roll or M.pose.roll, base, true
     for _, st in ipairs(items) do if st.turn == nil then st.turn = it.turn end end
     items[#items + 1] = it
     return it
@@ -1837,7 +1967,11 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pier
       best = dockPlace(g, b.item)
       if best then
         dockCommit(g, rec, best)
-        sab.Trace("grid: %s on face %d at %d %d %d arm %d, %d new crosses", b.item.macro, best.face, best.node[1], best.node[2], best.node[3], best.di, best.path and #best.path or 0)
+        if best.stack then
+          sab.Trace("grid: %s stacked on %s (%s on %s, roll %.0f), no cross", b.item.macro, best.stack.item.macro, best.own, best.conn, math.deg(best.roll))
+        else
+          sab.Trace("grid: %s on face %d at %d %d %d arm %d, %d new crosses", b.item.macro, best.face, best.node[1], best.node[2], best.node[3], best.di, best.path and #best.path or 0)
+        end
       else
         g.failed[#g.failed + 1] = b.item.macro
         g.dockLost[b.item] = true

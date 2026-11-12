@@ -1374,7 +1374,21 @@ function sab.OfferPlot(run)
   end
   local g = run.grid
   local noRoom = g and g.dockFailed > 0 and { g.dockFailed, g.dockTotal } or nil
-  if noRoom then sab.Debug("%d of %d docks find no room within the plot cap: the player decides whether the rest is placed", noRoom[1], noRoom[2]) end
+  if noRoom then
+    -- offered only while the station keeps a pier and a dock (standing modules count), else nothing is placed
+    local piers, docks = 0, 0
+    local function count(macro)
+      if IsMacroClass(macro, "pier") then piers = piers + 1 elseif IsMacroClass(macro, "dockarea") or IsMacroClass(macro, "buildmodule") then docks = docks + 1 end
+    end
+    for _, e in ipairs(sab.ReadPlan()) do count(e.macro) end
+    for _, it in ipairs(run.items) do count(it.macro) end
+    if piers == 0 or docks == 0 then
+      sab.StopRun(string.format("%d of %d docks find no room within the plot cap and the station would keep %d piers and %d docks", noRoom[1], noRoom[2], piers, docks))
+      sab.lastRun = { placed = 0, failed = 0, noRoom = noRoom }
+      return
+    end
+    sab.Debug("%d of %d docks find no room within the plot cap (%d piers and %d docks stay): the player decides whether the rest is placed", noRoom[1], noRoom[2], piers, docks)
+  end
   local offer = { sector = sector, price = 0, noRoom = noRoom }
   if box and not plot.isFree(sector) then
     local size = { x = (f.pos[1] + f.neg[1]) * PLOT_STEP, y = (f.pos[2] + f.neg[2]) * PLOT_STEP, z = (f.pos[3] + f.neg[3]) * PLOT_STEP }
