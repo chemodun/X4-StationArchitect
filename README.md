@@ -5,7 +5,7 @@ Tell the build menu what your station should produce or build: this extension wo
 ## Features
 
 - **Target planner**: say what the station should make, not which modules: wares on the **Wares** tab, ships to build or resupply per hour on the **Ships** tab; several targets in one plan.
-- **Compact layout**: production, storage and habitats packed tight on connection modules; build modules on the sides with clear approach lanes; docks and piers outward.
+- **Compact layout**: production, storage and habitats packed tight on connection modules; build modules on the sides with clear approach lanes; docks and piers on a row under the block, their lanes clear.
 - **Full cycle and workforce**: optionally every intermediate ware down to raw resources and energy, habitats for the workforce, and its food and medicine.
 - **Buy instead of make**: untick a production module the plan adds for anything but a target; its ware is bought and the rest of the plan follows.
 - **Read from the game**: production rates, sunlight and workforce bonuses, module sizes, docking bays, ship build times and the production lines of every build module; docks sized for the planned traffic.
@@ -106,7 +106,7 @@ Their scrap metal feeds the scrap recycling modules that make your target wares 
 
 ### Run
 
-1. Press **Run**. The run first finds a layout. Where the plot costs money, it then shows the plot size it needs and the licence price, and places nothing until you press **Buy licence**; **Cancel** ends the run.
+1. Press **Run**. The run first finds a layout. When a pier or dock area finds no room within the game's 20 km plot limit, the panel says how many and asks whether to **Continue** without them; the result line counts the docks left out. Where the plot costs money, it then shows the plot size it needs and the licence price, and places nothing until you press **Buy licence**; **Cancel** ends the run at either question.
 
 ![A run waiting for the plot licence](docs/images/panel_licence.png)
 
@@ -166,13 +166,17 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 
 ## Changelog
 
-### [1.31] - 2026-11-??
+### [1.40] - 2026-11-12
 
 - Added
   - The panel says when a run stopped on an error, with the detail in the game log
   - When a pier or dock area finds no room within the plot limit, the panel asks whether to continue without it instead of stopping; the result line counts the docks left out
+  - The plot questions come one at a time: the docks without room first, then the licence
 - Changed
   - The pack stops at the first layout shape with nothing failed: about half the pack time on large plans
+  - The pack itself runs about twice as fast on large plans and keeps the game at a playable frame rate while it runs
+  - Piers of one kind are placed flush in pairs, so a row of piers takes less room
+  - In a full cycle the ship build modules come right after the storage their wares need
   - The Bill tab has one Run / Stop button
   - The grid packs every module on one block: fewer connection structures, a smaller plan box, every floor filled before a higher one
   - Piers and dock areas are placed with the block, on a row under it, side by side with their approach lanes clear; the sides take over when the bottom is full: a faster pack and a smaller plot
@@ -180,6 +184,7 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
   - A build module larger than the station's first pier could take the pier's place under the centre; the pier was placed there anyway, the editor refused the overlap and the run fell back to the coarse grid
   - Large modules could be left without a grid place and go to the editor's own search far from the block
   - A connection structure with diagonal arms was taken as a grid cross and the run stopped before placing anything
+  - The pack progress started a new layout shape at the previous shape's count
 
 ### [1.30] - 2026-11-10
 
