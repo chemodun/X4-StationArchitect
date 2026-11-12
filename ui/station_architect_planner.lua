@@ -1849,18 +1849,47 @@ function planner.Turns(plan)
     end
     return placed
   end
+  -- the cargo types of the ship builds' wares the plan stores: a full cycle's build module stands right after the
+  -- first storage of each, it runs on bought wares while the chain grows
+  local buildTransports = {}
+  if plan.target.fullCycle then
+    local seen = {}
+    for w in pairs(use) do
+      local transport = planner.Ware(w).transport
+      if transport and plan.storage[transport] and not seen[transport] then
+        seen[transport] = true
+        buildTransports[#buildTransports + 1] = transport
+      end
+    end
+    table.sort(buildTransports)
+  end
   for t = 1, nTurns do
     local turn, share = {}, t / nTurns
     local livingShare = t >= firstLiving and (t - firstLiving + 1) / (nTurns - firstLiving + 1) or 0
+    local function emitProducer(e)
+      turn[#turn + 1] = e.macro
+      for _, p in ipairs(e.products or {}) do addDue(p.ware, living[e.macro]) end
+    end
+    local function emitBuilds()
+      if not plan.target.fullCycle then return end
+      for _, transport in ipairs(buildTransports) do
+        if (placedStorage[transport] or 0) <= 0 then return end
+      end
+      for _, e in ipairs(finals) do
+        if e.group == "build" then
+          while (cum[e.macro] or 0) < counts[e.macro] do
+            cum[e.macro] = (cum[e.macro] or 0) + 1
+            emitProducer(e)
+          end
+        end
+      end
+    end
     local function emitStorage()
       for _, transport in ipairs(transports) do
         local need = (due[transport] or 0) * share + (dueLiving[transport] or 0) * livingShare
         placedStorage[transport] = emitWhile(turn, storages[transport] or {}, placedStorage[transport] or 0, need)
       end
-    end
-    local function emitProducer(e)
-      turn[#turn + 1] = e.macro
-      for _, p in ipairs(e.products or {}) do addDue(p.ware, living[e.macro]) end
+      emitBuilds()
     end
     -- the units due by the share, level by level, each level's storage behind it
     local function emitLevels(list, s)
