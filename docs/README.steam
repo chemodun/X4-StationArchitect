@@ -185,13 +185,18 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [*] Added
 [list]
 [*] The panel says when a run stopped on an error, with the detail in the game log
+[*] When a pier or dock area finds no room within the plot limit, the panel asks whether to continue without it instead of stopping; the result line counts the docks left out
 [/list]
 [*] Changed
 [list]
+[*] The pack stops at the first layout shape with nothing failed: about half the pack time on large plans
+[*] The Bill tab has one Run / Stop button
 [*] The grid packs every module on one block: fewer connection structures, a smaller plan box, every floor filled before a higher one
+[*] Piers and dock areas are placed with the block, on a row under it, side by side with their approach lanes clear; the sides take over when the bottom is full: a faster pack and a smaller plot
 [/list]
 [*] Fixed
 [list]
+[*] A build module larger than the station's first pier could take the pier's place under the centre; the pier was placed there anyway, the editor refused the overlap and the run fell back to the coarse grid
 [*] Large modules could be left without a grid place and go to the editor's own search far from the block
 [*] A connection structure with diagonal arms was taken as a grid cross and the run stopped before placing anything
 [/list]
