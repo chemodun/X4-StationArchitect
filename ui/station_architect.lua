@@ -2564,6 +2564,8 @@ end
 -- bill changes. The progress text and the button states are cell functions, so a run needs no rebuild.
 
 local PANEL_LAYER = 3
+-- during a run the panel's function cells refresh this often; vanilla's frame update sets every one of them each frame
+local PANEL_UPDATE_DT = 0.5
 local PAGE = 1972092448
 -- the left-bar categories of the build menu with vanilla's names
 local CATEGORIES = {
@@ -3923,7 +3925,9 @@ local function hookMenu()
       if not ok then sab.Error("panel failed: %s", tostring(err)) end
     end
     -- function cells (progress, button states) are re-evaluated only by the frame's own update, as vanilla does per frame
-    if sab.panelFrame and menu.shown then
+    local now = getElapsedTime()
+    if sab.panelFrame and menu.shown and (not sab.run or now - (sab.panelUpdated or 0) >= PANEL_UPDATE_DT) then
+      sab.panelUpdated = now
       local ok, err = pcall(sab.panelFrame.update, sab.panelFrame)
       if not ok then
         sab.Error("panel update failed: %s", tostring(err))

@@ -16,12 +16,14 @@ local yield = coroutine.yield
 local DIRS = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
 local OPPOSITE = { 2, 1, 4, 3, 6, 5 }
 local ROLLS = { 0, math.pi / 2, math.pi, 3 * math.pi / 2 }
-local CHECKS_PER_FRAME = 12000
+-- the base budget of work units per frame follows the measured frame towards TARGET_DT, within the bounds; a value
+-- set from outside above MAX_CHECKS is kept as it is
+local CHECKS_PER_FRAME, MIN_CHECKS, MAX_CHECKS, TARGET_DT = 12000, 500, 200000, 0.15
 grid.checksPerFrame = CHECKS_PER_FRAME
--- two base-budget frames in a row over BACKGROUND_DT long are the game in the background (a frame costs its floor
--- whatever the Lua does): the budget then grows by BOOST, except every PROBE_EVERY-th frame that measures again
-local BACKGROUND_DT, BOOST, PROBE_EVERY = 0.125, 24, 4
-grid.boost = 1
+-- every PROBE_EVERY-th frame runs MIN_CHECKS only: SLOW_PROBES probe frames in a row over BACKGROUND_DT long are the
+-- game in the background (a frame costs its floor whatever the Lua does), where the other frames run BOOST_CHECKS
+local BACKGROUND_DT, BOOST_CHECKS, PROBE_EVERY, SLOW_PROBES = 0.125, 100000, 8, 3
+grid.budget = CHECKS_PER_FRAME
 -- new crosses a module may need to reach the tree
 local MAX_PATH = 4
 -- footprint estimate: grid cells per module cell
@@ -244,11 +246,20 @@ local function markLean(g, t0, t1, c0, c1, M)
 end
 
 ---@async
-local function work(g, n)
+local function work(g, n, tag)
   g.work = g.work + n
-  if g.work > grid.checksPerFrame * grid.boost then
+  g.workBy[tag] = (g.workBy[tag] or 0) + n
+  if g.work > grid.budget then
     g.work = 0
     g.frames = (g.frames or 0) + 1
+    -- the slice's units per caller, matched to the frame's length logged by grid.Step
+    local parts = {}
+    for t, u in pairs(g.workBy) do
+      parts[#parts + 1] = t .. "=" .. u
+      g.workTotal[t] = (g.workTotal[t] or 0) + u
+    end
+    sab.Trace("grid: slice in frame %d: %s", grid.stepN or 0, table.concat(parts, " "))
+    g.workBy = {}
     yield()
   end
 end
@@ -320,7 +331,7 @@ local function distances(g, ylo, yhi, seq)
         end
       end
     end
-    work(g, 6)
+    work(g, 6, "distances")
   end
   return dist, from
 end
@@ -380,7 +391,7 @@ local function rebuildSums(g)
     end
   end
   g.sumH, g.dirty = h, {}
-  work(g, cells)
+  work(g, cells, "sums")
 end
 
 -- Occupied occupancy cells in the box x0..x1, y0..y1, z0..z1 (inside the footprint, y0 >= 0); sums: g.csums
@@ -426,13 +437,14 @@ end
 local function refuse(g, why)
   local W = g.why
   if W then W[why] = (W[why] or 0) + 1 end
+  g.whyTotal[why] = (g.whyTotal[why] or 0) + 1
   return nil
 end
 
 -- A pose's cells are a box: free test and contacts (occupied or off-grid neighbours) from the running sums.
 ---@async
 local function evaluate(g, node, pose, cost, path, on)
-  work(g, 10)
+  work(g, 10, "evaluate")
   local R = g.R
   local x0, x1 = R * node[1] + pose.lo[1], R * node[1] + pose.hi[1]
   local y0, y1 = R * node[2] + pose.lo[2], R * node[2] + pose.hi[2]
@@ -740,7 +752,7 @@ local function keepsAccess(g, best, seq)
     for di, d in ipairs(DIRS) do
       if push(q[1] + d[1], q[2] + d[2], q[3] + d[3], OPPOSITE[di]) then return true end
     end
-    work(g, 6)
+    work(g, 6, "access")
   end
   return false
 end
@@ -757,13 +769,17 @@ local function place(g, rec, wide)
       rec.minTop = math.min(rec.minTop, pose.top)
       rec.minLo = math.min(rec.minLo, pose.lo[2])
       rec.bound = math.min(rec.bound, -pose.faces * W_CONTACT)
-      -- per arm direction: the box all its poses lie in, the fewest cells one needs, whether each covers the cell facing the arm
-      local d = DIRS[pose.di]
-      local covers = g.R == 1
-      for i = 1, 3 do covers = covers and pose.lo[i] <= d[i] and d[i] <= pose.hi[i] end
+      -- per arm direction: the box all its poses lie in, the fewest cells one needs, whether each covers the first
+      -- occupancy cell past the arm on the cross's centre line (f)
+      local d, R = DIRS[pose.di], g.R
+      local f, covers = {}, true
+      for i = 1, 3 do
+        f[i] = d[i] > 0 and R or d[i] < 0 and -1 or math.floor((R - 1) / 2)
+        covers = covers and pose.lo[i] <= f[i] and f[i] <= pose.hi[i]
+      end
       local U = rec.union[pose.di]
       if not U then
-        U = { lo = { pose.lo[1], pose.lo[2], pose.lo[3] }, hi = { pose.hi[1], pose.hi[2], pose.hi[3] }, vmin = #pose.cells, facing = covers }
+        U = { lo = { pose.lo[1], pose.lo[2], pose.lo[3] }, hi = { pose.hi[1], pose.hi[2], pose.hi[3] }, vmin = #pose.cells, facing = covers, f = f }
         rec.union[pose.di] = U
       end
       for i = 1, 3 do U.lo[i], U.hi[i] = math.min(U.lo[i], pose.lo[i]), math.max(U.hi[i], pose.hi[i]) end
@@ -784,28 +800,42 @@ local function place(g, rec, wide)
     -- no pose on this arm fits when the cell facing it is taken (all cover it) or the free cells in the box of all
     -- its poses are fewer than the smallest pose needs
     local U = rec.union[di]
+    local R, nx, nz = g.R, g.fx, g.fz
     if U then
-      local d = DIRS[di]
-      if U.facing and not free(g, node[1] + d[1], node[2] + d[2], node[3] + d[3]) then return end
-      local R = g.R
+      if U.facing and g.focc[fkey(g, R * node[1] + U.f[1], R * node[2] + U.f[2], R * node[3] + U.f[3])] then return end
       local x0, x1 = math.max(0, R * node[1] + U.lo[1]), math.min(g.fx - 1, R * node[1] + U.hi[1])
       local y0, y1 = math.max(0, R * node[2] + U.lo[2]), R * node[2] + U.hi[2]
       local z0, z1 = math.max(0, R * node[3] + U.lo[3]), math.min(g.fz - 1, R * node[3] + U.hi[3])
       if x0 > x1 or y0 > y1 or z0 > z1 then return end
-      work(g, 1)
+      work(g, 1, "place")
       if (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) - boxSum(g, x0, x1, y0, y1, z0, z1) < U.vmin then return end
     end
+    local off, taken = 0, 0
     for _, pose in ipairs(rec.byDi[di]) do
       -- a wrapping body hangs on a cross only
-      if not (pose.wrap and kind == "port") and (not best or levelCost(g, g.R * node[2] + pose.lo[2]) + topCost(g, node[2] + pose.top) + cost * W_COST - pose.faces * W_CONTACT < best.score)
+      if not (pose.wrap and kind == "port") and (not best or levelCost(g, R * node[2] + pose.lo[2]) + topCost(g, node[2] + pose.top) + cost * W_COST - pose.faces * W_CONTACT < best.score)
           and not (banned[pose] and banned[pose][key(g, node[1], node[2], node[3])]) then
-        local score = evaluate(g, node, pose, cost, extra and extra.path, extra and extra.module)
-        if score and (not best or score < best.score) then
-          best = { score = score, kind = kind, node = node, di = di, pose = pose }
-          if extra then for k, v in pairs(extra) do best[k] = v end end
+        -- the two refusals nearly every pose ends in, without the call
+        local x0, x1 = R * node[1] + pose.lo[1], R * node[1] + pose.hi[1]
+        local y0, y1 = R * node[2] + pose.lo[2], R * node[2] + pose.hi[2]
+        local z0, z1 = R * node[3] + pose.lo[3], R * node[3] + pose.hi[3]
+        if x0 < 0 or z0 < 0 or y0 < 0 or x1 >= nx or z1 >= nz then
+          off = off + 1
+        elseif not pose.wrap and boxSum(g, x0, x1, y0, y1, z0, z1) > 0 then
+          taken = taken + 1
+        else
+          local score = evaluate(g, node, pose, cost, extra and extra.path, extra and extra.module)
+          if score and (not best or score < best.score) then
+            best = { score = score, kind = kind, node = node, di = di, pose = pose }
+            if extra then for k, v in pairs(extra) do best[k] = v end end
+          end
         end
       end
     end
+    if W then
+      W["off the block"], W["cells taken"] = (W["off the block"] or 0) + off, (W["cells taken"] or 0) + taken
+    end
+    if off + taken > 0 then work(g, off + taken, "skip") end
   end
   -- a seed without crosses grows from its ports only
   if not g.root and not g.seeded then
@@ -1070,7 +1100,7 @@ local function dockNode(g, n)
   local tests = k
   if not found then found, k = touchesAny(nearZone, b, D.zones) tests = tests + k end
   if not found and g.zones then found, k = touchesAny(nearZone, b, g.zones) tests = tests + k end
-  work(g, tests)
+  work(g, tests, "dockNode")
   return not found
 end
 
@@ -1233,7 +1263,7 @@ local function dockFits(g, fi, n, m, pose, E)
     if not found then found, k = touchesAny(nearZone, zb, D.boxes) tests = tests + k why = "a zone at a cross" end
     if not found then found, k = touchesAny(nearZone, zb, boxes) tests = tests + k end
   end
-  work(g, tests + 4)
+  work(g, tests + 4, "dockFits")
   if found then return refuse(g, why) end
   local all = union({ min = { F.min[1], F.min[2], F.min[3] }, max = { F.max[1], g.top * u[2] + g.a[2], F.max[3] } }, D.all or body)
   all = union(all, body)
@@ -1307,7 +1337,7 @@ local function stackFits(g, R, body, o)
     if not found then found, k = touchesOther(nearZone, zb, D.bodies) tests = tests + k why = "a zone at a body" end
     if not found then found, k = touchesAny(nearZone, zb, D.boxes) tests = tests + k why = "a zone at a cross" end
   end
-  work(g, tests + 4)
+  work(g, tests + 4, "stackFits")
   if found then return refuse(g, why) end
   local all = union({ min = { F.min[1], F.min[2], F.min[3] }, max = { F.max[1], g.top * u[2] + g.a[2], F.max[3] } }, D.all or body)
   all = union(all, body)
@@ -1950,7 +1980,7 @@ end
 ---@async
 local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pierItem)
   local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, rootY = rootY or 0, pierItem = pierItem, occ = {}, focc = {}, dirty = {},
-    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, dockLost = {}, commits = 0, laneRefused = 0,
+    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, workBy = {}, workTotal = {}, whyTotal = {}, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, dockLost = {}, commits = 0, laneRefused = 0,
     started = getElapsedTime() }
   if seed then seedGrid(g, seed) end
   dockInit(g, kit)
@@ -2047,6 +2077,17 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pier
   sab.Debug("grid: footprint %d x %d, cost %g: %d placed, %d failed, connectors %d (%d crosses, %d saved by struts), used %.1f x %.1f x %.1f km, module cells %.0f%%, %d placements refused for closing the way up, %d on a later item's tree, %d poses at an approach zone, %d of %d docks on the row, %d row crosses, %d frames, %.1f s",
     g.sx, g.sz, W_COST, #g.modules + #g.docks, #g.failed, g.connectors, crosses, g.saved, g.used[1] * g.u[1] / 1000, g.used[2] * g.u[2] / 1000, g.used[3] * g.u[3] / 1000,
     100 * modCells / g.box, g.banned, g.relaxed or 0, g.laneRefused, D.total - D.failed, D.total, D.newCrosses, g.frames, getElapsedTime() - g.started)
+  local units, names = {}, {}
+  for t, u in pairs(g.workBy) do g.workTotal[t] = (g.workTotal[t] or 0) + u end
+  for t, u in pairs(g.workTotal) do names[#names + 1] = t units[t] = u end
+  table.sort(names, function(a, b) return units[a] > units[b] end)
+  for i, t in ipairs(names) do names[i] = string.format("%s %.2f M", t, units[t] / 1e6) end
+  sab.Debug("grid: work units by caller: %s", table.concat(names, ", "))
+  local whys, refused = {}, 0
+  for why, k in pairs(g.whyTotal) do whys[#whys + 1] = why refused = refused + k end
+  table.sort(whys, function(a, b) return g.whyTotal[a] > g.whyTotal[b] end)
+  for i, why in ipairs(whys) do whys[i] = string.format("%s %d", why, g.whyTotal[why]) end
+  sab.Debug("grid: pose evaluations: %d, %d refused: %s", (g.workTotal.evaluate or 0) / 10, refused, table.concat(whys, ", "))
   return g
 end
 
@@ -2092,7 +2133,7 @@ local function detach(g, D, run)
   end
   ---@async
   local function clear(o)
-    work(g, #bodies * (#zones + 1) + #D.zones)
+    work(g, #bodies * (#zones + 1) + #D.zones, "detach")
     if root and hit(shifted(root, o), reach) then return false, "the root in snap reach" end
     for _, b in ipairs(bodies) do
       local s = shifted(b, o)
@@ -2299,25 +2340,51 @@ end
 function grid.Step(run)
   local now = getElapsedTime()
   local n = (run.stepN or 0) + 1
-  -- the frame length seen now is that of the previous frame; after a base-budget frame it tells the background
+  -- the frame length seen now is that of the previous frame; after a probe frame it tells the background
   -- (the first frame also carries the run's start and the panel redraw: it is never measured)
   local function probe(i) return i <= 3 or (i - 1) % PROBE_EVERY == 0 end
   if n >= 3 and probe(n - 1) then
-    local slow = now - run.stepAt > BACKGROUND_DT
-    run.background = slow and run.slow == true
-    run.slow = slow
-    sab.Trace("grid: a base-budget frame took %.3f s, %s", now - run.stepAt, run.background and "background" or "foreground")
+    run.slowProbes = now - run.stepAt > BACKGROUND_DT and (run.slowProbes or 0) + 1 or 0
+    run.background = run.slowProbes >= SLOW_PROBES
+    sab.Trace("grid: a probe frame took %.3f s, %s", now - run.stepAt, run.background and "background" or "foreground")
+  end
+  -- every frame's length, by the budget it ran
+  if n >= 3 then
+    run.stepTimes = run.stepTimes or { base = {}, boost = {} }
+    local list = run.stepBoost and run.stepTimes.boost or run.stepTimes.base
+    local dt = now - run.stepAt
+    list[#list + 1] = dt
+    sab.Trace("grid: frame %d took %.3f s, %s budget %d", n - 1, dt, run.stepBoost and "boosted" or probe(n - 1) and "probe" or "base", grid.budget)
+    if not run.stepBoost and not probe(n - 1) and grid.checksPerFrame <= MAX_CHECKS then
+      local want = grid.checksPerFrame * TARGET_DT / math.max(dt, 0.01)
+      grid.checksPerFrame = math.floor(math.max(MIN_CHECKS, math.min(MAX_CHECKS, (grid.checksPerFrame + want) / 2)))
+    end
   end
   run.stepN, run.stepAt = n, now
-  grid.boost = not probe(n) and run.background and BOOST or 1
+  grid.stepN = n
+  local fixed = grid.checksPerFrame > MAX_CHECKS
+  run.stepBoost = not fixed and not probe(n) and run.background == true
+  grid.budget = fixed and grid.checksPerFrame or run.stepBoost and BOOST_CHECKS or probe(n) and MIN_CHECKS or grid.checksPerFrame
   local ok, err = coroutine.resume(run.packer, run)
-  grid.boost = 1
   if not ok then
     sab.Error("grid layout failed: %s", tostring(err))
     sab.StopRun("grid layout failed", true)
     return
   end
-  if coroutine.status(run.packer) == "dead" then run.packed = getElapsedTime() end
+  if coroutine.status(run.packer) == "dead" then
+    run.packed = getElapsedTime()
+    local function stats(list)
+      table.sort(list)
+      local sum = 0
+      for _, dt in ipairs(list) do sum = sum + dt end
+      return #list, #list > 0 and sum / #list or 0, list[math.ceil(#list / 2)] or 0, list[#list] or 0
+    end
+    local T = run.stepTimes or { base = {}, boost = {} }
+    local nb, mb, medb, maxb = stats(T.base)
+    local nx, mx, medx, maxx = stats(T.boost)
+    sab.Debug("grid: pack frames: %d at the base budget (mean %.3f s, median %.3f, max %.3f), %d boosted (mean %.3f s, median %.3f, max %.3f)",
+      nb, mb, medb, maxb, nx, mx, medx, maxx)
+  end
   if coroutine.status(run.packer) == "dead" and run.packOnly then
     run.packer = nil
     sab.StopRun("packed only")
