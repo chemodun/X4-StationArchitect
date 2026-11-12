@@ -265,10 +265,12 @@ local function work(g, n, tag)
 end
 
 -- profiling: with grid.phases set (and the budget fixed huge from eval) every phase starts in a frame of its own,
--- so the frame's length logged by grid.Step is the phase's cost
+-- so the frame's length logged by grid.Step is the phase's cost; the idle frame before it is the floor to subtract
 ---@async
 local function phase(name)
   if not grid.phases then return end
+  yield()
+  sab.Trace("grid: phase idle in frame %d", grid.stepN or 0)
   yield()
   sab.Trace("grid: phase %s in frame %d", name, grid.stepN or 0)
 end
@@ -724,37 +726,62 @@ local function keepsAccess(g, best, seq)
   end
   -- the way up must be one distances can grow new crosses along
   local seen, queue, head = {}, {}, 1
-  local function push(x, y, z, back)
+  -- a cell the flood may enter from back; "above" ends the search
+  local function enter(x, y, z, back)
     if x < 0 or x >= nx or z < 0 or z >= nz or y < 0 then return false end
     local k = key(g, x, y, z)
     if g.occ[k] or taken[k] or seen[k] or g.touched[k] or touched[k] then return false end
     for di = 1, 6 do
       if di ~= back and faceBlocked(x, y, z, di) then return false end
     end
-    if y > top then return true end
-    seen[k] = true
-    queue[#queue + 1] = { x, y, z }
+    return y > top and "above" or k
+  end
+  local function push(x, y, z, back)
+    local k = enter(x, y, z, back)
+    if k == "above" then return true end
+    if k then
+      seen[k] = true
+      queue[#queue + 1] = { x, y, z }
+    end
     return false
   end
+  local sources = {}
+  local function source(x, y, z, back) sources[#sources + 1] = { x, y, z, back } end
   for _, X in pairs(g.crosses) do
     local n = X.node
     for di = 1, (not seq or (X.seq or 0) <= seq) and 6 or 0 do
       local d = DIRS[di]
-      if not X.arms[di] and push(n[1] + d[1], n[2] + d[2], n[3] + d[3], OPPOSITE[di]) then return true end
+      if not X.arms[di] then source(n[1] + d[1], n[2] + d[2], n[3] + d[3], OPPOSITE[di]) end
     end
   end
   for _, n in ipairs(crossNodes) do
-    for di, d in ipairs(DIRS) do
-      if push(n[1] + d[1], n[2] + d[2], n[3] + d[3], OPPOSITE[di]) then return true end
-    end
+    for di, d in ipairs(DIRS) do source(n[1] + d[1], n[2] + d[2], n[3] + d[3], OPPOSITE[di]) end
   end
   for _, M in ipairs(g.modules) do
     for _, pt in ipairs((not seq or (M.seq or 0) <= seq) and M.ports or NONE) do
-      if not pt.used and push(pt.node[1], pt.node[2], pt.node[3], OPPOSITE[pt.di]) then return true end
+      if not pt.used then source(pt.node[1], pt.node[2], pt.node[3], OPPOSITE[pt.di]) end
     end
   end
   for _, pt in ipairs(pose.ports) do
-    if push(node[1] + pt.node[1], node[2] + pt.node[2], node[3] + pt.node[3], OPPOSITE[pt.di]) then return true end
+    source(node[1] + pt.node[1], node[2] + pt.node[2], node[3] + pt.node[3], OPPOSITE[pt.di])
+  end
+  -- a straight climb from a source reaches above the top in a few cells where the flood would first wade
+  -- through the whole open surface a layer at a time
+  for _, s in ipairs(sources) do
+    local x, y, z, back = s[1], s[2], s[3], s[4]
+    while true do
+      local k = enter(x, y, z, back)
+      if k == "above" then
+        g.climbs = g.climbs + 1
+        return true
+      end
+      if not k then break end
+      y, back = y + 1, 4
+      work(g, 1, "access")
+    end
+  end
+  for _, s in ipairs(sources) do
+    if push(s[1], s[2], s[3], s[4]) then return true end
   end
   while queue[head] do
     local q = queue[head]
@@ -2030,7 +2057,7 @@ end
 ---@async
 local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pierItem)
   local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, rootY = rootY or 0, pierItem = pierItem, occ = {}, focc = {}, dirty = {},
-    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, workBy = {}, workTotal = {}, whyTotal = {}, dead = {}, deadPose = {}, deadHits = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, dockLost = {}, commits = 0, laneRefused = 0,
+    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, workBy = {}, workTotal = {}, whyTotal = {}, dead = {}, deadPose = {}, deadHits = 0, climbs = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, dockLost = {}, commits = 0, laneRefused = 0,
     started = getElapsedTime() }
   if seed then seedGrid(g, seed) end
   dockInit(g, kit)
@@ -2139,7 +2166,8 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pier
   for why, k in pairs(g.whyTotal) do whys[#whys + 1] = why refused = refused + k end
   table.sort(whys, function(a, b) return g.whyTotal[a] > g.whyTotal[b] end)
   for i, why in ipairs(whys) do whys[i] = string.format("%s %d", why, g.whyTotal[why]) end
-  sab.Debug("grid: pose evaluations: %d, %d refused, %d dead arm or pose hits: %s", (g.workTotal.evaluate or 0) / 10, refused, g.deadHits, table.concat(whys, ", "))
+  sab.Debug("grid: pose evaluations: %d, %d refused, %d dead arm or pose hits, way up by a climb %d times: %s",
+    (g.workTotal.evaluate or 0) / 10, refused, g.deadHits, g.climbs, table.concat(whys, ", "))
   return g
 end
 
