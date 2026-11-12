@@ -264,6 +264,15 @@ local function work(g, n, tag)
   end
 end
 
+-- profiling: with grid.phases set (and the budget fixed huge from eval) every phase starts in a frame of its own,
+-- so the frame's length logged by grid.Step is the phase's cost
+---@async
+local function phase(name)
+  if not grid.phases then return end
+  yield()
+  sab.Trace("grid: phase %s in frame %d", name, grid.stepN or 0)
+end
+
 -- The bill position a parent stands at: a module's, or that of what a cross chain hangs on; emit places a
 -- module after its parent, so a module takes no parent later in the bill.
 local function parentSeq(parent)
@@ -644,6 +653,7 @@ local function commit(g, rec, best)
     end
   end
   g.modules[#g.modules + 1] = rec
+  phase("sums")
   rebuildSums(g)
 end
 
@@ -762,6 +772,7 @@ end
 -- footprint centre.
 ---@async
 local function place(g, rec, wide)
+  phase("setup")
   if not rec.byDi then
     rec.byDi, rec.bound, rec.minTop, rec.minLo, rec.banned, rec.union = { {}, {}, {}, {}, {}, {} }, math.huge, math.huge, math.huge, {}, {}
     for _, pose in ipairs(rec.poses) do
@@ -790,8 +801,21 @@ local function place(g, rec, wide)
   local best
   local banned = rec.banned
   local seq = rec.seqLimit or rec.item.seq or math.huge
+  -- cells are only ever taken and the block never grows, so a pose refused by those two tests at a node stays
+  -- refused for the pack, and an arm whose every pose is refused so is dead for the shape: both are remembered
+  local dead = g.dead[rec.poses]
+  if not dead then
+    dead = {}
+    g.dead[rec.poses] = dead
+  end
   ---@async
   local function consider(kind, node, di, cost, extra)
+    local nk = node[1] >= 0 and node[1] < g.sx and node[3] >= 0 and node[3] < g.sz and node[2] >= 0 and key(g, node[1], node[2], node[3])
+    local ak = nk and nk * 8 + di
+    if ak and dead[ak] then
+      g.deadHits = g.deadHits + 1
+      return
+    end
     local W = g.why
     if W then
       W.nodes = (W.nodes or 0) + 1
@@ -802,36 +826,58 @@ local function place(g, rec, wide)
     local U = rec.union[di]
     local R, nx, nz = g.R, g.fx, g.fz
     if U then
-      if U.facing and g.focc[fkey(g, R * node[1] + U.f[1], R * node[2] + U.f[2], R * node[3] + U.f[3])] then return end
+      if U.facing and g.focc[fkey(g, R * node[1] + U.f[1], R * node[2] + U.f[2], R * node[3] + U.f[3])] then
+        if ak then dead[ak] = true end
+        return
+      end
       local x0, x1 = math.max(0, R * node[1] + U.lo[1]), math.min(g.fx - 1, R * node[1] + U.hi[1])
       local y0, y1 = math.max(0, R * node[2] + U.lo[2]), R * node[2] + U.hi[2]
       local z0, z1 = math.max(0, R * node[3] + U.lo[3]), math.min(g.fz - 1, R * node[3] + U.hi[3])
-      if x0 > x1 or y0 > y1 or z0 > z1 then return end
+      if x0 > x1 or y0 > y1 or z0 > z1 then
+        if ak then dead[ak] = true end
+        return
+      end
       work(g, 1, "place")
-      if (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) - boxSum(g, x0, x1, y0, y1, z0, z1) < U.vmin then return end
+      if (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) - boxSum(g, x0, x1, y0, y1, z0, z1) < U.vmin then
+        if ak then dead[ak] = true end
+        return
+      end
     end
-    local off, taken = 0, 0
+    -- a wrapping body hangs on a cross only
+    local off, taken, open = 0, 0, 0
     for _, pose in ipairs(rec.byDi[di]) do
-      -- a wrapping body hangs on a cross only
-      if not (pose.wrap and kind == "port") and (not best or levelCost(g, R * node[2] + pose.lo[2]) + topCost(g, node[2] + pose.top) + cost * W_COST - pose.faces * W_CONTACT < best.score)
+      local dp = g.deadPose[pose]
+      if nk and dp and dp[nk] then
+        g.deadHits = g.deadHits + 1
+      elseif not (pose.wrap and kind == "port") and (not best or levelCost(g, R * node[2] + pose.lo[2]) + topCost(g, node[2] + pose.top) + cost * W_COST - pose.faces * W_CONTACT < best.score)
           and not (banned[pose] and banned[pose][key(g, node[1], node[2], node[3])]) then
         -- the two refusals nearly every pose ends in, without the call
         local x0, x1 = R * node[1] + pose.lo[1], R * node[1] + pose.hi[1]
         local y0, y1 = R * node[2] + pose.lo[2], R * node[2] + pose.hi[2]
         local z0, z1 = R * node[3] + pose.lo[3], R * node[3] + pose.hi[3]
-        if x0 < 0 or z0 < 0 or y0 < 0 or x1 >= nx or z1 >= nz then
-          off = off + 1
-        elseif not pose.wrap and boxSum(g, x0, x1, y0, y1, z0, z1) > 0 then
-          taken = taken + 1
+        local isOff = x0 < 0 or z0 < 0 or y0 < 0 or x1 >= nx or z1 >= nz
+        if isOff or (not pose.wrap and boxSum(g, x0, x1, y0, y1, z0, z1) > 0) then
+          if isOff then off = off + 1 else taken = taken + 1 end
+          if nk then
+            if not dp then
+              dp = {}
+              g.deadPose[pose] = dp
+            end
+            dp[nk] = true
+          end
         else
+          open = open + 1
           local score = evaluate(g, node, pose, cost, extra and extra.path, extra and extra.module)
           if score and (not best or score < best.score) then
             best = { score = score, kind = kind, node = node, di = di, pose = pose }
             if extra then for k, v in pairs(extra) do best[k] = v end end
           end
         end
+      else
+        open = open + 1
       end
     end
+    if ak and open == 0 then dead[ak] = true end
     if W then
       W["off the block"], W["cells taken"] = (W["off the block"] or 0) + off, (W["cells taken"] or 0) + taken
     end
@@ -849,6 +895,7 @@ local function place(g, rec, wide)
   local ylo, yhi = math.max(0, g.floor - g.tallest), math.max(g.floor, g.free) + g.tallest
   -- wide: every band the floor loop of findPlace reaches, in one pass
   if wide then yhi = math.max(yhi, math.max(g.top + g.tallest + 1, g.free) + g.tallest) end
+  phase("arms")
   for _, X in pairs(g.crosses) do
     local n = X.node
     if n[2] >= ylo and n[2] <= yhi and (X.seq or 0) <= seq then
@@ -875,7 +922,9 @@ local function place(g, rec, wide)
     yTop = math.min(yTop, math.floor((g.R * (level + 1) - 1 - rec.minLo) / g.R))
   end
   if yTop >= ylo then
+    phase("distances")
     local dist, from = distances(g, ylo, math.min(yhi, yTop + g.maxPath - 1), seq)
+    phase("new")
     for k, d in pairs(dist) do
       local q = from[k]
       local n
@@ -1660,6 +1709,7 @@ local function findPlace(g, rec)
   while true do
     local best = place(g, rec)
     if best then
+      phase("access")
       if keepsAccess(g, best) or not openAbove(g) then
         g.floorOf[macro] = g.floor
         return best
@@ -1980,7 +2030,7 @@ end
 ---@async
 local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pierItem)
   local g = { u = kit.cell, a = kit.arms, R = R, sx = sx, sz = sz, fx = R * sx, fz = R * sz, tallest = tallest, rootY = rootY or 0, pierItem = pierItem, occ = {}, focc = {}, dirty = {},
-    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, workBy = {}, workTotal = {}, whyTotal = {}, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, dockLost = {}, commits = 0, laneRefused = 0,
+    crosses = {}, modules = {}, touched = {}, lean = {}, portAt = {}, top = 0, floor = 0, floorOf = {}, free = 0, work = 0, workBy = {}, workTotal = {}, whyTotal = {}, dead = {}, deadPose = {}, deadHits = 0, frames = 0, newCrosses = 0, maxPath = MAX_PATH, banned = 0, failed = {}, dockLost = {}, commits = 0, laneRefused = 0,
     started = getElapsedTime() }
   if seed then seedGrid(g, seed) end
   dockInit(g, kit)
@@ -1994,6 +2044,7 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pier
     if b.dock then
       local D = g.dock
       D.total = D.total + 1
+      phase("dock")
       best = dockPlace(g, b.item)
       if best then
         dockCommit(g, rec, best)
@@ -2031,6 +2082,7 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pier
     if best == true then
       -- a dock, done above
     elseif best then
+      phase("commit")
       commit(g, rec, best)
       sab.Trace("grid: %s on %s at %d %d %d, %d cells, cost %d", rec.item.macro, best.kind, best.node[1], best.node[2], best.node[3], #best.pose.cells, best.kind == "new" and #best.path or 0)
     else
@@ -2087,7 +2139,7 @@ local function layout(kit, base, sx, sz, tallest, progress, seed, R, rootY, pier
   for why, k in pairs(g.whyTotal) do whys[#whys + 1] = why refused = refused + k end
   table.sort(whys, function(a, b) return g.whyTotal[a] > g.whyTotal[b] end)
   for i, why in ipairs(whys) do whys[i] = string.format("%s %d", why, g.whyTotal[why]) end
-  sab.Debug("grid: pose evaluations: %d, %d refused: %s", (g.workTotal.evaluate or 0) / 10, refused, table.concat(whys, ", "))
+  sab.Debug("grid: pose evaluations: %d, %d refused, %d dead arm or pose hits: %s", (g.workTotal.evaluate or 0) / 10, refused, g.deadHits, table.concat(whys, ", "))
   return g
 end
 
