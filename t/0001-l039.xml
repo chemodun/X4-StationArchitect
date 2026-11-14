@@ -45,7 +45,7 @@
       <t id="150">Razza dei moduli</t>
       <t id="151">Qualsiasi</t>
       <t id="152">Obiettivi selezionati: %s</t>
-      <t id="153">L'API Extra Data non può leggere i dati dei moduli in questa versione del gioco</t>
+      <t id="153">L'API Extra UI non può leggere i dati dei moduli in questa versione del gioco</t>
       <t id="154">Interrotto, il piano è stato modificato a mano: %s posizionati, %s falliti</t>
       <t id="155">Moduli di risorse speciali: %s</t>
       <t id="156">Aggiungi un modulo</t>

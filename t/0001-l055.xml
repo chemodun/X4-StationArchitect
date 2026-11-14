@@ -45,7 +45,7 @@
       <t id="150">Raça dos módulos</t>
       <t id="151">Qualquer</t>
       <t id="152">Alvos selecionados: %s</t>
-      <t id="153">A API Extra Data não consegue ler os dados dos módulos nesta versão do jogo</t>
+      <t id="153">A API Extra UI não consegue ler os dados dos módulos nesta versão do jogo</t>
       <t id="154">Interrompido, o plano foi alterado manualmente: %s colocados, %s falhos</t>
       <t id="155">Módulos de recursos especiais: %s</t>
       <t id="156">Adicionar um módulo</t>

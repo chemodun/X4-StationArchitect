@@ -160,23 +160,23 @@ local function methodOf(ware, p, races)
   return matches[1]
 end
 
--- The workforce and sunlight effects of a method from the Extra Data API; nil when that API
+-- The workforce and sunlight effects of a method from the Extra UI API; nil when that API
 -- cannot answer on this build (fail closed: the plan then warns and applies no bonus).
 local function effectsOf(ware, method)
-  if not (method and ExtraData and ExtraData.Available()) then return nil end
-  local work, sunlight = ExtraData.GetWareDataEx(ware,
+  if not (method and ExtraUI and ExtraUI.Available()) then return nil end
+  local work, sunlight = ExtraUI.GetWareDataEx(ware,
     "productioneffects." .. method .. ".work", "productioneffects." .. method .. ".sunlight")
   if work == nil and sunlight == nil then return nil end
   return { work = work or 0, sunlight = sunlight or 0 }
 end
 
 -- One module as the planner sees it. Rates are per hour. The library carries no pier docks (0 for every
--- pier), so a pier's count is its docking bays from the Extra Data API.
+-- pier), so a pier's count is its docking bays from the Extra UI API.
 local function entryOf(group, lib, macro)
   local data = GetLibraryEntry(lib, macro)
   local races = GetMacroData(macro, "makerraceid")
   races = type(races) == "table" and races or { races }
-  local bays = lib == "moduletypes_dock" and IsMacroClass(macro, "pier") and ExtraData and ExtraData.GetMacroDataEx(macro, "dockingbays")
+  local bays = lib == "moduletypes_dock" and IsMacroClass(macro, "pier") and ExtraUI and ExtraUI.GetMacroDataEx(macro, "dockingbays")
   local e = { macro = macro, group = group, name = data.name, race = races[1] or "generic", races = {},
     workforce = data.maxworkforce or 0, docksS = data.docks_s or 0, docksM = data.docks_m or 0,
     pierDocks = bays and #bays or 0 }
@@ -186,14 +186,14 @@ local function entryOf(group, lib, macro)
     e.efficiency = data.efficiencyfactor or 0
     -- ships built at once: one per build processor
     e.lines = 0
-    for _, c in ipairs(ExtraData and ExtraData.GetMacroDataEx(macro, "connections.buildprocessor") or {}) do
+    for _, c in ipairs(ExtraUI and ExtraUI.GetMacroDataEx(macro, "connections.buildprocessor") or {}) do
       e.lines = e.lines + (c.count or 0)
     end
     e.lines = math.max(1, e.lines)
-    -- the ship sizes the module fabricates (none for a maintenance bay) and resupplies; nil when the Extra Data
+    -- the ship sizes the module fabricates (none for a maintenance bay) and resupplies; nil when the Extra UI
     -- API cannot tell
     for field, key in pairs({ builds = "builderclasses", supplies = "supplyclasses" }) do
-      local classes = ExtraData and ExtraData.GetMacroDataEx(macro, key)
+      local classes = ExtraUI and ExtraUI.GetMacroDataEx(macro, key)
       if classes then
         local sizes = {}
         for _, class in ipairs(classes) do
@@ -231,7 +231,7 @@ local function entryOf(group, lib, macro)
     e.tags = data.storagetags or {}
   elseif group == "habitation" then
     -- a habitat goes by its workforce's race; SW Interworlds' differ from their makers'
-    local workforceRace = ExtraData and ExtraData.GetMacroDataEx(macro, "workforcerace")
+    local workforceRace = ExtraUI and ExtraUI.GetMacroDataEx(macro, "workforcerace")
     if workforceRace then e.race, e.races = workforceRace, { [workforceRace] = true } end
     e.capacity = data.workforcecapacity or 0
     e.needs = {}
@@ -242,7 +242,7 @@ local function entryOf(group, lib, macro)
       e.group, e.capacity = "pier", e.pierDocks
       -- approach directions: a one-sided pier needs the least plot
       local dirs = {}
-      for _, z in ipairs(ExtraData.GetMacroDataEx(macro, "exclusionzones") or {}) do
+      for _, z in ipairs(ExtraUI.GetMacroDataEx(macro, "exclusionzones") or {}) do
         local d = z.direction
         dirs[string.format("%.1f,%.1f,%.1f", d[1], d[2], d[3])] = true
       end
@@ -727,7 +727,7 @@ local function stationDocks(station)
   local pierDocks, areas = 0, 0
   for _, macro in ipairs(stationMacros(station)) do
     if IsMacroClass(macro, "pier") then
-      local bays = ExtraData and ExtraData.GetMacroDataEx(macro, "dockingbays")
+      local bays = ExtraUI and ExtraUI.GetMacroDataEx(macro, "dockingbays")
       pierDocks = pierDocks + (bays and #bays or 0)
     elseif IsMacroClass(macro, "dockarea") and not GetMacroData(macro, "isventuremodule") then
       areas = areas + 1
@@ -1115,8 +1115,8 @@ function planner.Plan(target)
     shipRates = {}, shipHours = {}, ships = {}, resupplies = {}, shipBays = {}, adds = false }
   local counts = plan.counts
   local function warn(fmt, ...) plan.warnings[#plan.warnings + 1] = string.format(fmt, ...) end
-  if not (ExtraData and ExtraData.Available()) then
-    warn("production effects unavailable (Extra Data API): no workforce or sunlight bonus applied")
+  if not (ExtraUI and ExtraUI.Available()) then
+    warn("production effects unavailable (Extra UI API): no workforce or sunlight bonus applied")
   end
   -- without planned habitats the new modules run at the station's current workforce
   local liveFraction = (not target.workforce) and liveWorkforceFraction(target.station) or 0
@@ -1134,7 +1134,7 @@ function planner.Plan(target)
       local supplied = math.max(bays, goal.bays or bays)
       if bays > 0 or (target.fullCycle and supplied > 0) then plan.adds = true end
       local sizes = goal.repair and {} or (goal.shipSize and { goal.shipSize }) or (e and e.builds)
-      if e and not sizes then warn("build module kind unknown (Extra Data API): %s planned without ships", e.name) end
+      if e and not sizes then warn("build module kind unknown (Extra UI API): %s planned without ships", e.name) end
       if sizes and #sizes > 0 then
         -- one ship per build line of a bay at a time
         local id = table.concat(sizes, " ")

@@ -45,7 +45,7 @@
       <t id="150">Rasse der Module</t>
       <t id="151">Beliebig</t>
       <t id="152">Gewählte Ziele: %s</t>
-      <t id="153">Die Extra Data API kann Moduldaten in dieser Spielversion nicht lesen</t>
+      <t id="153">Die Extra UI API kann Moduldaten in dieser Spielversion nicht lesen</t>
       <t id="154">Angehalten, der Plan wurde von Hand geändert: %s platziert, %s fehlgeschlagen</t>
       <t id="155">Module für Sonderressourcen: %s</t>
       <t id="156">Modul hinzufügen</t>

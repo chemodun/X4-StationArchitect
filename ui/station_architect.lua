@@ -53,13 +53,6 @@ ffi.cdef [[
 
 local MENU_NAME = "StationConfigurationMenu"
 
--- ctypes once: a type string given to ffi.cast is parsed every call and a function type is never interned,
--- so the finite ctype table runs out after enough calls ("table overflow")
-local P, U8PP, U16P, U32P, I32P, U64P = ffi.typeof("uint8_t*"), ffi.typeof("uint8_t**"), ffi.typeof("uint16_t*"), ffi.typeof("uint32_t*"), ffi.typeof("int32_t*"), ffi.typeof("uint64_t*")
-local FLOATP, VOIDPP, CHARP, CHARPP, UPTR = ffi.typeof("float*"), ffi.typeof("void**"), ffi.typeof("const char*"), ffi.typeof("const char**"), ffi.typeof("uintptr_t")
-local FN_RESOLVE, FN_UPDATE = ffi.typeof("void*(*)(void*, uint64_t, uint32_t)"), ffi.typeof("void(*)(void*, uint8_t, const float*)")
-local FN_U8_I32 = ffi.typeof("uint8_t(*)(void*, int32_t)")
-local I64P = ffi.typeof("int64_t*")
 -- vanilla's cdefs (ego_detailmonitor loads first); the Plan2 variant is 9.00 only
 local PLAN_ENTRIES = ffi.typeof("UIConstructionPlanEntry[?]")
 local BOOL1 = ffi.typeof("bool[1]")
@@ -83,7 +76,7 @@ local sab = {
   run = nil,
   -- macro -> { maxX, maxY, maxZ, cX, cY, cZ }, read on first use
   sizes = {},
-  -- macro -> snap connections from the Extra Data API
+  -- macro -> snap connections from the Extra UI API
   snapCache = {},
   -- "entry macro|station connection|module macro|module connection" the engine refused to snap
   incompatible = {},
@@ -123,11 +116,11 @@ function sab.WriteConfig(key, value)
 end
 
 -- *** module sizes ***
--- half-extents about a centre, metres, from the Extra Data API; nil when it cannot answer
+-- half-extents about a centre, metres, from the Extra UI API; nil when it cannot answer
 
 setmetatable(sab.sizes, { __index = function(sizes, macro)
-  if not ExtraData then return nil end
-  local box = ExtraData.GetMacroDataEx(macro, "boundingbox")
+  if not ExtraUI then return nil end
+  local box = ExtraUI.GetMacroDataEx(macro, "boundingbox")
   if not box then
     sizes[macro] = false
     return nil
@@ -191,342 +184,35 @@ local function applyDefaultLoadout(added)
 end
 
 -- *** engine access ***
--- What the exported map API withholds: the editor object behind the holomap, its floating module's
--- transform and snap result, and the editor's own update that runs the snap search. Two exported
--- wrappers are the anchors; their bytes are verified before any address read out of them is used,
--- and a mismatch disables the route (fail closed). Builds: GOG 9.00 and 8.00, see the claude file.
+-- The build editor through the Extra UI API; the editor handle below is the menu's holomap.
 
-local function u32(p) return ffi.cast(U32P, p)[0] end
-local function i32(p) return ffi.cast(I32P, p)[0] end
-local function u64(p) return ffi.cast(U64P, p)[0] end
-local function pp(p) return ffi.cast(U8PP, p) end
-local function uptr(p) return ffi.cast(UPTR, p) end
-local function fp(p) return ffi.cast(FLOATP, p) end
-local function u16p(p) return ffi.cast(U16P, p) end
+-- set when an entry pose disagrees with the plan: the route stays off for the session
+local engineLost = false
 
--- AddFloatingSequenceToConstructionPlan(holomapid): registry global, resolver, holomap kind 0x3a via vfunc
--- 0x11e0, editor at holomap +0x2c0 checked by vfunc 0x18(2), tail jump to the drop; false = rel32 masked
----@type (integer|false)[]
-local DROP_900 = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xf9, 0x48, 0x8b, 0xd1,
-  0x48, 0x8b, 0x0d, false, false, false, false, 0x41, 0xb8, 0x04, 0x00, 0x00, 0x00, 0xe8, false, false,
-  false, false, 0x48, 0x8b, 0xd8, 0x48, 0x85, 0xc0, 0x74, 0x4f, 0x48, 0x8b, 0x00, 0xba, 0x3a, 0x00,
-  0x00, 0x00, 0x48, 0x8b, 0xcb, 0xff, 0x90, 0xe0, 0x11, 0x00, 0x00, 0x33, 0xc9, 0x84, 0xc0, 0x48,
-  0x0f, 0x44, 0xd9, 0x48, 0x85, 0xdb, 0x74, 0x31, 0x48, 0x8b, 0x8b, 0xc0, 0x02, 0x00, 0x00, 0x48,
-  0x85, 0xc9, 0x74, 0x34, 0x48, 0x8b, 0x01, 0xba, 0x02, 0x00, 0x00, 0x00, 0xff, 0x50, 0x18, 0x84,
-  0xc0, 0x74, 0x25, 0x48, 0x8b, 0x8b, 0xc0, 0x02, 0x00, 0x00, 0x48, 0x8b, 0x5c, 0x24, 0x30, 0x48,
-  0x83, 0xc4, 0x20, 0x5f, 0xe9, false, false, false, false, 0x48, 0x8b, 0xd7, 0x48, 0x8d, 0x0d, false,
-  false, false, false, 0xe8, false, false, false, false, 0x48, 0x8b, 0x5c, 0x24, 0x30, 0x48, 0x83, 0xc4,
-  0x20, 0x5f, 0xc3 }
--- ResetConstructionMapModuleRotation(holomapid, cp_idx): same resolve, the plan vector at editor +0x300,
--- then the reset routine with the entry pointer
----@type (integer|false)[]
-local RESET_900 = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57,
-  0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xf2, 0x48, 0x8b, 0xf9, 0x48, 0x8b, 0xd1, 0x41, 0xb8, 0x04,
-  0x00, 0x00, 0x00, 0x48, 0x8b, 0x0d, false, false, false, false, 0xe8, false, false, false, false, 0x48,
-  0x8b, 0xd8, 0x48, 0x85, 0xc0, 0x0f, 0x84, 0xa7, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x00, 0xba, 0x3a,
-  0x00, 0x00, 0x00, 0x48, 0x8b, 0xcb, 0xff, 0x90, 0xe0, 0x11, 0x00, 0x00, 0x33, 0xed, 0x84, 0xc0,
-  0x48, 0x0f, 0x44, 0xdd, 0x48, 0x85, 0xdb, 0x0f, 0x84, 0x85, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x8b,
-  0xc0, 0x02, 0x00, 0x00, 0x48, 0x85, 0xc9, 0x0f, 0x84, 0x84, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x01,
-  0x8d, 0x55, 0x02, 0xff, 0x50, 0x18, 0x84, 0xc0, 0x74, 0x77, 0x48, 0x8b, 0x83, 0xc0, 0x02, 0x00,
-  0x00, 0x48, 0x8b, 0xb8, 0x00, 0x03, 0x00, 0x00, 0x48, 0x85, 0xff, 0x74, 0x64, 0xba, 0xff, 0xff,
-  0xff, 0xff, 0x48, 0x8b, 0xcf, 0xe8, false, false, false, false, 0x48, 0x3b, 0xf0, 0x73, 0x52, 0x48,
-  0x8b, 0x0f, 0x48, 0x8b, 0x47, 0x08, 0x48, 0x2b, 0xc1, 0x48, 0xc1, 0xf8, 0x03, 0x48, 0x3b, 0xf0,
-  0x73, 0x04, 0x48, 0x8b, 0x2c, 0xf1, 0x48, 0x8b, 0x8b, 0xc0, 0x02, 0x00, 0x00, 0x48, 0x85, 0xc9,
-  0x74, 0x2f, 0x48, 0x8b, 0x01, 0xba, 0x02, 0x00, 0x00, 0x00, 0xff, 0x50, 0x18, 0x84, 0xc0, 0x74,
-  0x20, 0x48, 0x8b, 0x8b, 0xc0, 0x02, 0x00, 0x00, 0x48, 0x8b, 0xd5, 0xe8, false, false, false, false,
-  0xeb, 0x0f, 0x48, 0x8b, 0xd7, 0x48, 0x8d, 0x0d, false, false, false, false, 0xe8, false, false, false,
-  false, 0x48, 0x8b, 0x5c, 0x24, 0x30, 0x48, 0x8b, 0x6c, 0x24, 0x38, 0x48, 0x8b, 0x74, 0x24, 0x40,
-  0x48, 0x83, 0xc4, 0x20, 0x5f, 0xc3 }
--- inside the reset routine, +0x163: identity rows into +0x440..+0x460, then update(editor, 0, zero ray)
----@type (integer|false)[]
-local UPDATE_900 = { 0x4c, 0x8d, 0x05, false, false, false, false, 0x0f, 0x11, 0x87, 0x40, 0x04, 0x00, 0x00, 0x33, 0xd2,
-  0x0f, 0x28, 0x0d, false, false, false, false, 0x48, 0x8b, 0xcf, 0x0f, 0x11, 0x8f, 0x50, 0x04, 0x00,
-  0x00, 0x0f, 0x28, 0x05, false, false, false, false, 0x0f, 0x11, 0x87, 0x60, 0x04, 0x00, 0x00, 0xe8,
-  false, false, false, false }
--- inside the update: cmp byte [r15 + disp32], r12b, the editor's dragging flag that gates the snap search
----@type (integer|false)[]
-local DRAGGING_900 = { 0x45, 0x38, 0xa7, false, false, false, false }
-
--- GOG 8.00: the same two wrappers with the registry behind a lazy getter and the reset routine as a tail jump;
--- the update takes the editor alone (9.00 added the ray arguments, read only when the flag is set)
----@type (integer|false)[]
-local DROP_800 = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xf9, 0xe8, false, false,
-  false, false, 0x41, 0xb8, 0x04, 0x00, 0x00, 0x00, 0x48, 0x8b, 0xd7, 0x48, 0x8b, 0xc8, 0xe8, false,
-  false, false, false, 0x48, 0x8b, 0xd8, 0x48, 0x85, 0xc0, 0x74, 0x53, 0x48, 0x8b, 0x10, 0x48, 0x8b,
-  0xc8, 0x4c, 0x8b, 0x82, 0x70, 0x11, 0x00, 0x00, 0xba, 0x39, 0x00, 0x00, 0x00, 0x41, 0xff, 0xd0, 0x33,
-  0xc9, 0x84, 0xc0, 0x48, 0x0f, 0x44, 0xd9, 0x48, 0x85, 0xdb, 0x74, 0x31, 0x48, 0x8b, 0x8b, 0xd0, 0x02,
-  0x00, 0x00, 0x48, 0x85, 0xc9, 0x74, 0x34, 0x48, 0x8b, 0x01, 0xba, 0x02, 0x00, 0x00, 0x00, 0xff, 0x50,
-  0x18, 0x84, 0xc0, 0x74, 0x25, 0x48, 0x8b, 0x8b, 0xd0, 0x02, 0x00, 0x00, 0x48, 0x8b, 0x5c, 0x24, 0x30,
-  0x48, 0x83, 0xc4, 0x20, 0x5f, 0xe9, false, false, false, false, 0x48, 0x8b, 0xd7, 0x48, 0x8d, 0x0d,
-  false, false, false, false, 0xe8, false, false, false, false, 0x48, 0x8b, 0x5c, 0x24, 0x30, 0x48, 0x83,
-  0xc4, 0x20, 0x5f, 0xc3 }
----@type (integer|false)[]
-local RESET_800 = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b,
-  0xf2, 0x48, 0x8b, 0xf9, 0xe8, false, false, false, false, 0x41, 0xb8, 0x04, 0x00, 0x00, 0x00, 0x48,
-  0x8b, 0xd7, 0x48, 0x8b, 0xc8, 0xe8, false, false, false, false, 0x48, 0x8b, 0xd8, 0x48, 0x85, 0xc0,
-  0x0f, 0x84, 0x96, 0x00, 0x00, 0x00, 0x4c, 0x8b, 0x00, 0xba, 0x39, 0x00, 0x00, 0x00, 0x48, 0x8b, 0xc8,
-  0x41, 0xff, 0x90, 0x70, 0x11, 0x00, 0x00, 0x33, 0xc9, 0x84, 0xc0, 0x48, 0x0f, 0x44, 0xd9, 0x48, 0x85,
-  0xdb, 0x74, 0x77, 0x48, 0x8b, 0x8b, 0xd0, 0x02, 0x00, 0x00, 0x48, 0x85, 0xc9, 0x74, 0x7a, 0x48, 0x8b,
-  0x01, 0xba, 0x02, 0x00, 0x00, 0x00, 0xff, 0x50, 0x18, 0x84, 0xc0, 0x74, 0x6b, 0x48, 0x8b, 0x8b, 0xd0,
-  0x02, 0x00, 0x00, 0x48, 0x8b, 0x81, 0x10, 0x03, 0x00, 0x00, 0x48, 0x85, 0xc0, 0x74, 0x58, 0x4c, 0x8b,
-  0x00, 0x48, 0x8b, 0x40, 0x08, 0x49, 0x2b, 0xc0, 0x48, 0xc1, 0xf8, 0x03, 0x48, 0x3b, 0xf0, 0x73, 0x45,
-  0x49, 0x8b, 0x3c, 0xf0, 0x48, 0x85, 0xc9, 0x74, 0x3c, 0x48, 0x8b, 0x01, 0xba, 0x02, 0x00, 0x00, 0x00,
-  0xff, 0x50, 0x18, 0x84, 0xc0, 0x74, 0x2d, 0x48, 0x8b, 0x8b, 0xd0, 0x02, 0x00, 0x00, 0x48, 0x8b, 0xd7,
-  0x48, 0x8b, 0x5c, 0x24, 0x30, 0x48, 0x8b, 0x74, 0x24, 0x38, 0x48, 0x83, 0xc4, 0x20, 0x5f, 0xe9, false,
-  false, false, false, 0x48, 0x8b, 0xd7, 0x48, 0x8d, 0x0d, false, false, false, false, 0xe8, false,
-  false, false, false, 0x48, 0x8b, 0x5c, 0x24, 0x30, 0x48, 0x8b, 0x74, 0x24, 0x38, 0x48, 0x83, 0xc4,
-  0x20, 0x5f, 0xc3 }
--- the registry getter's head: its global, read before the lazy creation
----@type (integer|false)[]
-local GETTER_800 = { 0x48, 0x89, 0x5c, 0x24, 0x18, 0x57, 0x48, 0x83, 0xec, 0x30, 0x48, 0x8b, 0x05, false, false, false,
-  false, 0x90 }
--- inside the reset routine: identity rows into +0x450..+0x470, then update(editor)
----@type (integer|false)[]
-local UPDATE_800 = { 0x0f, 0x28, 0x05, false, false, false, false, 0x48, 0x8b, 0xcf, 0x0f, 0x11, 0x87, 0x50, 0x04, 0x00,
-  0x00, 0x0f, 0x28, 0x0d, false, false, false, false, 0x0f, 0x11, 0x8f, 0x60, 0x04, 0x00, 0x00, 0x0f,
-  0x28, 0x05, false, false, false, false, 0x0f, 0x11, 0x87, 0x70, 0x04, 0x00, 0x00, 0xe8, false, false,
-  false, false }
--- inside the update: cmp byte [r15 + disp32], bl
----@type (integer|false)[]
-local DRAGGING_800 = { 0x41, 0x38, 0x9f, false, false, false, false }
-
--- both builds: the editor's picked-entry getter (vtable slot pickGetter) loads the plan entry vector's begin and
--- end, then the int64 pick index
----@type (integer|false)[]
-local PICK_GETTER = { 0x4c, 0x8b, 0x81, false, false, false, false, 0x48, 0x8b, 0x91, false, false, false, false,
-  0x48, 0x8b, 0x81, false, false, false, false, 0x49, 0x2b, 0xd0, 0x48, 0xc1, 0xfa, 0x03, 0x48, 0x3b, 0xc2 }
-
--- Per build: the patterns, their operand positions and the engine objects' field offsets. The patterns pin
--- editor, plan and the floating rows; the code-read dragging offset must equal `dragging`.
-local BUILDS = {
-  {
-    name = "9.00", drop = DROP_900, reset = RESET_900, update = UPDATE_900, draggingBytes = DRAGGING_900,
-    layout = {
-      dropRegistry = 0x13, dropResolver = 0x1e, resetRegistry = 0x26, resetResolver = 0x2b, resetRoutine = 0xdc,
-      updateCall = 0x163, draggingCmp = 0x1f9,
-      -- holomap: resolver kind, type check vfunc with its argument, the editor pointer
-      holomapKind = 4, holomapCheck = 0x11e0, holomapCheckArg = 0x3a, editor = 0x2c0,
-      -- editor: type check vfunc with its argument, plan entry vector, floating selection (begin, end),
-      -- floating transform, snap result, dragging flag
-      editorCheck = 0x18, editorCheckArg = 2, plan = 0x300, selection = 0x3c8, floating = 0x430, snapPose = 0x470,
-      valid = 0x4b0, snapEntryIdx = 0x4b8, snapEntry = 0x4c0, snapModuleConn = 0x4c8, snapStationConn = 0x4d0,
-      dragging = 0x570,
-      -- the picked entry (int64 index, plan size = the float) and the vtable slot of its getter
-      pick = 0x620, pickGetter = 0x218,
-      -- plan entry transform, connection name
-      entryTransform = 0x30, connectionName = 0x10,
-    },
-  },
-  {
-    name = "8.00", drop = DROP_800, reset = RESET_800, update = UPDATE_800, draggingBytes = DRAGGING_800, getter = GETTER_800,
-    layout = {
-      dropGetter = 0x0e, dropResolver = 0x1f, resetGetter = 0x16, resetResolver = 0x27, getterRegistry = 0x0d,
-      resetRoutine = 0xc9, updateCall = 0x144, draggingCmp = 0x1ee,
-      holomapKind = 4, holomapCheck = 0x1170, holomapCheckArg = 0x39, editor = 0x2d0,
-      -- the editor fields sit 0x10 above 9.00's
-      editorCheck = 0x18, editorCheckArg = 2, plan = 0x310, selection = 0x3d8, floating = 0x440, snapPose = 0x480,
-      valid = 0x4c0, snapEntryIdx = 0x4c8, snapEntry = 0x4d0, snapModuleConn = 0x4d8, snapStationConn = 0x4e0,
-      dragging = 0x580,
-      pick = 0x630, pickGetter = 0x1e0,
-      entryTransform = 0x30, connectionName = 0x10,
-    },
-  },
-}
-
--- the matched build's layout; nil until located
-local LAYOUT
-
--- nil: not located yet, false: unavailable, table: located
----@type table|false|nil
-local engine
-local zeroRay = ffi.new("float[32]")
-
-local function matchBytes(p, bytes)
-  for k = 1, #bytes do
-    if bytes[k] and p[k - 1] ~= bytes[k] then return false end
-  end
-  return true
-end
-
--- The exe image and its .text / .data ranges as RVAs.
-local function mapImage(anchor)
-  if ffi.os ~= "Windows" then return nil, "not the Windows build" end
-  local a = anchor - anchor % 0x10000
-  local base
-  for _ = 1, 4096 do
-    local p = ffi.cast(P, a)
-    if p[0] == 0x4d and p[1] == 0x5a then
-      local lfanew = i32(p + 0x3c)
-      if lfanew >= 0x40 and lfanew <= 0x1000 and u32(p + lfanew) == 0x4550 then
-        base = p
-        break
-      end
-    end
-    a = a - 0x10000
-  end
-  if not base then return nil, "image base not found" end
-  local pe = base + i32(base + 0x3c)
-  local opt = pe + 24
-  local img = { base = base, sec = {}, id = string.format("%x-%x", u32(pe + 8), u32(opt + 56)) }
-  local s = opt + u16p(pe + 20)[0]
-  for i = 0, u16p(pe + 6)[0] - 1 do
-    local h = s + i * 40
-    local n = {}
-    for k = 0, 7 do
-      if h[k] ~= 0 then n[#n + 1] = string.char(h[k]) end
-    end
-    local from, vsize, raw = u32(h + 12), u32(h + 8), u32(h + 16)
-    img.sec[table.concat(n)] = { from = from, to = from + math.min(vsize, raw), vto = from + vsize }
-  end
-  if not (img.sec[".text"] and img.sec[".data"]) then return nil, "image sections missing" end
-  return img
-end
-
-local function inText(img, rva, len)
-  local t = img.sec[".text"]
-  return rva >= t.from and rva + len <= t.to
-end
-
--- target RVA of a rip-relative rel32 operand stored at rva
-local function rel32(img, rva)
-  return rva + 4 + i32(img.base + rva)
-end
-
--- One build's walk from the two exports to registry, resolver and update; nil and the reason on any mismatch.
-local function walk(img, b, drop, reset)
-  local L = b.layout
-  if not (inText(img, drop, #b.drop) and matchBytes(img.base + drop, b.drop)) then return nil, "drop wrapper mismatch" end
-  if not (inText(img, reset, #b.reset) and matchBytes(img.base + reset, b.reset)) then return nil, "rotation reset wrapper mismatch" end
-  local resolver = rel32(img, drop + L.dropResolver)
-  if resolver ~= rel32(img, reset + L.resetResolver) then return nil, "wrappers disagree" end
-  local registry
-  if b.getter then
-    local getter = rel32(img, drop + L.dropGetter)
-    if getter ~= rel32(img, reset + L.resetGetter) then return nil, "wrappers disagree" end
-    if not (inText(img, getter, #b.getter) and matchBytes(img.base + getter, b.getter)) then return nil, "registry getter mismatch" end
-    registry = rel32(img, getter + L.getterRegistry)
-  else
-    registry = rel32(img, drop + L.dropRegistry)
-    if registry ~= rel32(img, reset + L.resetRegistry) then return nil, "wrappers disagree" end
-  end
-  local d = img.sec[".data"]
-  if registry < d.from or registry + 8 > d.vto then return nil, "registry outside .data" end
-  local at = rel32(img, reset + L.resetRoutine) + L.updateCall
-  if not (inText(img, at, #b.update) and matchBytes(img.base + at, b.update)) then return nil, "update call mismatch" end
-  local update = rel32(img, at + #b.update - 4)
-  at = update + L.draggingCmp
-  if not (inText(img, at, #b.draggingBytes) and matchBytes(img.base + at, b.draggingBytes)) then return nil, "dragging flag mismatch" end
-  local dragging = i32(img.base + at + 3)
-  if dragging ~= L.dragging then return nil, string.format("dragging flag at +0x%x, not +0x%x", dragging, L.dragging) end
-  if not (inText(img, resolver, 16) and inText(img, update, 16)) then return nil, "target outside .text" end
-  return { registry = registry, resolver = resolver, update = update, dragging = dragging }
-end
-
----@return table|false, string?
-local function detect()
-  local dropAnchor = uptr(C.AddFloatingSequenceToConstructionPlan)
-  local resetAnchor = uptr(C.ResetConstructionMapModuleRotation)
-  local img, why = mapImage(dropAnchor)
-  if not img then return false, why end
-  local base = uptr(img.base)
-  local drop, reset = tonumber(dropAnchor - base), tonumber(resetAnchor - base)
-  local reasons = {}
-  for _, b in ipairs(BUILDS) do
-    local found, reason = walk(img, b, drop, reset)
-    if found then
-      LAYOUT = b.layout
-      sab.Debug("engine located (%s layout, %s): resolver 0x%x registry 0x%x update 0x%x dragging +0x%x", b.name, img.id,
-        found.resolver, found.registry, found.update, found.dragging)
-      return {
-        img = img,
-        resolve = ffi.cast(FN_RESOLVE, img.base + found.resolver),
-        registry = ffi.cast(VOIDPP, img.base + found.registry),
-        update = ffi.cast(FN_UPDATE, img.base + found.update),
-        dragging = found.dragging,
-      }
-    end
-    reasons[#reasons + 1] = b.name .. ": " .. reason
-  end
-  return false, table.concat(reasons, "; ")
-end
-
-local function locate()
-  local ok, result, reason = pcall(detect)
-  if not ok then
-    result, reason = false, "error: " .. tostring(result)
-  end
-  engine = result
-  if engine == false then sab.Error("engine access unavailable (%s)", tostring(reason)) end
-end
-
-local function vfunc(obj, offset, sig)
-  local vt = pp(obj)[0]
-  return ffi.cast(sig, ffi.cast(VOIDPP, vt + offset)[0])
-end
-
--- The station editor behind the menu's holomap, or nil.
+-- The menu's holomap when the Extra UI API reaches its editor, or nil.
 function sab.Editor()
-  if engine == nil then locate() end
   local menu = sab.menu
-  if not (engine and menu and menu.holomap and menu.holomap ~= 0) then return nil end
-  local registry = engine.registry[0]
-  if registry == nil then return nil end
-  local holo = engine.resolve(registry, menu.holomap, LAYOUT.holomapKind)
-  if holo == nil then return nil end
-  if vfunc(holo, LAYOUT.holomapCheck, FN_U8_I32)(holo, LAYOUT.holomapCheckArg) == 0 then return nil end
-  local editor = pp(ffi.cast(P, holo) + LAYOUT.editor)[0]
-  if editor == nil then return nil end
-  if vfunc(editor, LAYOUT.editorCheck, FN_U8_I32)(editor, LAYOUT.editorCheckArg) == 0 then return nil end
-  return editor
-end
-
--- MSVC std::string at p
-local function stdString(p)
-  local size, cap = tonumber(u64(p + 0x10)), tonumber(u64(p + 0x18))
-  if size > 1024 or cap < size or cap < 15 or cap > 0x10000 then return nil end
-  return ffi.string(cap > 15 and ffi.cast(CHARPP, p)[0] or ffi.cast(CHARP, p), size)
-end
-
--- 4x4 float transform at p: translation then three rotation rows
-local function readTransform(p)
-  local f = fp(p)
-  return { x = f[0], y = f[1], z = f[2],
-    rows = { { f[4], f[5], f[6] }, { f[8], f[9], f[10] }, { f[12], f[13], f[14] } } }
+  if engineLost or not (ExtraUI and ExtraUI.GetConstructionMapSnap and menu and menu.holomap and menu.holomap ~= 0) then return nil end
+  if not select(6, ExtraUI.Available()) then return nil end
+  return menu.holomap
 end
 
 function sab.ReadFloating(editor)
-  return readTransform(editor + LAYOUT.floating)
+  return ExtraUI.GetConstructionMapFloatingPose(editor)
 end
 
--- Whether a module floats: the selection vector is not empty (what 9.00's HasBuildMapFloatingSelection reads).
 function sab.HasFloating(editor)
-  local sel = pp(editor + LAYOUT.selection)
-  return sel[0] ~= sel[1]
+  return ExtraUI.GetConstructionMapFloatingPose(editor) ~= nil
 end
 
 -- pos = { x, y, z } in the plan's frame; rows = three { x, y, z } or nil to keep the rotation
 function sab.WriteFloating(editor, pos, rows)
-  local f = fp(editor + LAYOUT.floating)
-  f[0], f[1], f[2] = pos.x, pos.y, pos.z
-  if rows then
-    for r = 1, 3 do
-      f[r * 4], f[r * 4 + 1], f[r * 4 + 2] = rows[r][1], rows[r][2], rows[r][3]
-    end
-  end
+  ExtraUI.SetConstructionMapFloatingPose(editor, pos, rows)
 end
 
 -- A plan entry's transform as the editor holds it, built ones included.
 function sab.EntryPose(editor, idx)
-  local vec = pp(editor + LAYOUT.plan)[0]
-  if vec == nil then return nil end
-  local first, last = pp(vec)[0], pp(vec + 8)[0]
-  local n = tonumber((uptr(last) - uptr(first)) / 8)
-  if idx < 0 or idx >= n then return nil end
-  local e = pp(first)[idx]
-  if e == nil then return nil end
-  local pose = readTransform(e + LAYOUT.entryTransform)
-  pose.count = n
-  return pose
+  return ExtraUI.GetConstructionMapEntryPose(editor, idx)
 end
 
 -- The editor's entry pose of a ReadPlan entry; a translation other than the plan's offset means the entry
@@ -536,26 +222,26 @@ local function checkedPose(editor, e)
   if not pose then return nil end
   local o = e.offset
   if math.abs(pose.x - o.x) > 0.1 or math.abs(pose.y - o.y) > 0.1 or math.abs(pose.z - o.z) > 0.1 then
-    engine = false
+    engineLost = true
     sab.Error("engine access unavailable (entry %d %s at %.1f %.1f %.1f, the plan has %.1f %.1f %.1f)", e.idx, e.macro, pose.x, pose.y, pose.z, o.x, o.y, o.z)
     return nil
   end
   return pose
 end
 
--- the module data the route needs from the Extra Data API is readable on this build
+-- the module data the route needs from the Extra UI API is readable on this build
 local function macroDataOk()
-  if not (ExtraData and ExtraData.Available) then return false end
-  local _, macros = ExtraData.Available()
+  if not (ExtraUI and ExtraUI.Available) then return false end
+  local _, macros = ExtraUI.Available()
   return macros
 end
 
--- A macro's snap connections from the Extra Data API: name, position and direction in the macro's frame.
+-- A macro's snap connections from the Extra UI API: name, position and direction in the macro's frame.
 function sab.Connections(name)
-  if not (name and ExtraData) then return {} end
+  if not (name and ExtraUI) then return {} end
   if sab.snapCache[name] then return sab.snapCache[name] end
   local list = {}
-  for _, c in ipairs(ExtraData.GetMacroDataEx(name, "snapconnections") or {}) do
+  for _, c in ipairs(ExtraUI.GetMacroDataEx(name, "snapconnections") or {}) do
     list[#list + 1] = { name = c.name, pos = c.position, dir = c.direction, rows = c.rows }
   end
   sab.snapCache[name] = list
@@ -672,44 +358,15 @@ function sab.PoseForPair(entryPose, stationConn, moduleConn, roll)
     unit(rotate(stationConn.dir, eRows)), moduleConn, roll)
 end
 
--- Run the editor's update without a cursor: the snap search from the floating transform as written.
--- A target entry pointer means the nearest compatible pair inside the snap radius was found.
+-- The editor's snap search from the floating transform as written.
 function sab.Snap(editor)
-  if not sab.HasFloating(editor) then return { snapped = false, valid = false } end
-  -- the snap search runs only while the editor drags a module
-  local wasDragging = editor[engine.dragging]
-  editor[engine.dragging] = 1
-  engine.update(editor, 0, zeroRay)
-  editor[engine.dragging] = wasDragging
-  local r = { snapped = pp(editor + LAYOUT.snapEntry)[0] ~= nil, valid = editor[LAYOUT.valid] ~= 0 }
-  if r.snapped then
-    r.entryIdx = tonumber(u64(editor + LAYOUT.snapEntryIdx))
-    local modConn, stationConn = pp(editor + LAYOUT.snapModuleConn)[0], pp(editor + LAYOUT.snapStationConn)[0]
-    r.connection = modConn ~= nil and stdString(modConn + LAYOUT.connectionName) or nil
-    r.predecessorConnection = stationConn ~= nil and stdString(stationConn + LAYOUT.connectionName) or nil
-    r.pose = readTransform(editor + LAYOUT.snapPose)
-  end
-  return r
+  return ExtraUI.GetConstructionMapSnap(editor) or { snapped = false, valid = false }
 end
 
--- The pick index, once its getter's code confirms the field; false when it does not.
-local function pickField(editor)
-  if engine.pick == nil then
-    local img, L = engine.img, LAYOUT
-    local at = tonumber(uptr(ffi.cast(VOIDPP, pp(editor)[0] + L.pickGetter)[0]) - uptr(img.base))
-    local ok = inText(img, at, #PICK_GETTER) and matchBytes(img.base + at, PICK_GETTER) and i32(img.base + at + 3) == L.plan + 8
-        and i32(img.base + at + 10) == L.plan + 0x10 and i32(img.base + at + 17) == L.pick
-    engine.pick = ok and L.pick or false
-    if not ok then sab.Debug("pick index not confirmed: a refused valid drop keeps the dragged retry") end
-  end
-  return engine.pick
-end
-
--- The editor refuses a drop while the real cursor picks the float: clear the pick first (-1, nothing picked).
+-- Drops the float also while the real cursor picks it.
 local function dropFloating(editor)
-  local pick = editor and pickField(editor)
-  if pick then ffi.cast(I64P, editor + pick)[0] = -1 end
-  C.AddFloatingSequenceToConstructionPlan(sab.menu.holomap)
+  local holomap = sab.menu.holomap
+  if not (editor and ExtraUI.DropConstructionMapFloating(editor)) then C.AddFloatingSequenceToConstructionPlan(holomap) end
 end
 
 -- *** one placement ***
@@ -978,13 +635,13 @@ local function worldBox(size, pos, rows)
   return box
 end
 
--- a macro's approach zones: the Extra Data API reads them from the engine on every call
+-- a macro's approach zones: the Extra UI API reads them from the engine on every call
 local zonesOf = {}
 
--- The approach zones (exclusionzones, Extra Data API) of a macro through a pose, as boxes with their direction.
+-- The approach zones (exclusionzones, Extra UI API) of a macro through a pose, as boxes with their direction.
 local function zoneBoxes(macro, pos, rows)
   local list = {}
-  if zonesOf[macro] == nil and ExtraData then zonesOf[macro] = ExtraData.GetMacroDataEx(macro, "exclusionzones") or false end
+  if zonesOf[macro] == nil and ExtraUI then zonesOf[macro] = ExtraUI.GetMacroDataEx(macro, "exclusionzones") or false end
   for _, z in ipairs(zonesOf[macro] or {}) do
     local m = mulRows(z.rows, rows)
     local at, mid = rotate(z.position, rows), rotate(z.centre, m)
@@ -1537,7 +1194,7 @@ local function anchorOf(run)
 end
 
 -- *** connectors ***
--- Connection geometry from the Extra Data API at the start of the run: every connector and, on the grid
+-- Connection geometry from the Extra UI API at the start of the run: every connector and, on the grid
 -- route, every module (cached per Lua state).
 
 sab.macroConns = sab.macroConns or {}
@@ -1786,7 +1443,7 @@ end
 -- Distinct approach directions of a dock module.
 local function approaches(macro)
   local dirs, n = {}, 0
-  for _, z in ipairs(ExtraData and ExtraData.GetMacroDataEx(macro, "exclusionzones") or {}) do
+  for _, z in ipairs(ExtraUI and ExtraUI.GetMacroDataEx(macro, "exclusionzones") or {}) do
     local k = string.format("%.1f,%.1f,%.1f", z.direction[1], z.direction[2], z.direction[3])
     if not dirs[k] then dirs[k], n = true, n + 1 end
   end
@@ -1805,7 +1462,7 @@ local function rootPier(run)
   local pick, pickKey
   for _, m in ipairs(owned("moduletypes_dock")) do
     if IsMacroClass(m, "pier") then
-      local bays = #(ExtraData.GetMacroDataEx(m, "dockingbays") or {})
+      local bays = #(ExtraUI.GetMacroDataEx(m, "dockingbays") or {})
       local k = { (race ~= nil and raceOf(m) == race) and 0 or 1, approaches(m), bays <= sab.planner.bigPier and -bays or bays }
       local better = not pickKey
       for i = 1, pickKey and #k or 0 do
@@ -2326,7 +1983,7 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
     return false
   end
   if not macroDataOk() then
-    sab.Error("the Extra Data API cannot read module data on this build")
+    sab.Error("the Extra UI API cannot read module data on this build")
     return false
   end
   -- growth no plan holds any more is undone before the run reads the plot
@@ -2336,7 +1993,7 @@ function sab.StartRun(items, connector, turns, gridRoute, opts)
     stopOnFail = opts and opts.stopOnFail, packOnly = opts and opts.packOnly, moduleRace = opts and opts.moduleRace,
     subdivide = opts and opts.subdivide, started = getElapsedTime(), frames = 0, searchFrames = 0, searches = 0 }
   readPlanState(run, editor)
-  if engine == false then return false end
+  if engineLost then return false end
   local cs = connector and sab.sizes[connector.macro]
   run.levelY, run.levelH = anchorOf(run)[2], cs and 2 * cs.maxY or 400
   run.planCount = tonumber(C.GetNumBuildMapConstructionPlan(menu.holomap, false))
@@ -2484,7 +2141,7 @@ function sab.Tick(chained)
     sab.StopRun("stopped at the first failure")
     return
   end
-  if engine == false then
+  if engineLost then
     sab.StopRun("engine access lost", true)
     return
   end

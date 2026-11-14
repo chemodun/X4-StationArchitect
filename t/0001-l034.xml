@@ -45,7 +45,7 @@
       <t id="150">Raza de los módulos</t>
       <t id="151">Cualquiera</t>
       <t id="152">Objetivos seleccionados: %s</t>
-      <t id="153">La API de Extra Data no puede leer los datos de módulos en esta versión del juego</t>
+      <t id="153">La API de Extra UI no puede leer los datos de módulos en esta versión del juego</t>
       <t id="154">Detenido, el plan se modificó a mano: %s colocados, %s fallidos</t>
       <t id="155">Módulos de recursos especiales: %s</t>
       <t id="156">Añadir un módulo</t>

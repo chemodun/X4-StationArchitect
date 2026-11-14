@@ -5,7 +5,7 @@
     <dependency name="ego_detailmonitor" />
     <dependency name="ego_interactmenu" />
     <dependency name="lua_log_api" />
-    <dependency name="extra_data_api" />
+    <dependency name="extra_ui_api" />
     <file name="ui/station_architect.lua" />
     <file name="ui/station_architect_planner.lua" />
     <file name="ui/station_architect_grid.lua" />
