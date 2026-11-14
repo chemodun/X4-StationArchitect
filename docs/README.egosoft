@@ -23,7 +23,7 @@ Tell the build menu what your station should produce or build: this extension wo
 [*] Works only inside the open build menu of a station you own, with your own blueprints.
 [*] This mod requires [b]Protected UI Mode[/b] in the game's Extensions settings to be disabled.
 [*] Windows version of the game only: the placement route reads the game's own editor in memory, which the native Linux build does not expose the same way. The Windows game running on Linux through Proton or Wine should work.
-[*] Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable, or that the Extra Data API cannot read module data, and Run stays off; nothing else in the build menu changes.
+[*] Verified on the 8.00 and 9.00 builds of the game. On a build it does not recognise, the panel says the editor is not reachable, or that the Extra UI API cannot read module data, and Run stays off; nothing else in the build menu changes.
 [*] The plot is limited to the game's 20 km: a layout that needs more, docks and piers included, is refused before anything is placed. When the docks and piers are what does not fit, lower the [b]Docking[/b] sliders.
 [*] Extralarge modules are never planned. Vanilla has none among its blueprints; some total conversions add station-sized ones, and the plan takes the smaller modules instead.
 [*] Ship build times assume the station has its build drones; a shipyard without them builds several times slower than planned.
@@ -54,10 +54,10 @@ Tell the build menu what your station should produce or build: this extension wo
 [*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3823580916]Lua Log API[/url]
 [*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/2473]Lua Log API[/url]
 [/list]
-[*] [b]Extra Data API[/b]: Version [b]1.03[/b] or higher by [url=https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659]Chem O`Dun[/url].
+[*] [b]Extra UI API[/b]: Version [b]1.00[/b] or higher by [url=https://next.nexusmods.com/profile/ChemODun/mods?gameId=2659]Chem O`Dun[/url].
 [list]
-[*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3825599643]Extra Data API[/url]
-[*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/2519]Extra Data API[/url]
+[*] Available on Steam: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3839783822]Extra UI API[/url]
+[*] Available on Nexus Mods: [url=https://www.nexusmods.com/x4foundations/mods/2602]Extra UI API[/url]
 [/list]
 [/list]
 [size=130][u]Installation[/u][/size]
@@ -178,6 +178,13 @@ In the game's Extension Options, the Station Architect page has a Debug Level se
 [/list]
 [size=130][u]Changelog[/u][/size]
 
+[size=125][u][1.41] - 2026-11-??[/u][/size]
+[list]
+[*] Changed
+[list]
+[*] Depends on Extra UI API instead of Extra Data API
+[/list]
+[/list]
 [size=125][u][1.40] - 2026-11-12[/u][/size]
 [list]
 [*] Added
